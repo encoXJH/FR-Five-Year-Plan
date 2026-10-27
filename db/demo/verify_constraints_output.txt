@@ -1,0 +1,24 @@
+=== 反例1 UPDATE audit_log ===
+mysql: [Warning] Using a password on the command line interface can be insecure.
+ERROR 1644 (45000) at line 1: audit_log is append-only: UPDATE not allowed
+
+=== 反例2 DELETE audit_log ===
+mysql: [Warning] Using a password on the command line interface can be insecure.
+ERROR 1644 (45000) at line 1: audit_log is append-only: DELETE not allowed
+
+=== 反例3 A_PLUS parent_id NULL ===
+mysql: [Warning] Using a password on the command line interface can be insecure.
+ERROR 3819 (HY000) at line 1: Check constraint 'chk_indicator_parent' is violated.
+
+=== 确认数据未被破坏 ===
++------------+
+| audit_rows |
++------------+
+|          6 |
++------------+
++----------+
+| bad_rows |
++----------+
+|        0 |
++----------+
+mysql: [Warning] Using a password on the command line interface can be insecure.

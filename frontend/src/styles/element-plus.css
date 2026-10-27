@@ -1,0 +1,49 @@
+/* Element Plus 主题变量覆盖（界面设计规范 附录 B） */
+:root {
+  --el-font-family: var(--app-font-family);
+  --el-bg-color-page: #f2f3f5;
+  --el-border-radius-small: 2px;
+  --el-border-radius-base: 4px;
+  --el-border-radius-round: 20px;
+  --el-box-shadow-lighter: 0 0 6px rgba(0, 0, 0, 0.12);
+  --el-box-shadow-light: 0 0 12px rgba(0, 0, 0, 0.12);
+  --el-box-shadow: 0 12px 32px 4px rgba(0, 0, 0, 0.04), 0 8px 20px rgba(0, 0, 0, 0.08);
+}
+
+/* 扩展标签色：调整紫（2.4） */
+.el-tag.is-adjust {
+  --el-tag-text-color: var(--app-color-adjust);
+  --el-tag-bg-color: var(--app-color-adjust-bg);
+  --el-tag-border-color: var(--app-color-adjust-border);
+  --el-tag-hover-color: var(--app-color-adjust);
+}
+.el-tag.is-adjust.el-tag--plain {
+  --el-tag-bg-color: #ffffff;
+  --el-tag-border-color: #c6adec;
+}
+
+/* 扩展标签色：发展青（2.4） */
+.el-tag.is-teal {
+  --el-tag-text-color: var(--app-color-teal);
+  --el-tag-bg-color: var(--app-color-teal-bg);
+  --el-tag-border-color: var(--app-color-teal-border);
+  --el-tag-hover-color: var(--app-color-teal);
+}
+.el-tag.is-teal.el-tag--plain {
+  --el-tag-bg-color: #ffffff;
+}
+
+/* 数字等宽（3.3） */
+.el-table,
+.el-statistic,
+.el-progress__text,
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 表头样式（7.1）：背景 #F5F7FA、文字 #909399、字重 600 */
+.el-table .el-table__header th.el-table__cell {
+  background-color: #f5f7fa;
+  color: #909399;
+  font-weight: 600;
+}
