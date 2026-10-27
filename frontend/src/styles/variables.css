@@ -1,0 +1,53 @@
+:root {
+  /* 主色与色阶（界面设计规范 2.1） */
+  --el-color-primary: #2b5bc0;
+  --el-color-primary-dark-2: #22499a;
+  --el-color-primary-light-3: #6b8cd3;
+  --el-color-primary-light-5: #95ade0;
+  --el-color-primary-light-7: #bfceec;
+  --el-color-primary-light-8: #d5def2;
+  --el-color-primary-light-9: #eaeff9;
+
+  /* 扩展色（界面设计规范 2.4） */
+  --app-color-adjust: #8e5cd9;
+  --app-color-adjust-bg: #f4effb;
+  --app-color-adjust-border: #e8def7;
+  --app-color-teal: #13a8a8;
+  --app-color-teal-bg: #e7f6f6;
+  --app-color-teal-border: #89d3d3;
+  --app-color-exceed: #2ba471;
+
+  /* 图表色板（界面设计规范 2.4，ECharts 按顺序取用） */
+  --app-chart-colors: #2b5bc0, #13a8a8, #e6a23c, #8e5cd9, #67c23a, #f56c6c, #5b8ff9, #f6903d,
+    #9aa7c2;
+  --app-chart-target: #bfceec;
+  --app-chart-actual: #2b5bc0;
+  --app-chart-time-progress: #e6a23c;
+
+  /* 字体族（界面设计规范 3.1） */
+  --app-font-family:
+    'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Helvetica Neue', Helvetica, Arial,
+    sans-serif;
+  --app-font-number: 'DIN Alternate', 'Bahnschrift', 'Helvetica Neue', Arial, sans-serif;
+  --app-font-mono: Consolas, 'SFMono-Regular', Menlo, monospace;
+
+  /* 间距（界面设计规范 4.1，4px 基准） */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* 圆角（界面设计规范 4.3） */
+  --radius-card: 6px;
+  --radius-dialog: 8px;
+
+  /* 布局（界面设计规范 5.1） */
+  --app-header-height: 56px;
+  --app-aside-width: 216px;
+  --app-aside-collapsed-width: 64px;
+  --app-breadcrumb-height: 40px;
+  --app-content-min-width: 1280px;
+}

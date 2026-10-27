@@ -1,0 +1,39 @@
+﻿=== 反例1 UPDATE audit_log ===
+mysql.exe : ERROR 1644 (45000) at line 1: audit_log is append-only: UPDATE not allowed
+At line:15 char:2821
++ ... ections += (& $mysql --host=127.0.0.1 --port=13306 --user=root --data ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (ERROR 1644 (450...ATE not allowed:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+=== 反例2 DELETE audit_log ===
+mysql.exe : ERROR 1644 (45000) at line 1: audit_log is append-only: DELETE not allowed
+At line:15 char:3108
++ ... ections += (& $mysql --host=127.0.0.1 --port=13306 --user=root --data ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (ERROR 1644 (450...ETE not allowed:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+=== 反例3 A_PLUS parent_id NULL ===
+mysql.exe : ERROR 3819 (HY000) at line 1: Check constraint 'chk_indicator_parent' is violated.
+At line:15 char:3385
++ ... ections += (& $mysql --host=127.0.0.1 --port=13306 --user=root --data ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (ERROR 3819 (HY0...t' is violated.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+=== 确认数据未被破坏 ===
++------------+
+| audit_rows |
++------------+
+|        903 |
++------------+
++----------+
+| bad_rows |
++----------+
+|        0 |
++----------+
+

@@ -1,0 +1,90 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: metrics
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:metrics_db}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&createDatabaseIfNotExist=true
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:Metrics@2026}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 200MB
+  jackson:
+    time-zone: Asia/Shanghai
+  mvc:
+    problemdetails:
+      enabled: false
+  web:
+    resources:
+      add-mappings: true
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+
+springdoc:
+  # 生产环境置 SWAGGER_ENABLED=false 关闭接口文档（API 约定第 14 章）
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:true}
+    path: /swagger-ui.html
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:true}
+    path: /v3/api-docs
+  default-produces-media-type: application/json
+
+# 应用自定义配置
+app:
+  jwt:
+    secret: ${JWT_SECRET:please-change-me-to-a-random-64-char-string-for-production}
+    access-expire-minutes: ${JWT_ACCESS_EXPIRE_MINUTES:120}
+    refresh-expire-days: ${JWT_REFRESH_EXPIRE_DAYS:7}
+  file:
+    storage-type: ${FILE_STORAGE_TYPE:LOCAL}
+    storage-dir: ${FILE_STORAGE_DIR:./data/files}
+    signed-url-expire-minutes: ${FILE_SIGNED_URL_EXPIRE_MINUTES:10}
+    sign-secret: ${FILE_SIGN_SECRET:please-change-me-file-sign-secret}
+    kkfileview-url: ${KKFILEVIEW_URL:}
+  feishu:
+    app-id: ${FEISHU_APP_ID:}
+    app-secret: ${FEISHU_APP_SECRET:}
+    # 浏览器 OAuth 回调地址（需与飞书后台重定向 URL 一致）
+    redirect-uri: ${FEISHU_REDIRECT_URI:}
+    # 事件订阅 Encrypt Key（验签 + 报文解密）
+    encrypt-key: ${FEISHU_ENCRYPT_KEY:}
+    # 事件订阅 Verification Token
+    verification-token: ${FEISHU_VERIFICATION_TOKEN:}
+    # 平台对外访问基础地址（消息卡片链接拼接）
+    app-base-url: ${FEISHU_APP_BASE_URL:}
+    base-url: ${FEISHU_API_BASE_URL:https://open.feishu.cn}
+    accounts-url: ${FEISHU_ACCOUNTS_URL:https://accounts.feishu.cn}
+    push-enabled: ${FEISHU_PUSH_ENABLED:true}
+    push-interval-ms: ${FEISHU_PUSH_INTERVAL_MS:60000}
+    push-initial-delay-ms: ${FEISHU_PUSH_INITIAL_DELAY_MS:15000}
+    push-batch-size: ${FEISHU_PUSH_BATCH_SIZE:50}
+    connect-timeout-ms: ${FEISHU_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${FEISHU_READ_TIMEOUT_MS:5000}
+  login:
+    max-fail-count: 5
+    lock-minutes: 15
+  screen:
+    cache-seconds: ${SCREEN_CACHE_SECONDS:120}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    login-per-minute: ${RATE_LIMIT_LOGIN_PER_MINUTE:10}
+    api-per-minute: ${RATE_LIMIT_API_PER_MINUTE:300}
+    export-per-minute: ${RATE_LIMIT_EXPORT_PER_MINUTE:5}
+  reminder:
+    enabled: ${REMINDER_ENABLED:true}
+    cron: ${REMINDER_CRON:0 30 8 * * ?}

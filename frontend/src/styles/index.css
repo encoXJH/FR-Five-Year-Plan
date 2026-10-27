@@ -1,0 +1,39 @@
+@import './variables.css';
+@import './element-plus.css';
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--app-font-family);
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--el-text-color-primary);
+  background-color: var(--el-bg-color-page);
+}
+
+a {
+  color: var(--el-color-primary);
+  text-decoration: none;
+}
+
+/* 移动端（≤768px）：Element Plus 弹层组件按视口宽度收缩，仅影响小屏，不动桌面端 */
+@media (max-width: 768px) {
+  .el-message-box {
+    width: calc(100vw - 32px);
+  }
+
+  .el-message {
+    min-width: 0;
+    width: calc(100vw - 32px);
+  }
+
+  .el-dialog {
+    width: calc(100vw - 32px);
+  }
+}
