@@ -81,13 +81,20 @@ class IndicatorRulesTest {
     }
 
     @Test
+<<<<<<< HEAD
     void AUTO_SUM守恒_手工认定比率类与是否型跳过() {
+=======
+    void AUTO_SUM守恒_手工认定与比率类跳过() {
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         assertDoesNotThrow(() -> IndicatorRules.requireAutoSumConservation("INCREMENT", "MANUAL",
                 new BigDecimal("5"), List.of(bd("1"))));
         assertDoesNotThrow(() -> IndicatorRules.requireAutoSumConservation("GROWTH", "AUTO_SUM",
                 new BigDecimal("115"), List.of(bd("100"))));
+<<<<<<< HEAD
         assertDoesNotThrow(() -> IndicatorRules.requireAutoSumConservation("BOOLEAN", "AUTO_SUM",
                 BigDecimal.ONE, List.of(BigDecimal.ONE, BigDecimal.ONE)));
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     }
 
     @Test
@@ -165,6 +172,7 @@ class IndicatorRulesTest {
     }
 
     @Test
+<<<<<<< HEAD
     void 量化定义_BOOLEAN免计量单位其他口径仍必填() {
         assertDoesNotThrow(() -> IndicatorRules.requireQuantitativeDefinition(
                 "A_PLUS", null, "BOOLEAN", "BOOLEAN", null, "HIGHER_BETTER", null));
@@ -173,6 +181,8 @@ class IndicatorRulesTest {
     }
 
     @Test
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     void 目标值规范化_BOOLEAN布尔转1其余为null() {
         assertEquals(0, BigDecimal.ONE.compareTo(IndicatorRules.normalizeTarget(true, "BOOLEAN")));
         assertNull(IndicatorRules.normalizeTarget(false, "BOOLEAN"));

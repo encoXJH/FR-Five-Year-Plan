@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+<<<<<<< HEAD
 import ResponsiveRecordView from '@/components/ResponsiveRecordView.vue'
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 import { formatTargetValue } from '@/utils/indicator'
 import type { StatCaliber } from '@/types/enums'
 
@@ -48,6 +51,7 @@ function yearDisplay(row: PreviewRow, year: number): string {
 </script>
 
 <template>
+<<<<<<< HEAD
   <el-dialog
     v-model="visible"
     title="确认正式交给学院"
@@ -56,15 +60,24 @@ function yearDisplay(row: PreviewRow, year: number): string {
     class="distribute-preview-dialog"
     :close-on-click-modal="false"
   >
+=======
+  <el-dialog v-model="visible" title="下发预览" width="860px" :close-on-click-modal="false">
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     <el-alert
       type="info"
       :closable="false"
       class="preview-alert"
+<<<<<<< HEAD
       :title="`将把 ${indicatorCode} ${indicatorName} 正式交给学院，生成 ${rows.length} 条 B 任务并通知学院负责人；任务编号、负责人不可修改，目标调整需走延期 / 转移申请。`"
     />
     <ResponsiveRecordView>
       <template #table>
         <el-table :data="rows" border size="small" max-height="420">
+=======
+      :title="`将下发指标 ${indicatorCode} ${indicatorName}，生成 ${rows.length} 条 B 任务；下发后任务编号、负责人不可修改，目标调整需走延期 / 转移申请。`"
+    />
+    <el-table :data="rows" border size="small" max-height="420">
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       <el-table-column prop="code" label="任务编号" width="150" class-name="mono" />
       <el-table-column prop="unitName" label="承接单元" min-width="160" show-overflow-tooltip />
       <el-table-column label="学院负责人" width="110" align="center">
@@ -82,6 +95,7 @@ function yearDisplay(row: PreviewRow, year: number): string {
       <el-table-column label="五年目标" width="110" align="right">
         <template #default="{ row }">{{ totalDisplay(row) }}</template>
       </el-table-column>
+<<<<<<< HEAD
         </el-table>
       </template>
       <template #cards>
@@ -124,6 +138,13 @@ function yearDisplay(row: PreviewRow, year: number): string {
         <el-button @click="visible = false">取消</el-button>
         <el-button type="primary" :loading="confirming" @click="emit('confirm')">确认交给学院</el-button>
       </div>
+=======
+    </el-table>
+    <div class="unit-note" v-if="unitLabel">单位：{{ unitLabel }}</div>
+    <template #footer>
+      <el-button @click="visible = false">取消</el-button>
+      <el-button type="primary" :loading="confirming" @click="emit('confirm')">确认下发</el-button>
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     </template>
   </el-dialog>
 </template>
@@ -142,6 +163,7 @@ function yearDisplay(row: PreviewRow, year: number): string {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
+<<<<<<< HEAD
 
 .preview-card-list,
 .preview-card {
@@ -237,4 +259,6 @@ function yearDisplay(row: PreviewRow, year: number): string {
     padding-bottom: var(--space-3);
   }
 }
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 </style>

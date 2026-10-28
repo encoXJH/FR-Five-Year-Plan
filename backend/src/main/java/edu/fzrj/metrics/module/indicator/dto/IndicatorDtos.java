@@ -4,7 +4,10 @@ import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import edu.fzrj.metrics.common.api.UserRef;
+<<<<<<< HEAD
 import edu.fzrj.metrics.module.task.dto.TaskDtos;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
@@ -35,6 +38,10 @@ public final class IndicatorDtos {
     /** 新增 A / A+ */
     @Data
     public static class CreateRequest {
+<<<<<<< HEAD
+=======
+        @NotBlank(message = "层级必填")
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         private String level;
 
         /** A+ 必填：所属 A */
@@ -92,6 +99,7 @@ public final class IndicatorDtos {
         private List<YearTargetItem> yearTargets;
     }
 
+<<<<<<< HEAD
     /** 一页式新建 A+ 并保存 B 分解草稿 */
     @Data
     public static class DecompositionRequest {
@@ -107,6 +115,8 @@ public final class IndicatorDtos {
     public record DecompositionResponse(Detail aPlus, TaskDtos.AllocationView allocation) {
     }
 
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     /** 设置五年总量与年度目标 */
     @Data
     public static class YearTargetsPutRequest {

@@ -22,6 +22,7 @@ a {
   text-decoration: none;
 }
 
+<<<<<<< HEAD
 .responsive-card-list {
   display: flex;
   flex-direction: column;
@@ -82,6 +83,8 @@ a {
   padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
 }
 
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 /* 移动端（≤768px）：Element Plus 弹层组件按视口宽度收缩，仅影响小屏，不动桌面端 */
 @media (max-width: 768px) {
   .el-message-box {
@@ -95,6 +98,7 @@ a {
 
   .el-dialog {
     width: calc(100vw - 32px);
+<<<<<<< HEAD
     max-width: calc(100vw - 32px);
   }
 
@@ -129,5 +133,7 @@ a {
   .el-input-number,
   .el-select__wrapper {
     min-height: 44px;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   }
 }

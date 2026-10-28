@@ -1,6 +1,7 @@
 /**
  * 端到端冒烟脚本（Playwright 库 API，headless）
  *
+<<<<<<< HEAD
  * 主流程：登录 admin → 新建五年计划 → 配置 S / 总负责人 → 录 A16/A16-1（逐年目标与 S 归属）→ 定稿
  *        → 分解下发到真实八院 C01–C08 → 启动计划 + 激活 2026 → c01 接收/填报（含 PDF 材料）
  *        → owner1 审核通过 → c01 对 A16-1-C01 发起延期 1 人 → owner1 初审 → leader 终审
@@ -8,6 +9,12 @@
  *
  * 编号夹具：新增/分解表单不开放编号字段，仅在本次创建请求中补 A16/A16-1；
  * 其余字段及完整流程仍通过真实 UI 操作。
+=======
+ * 主流程：登录 admin → 新建五年计划 → 配置 S / 总负责人 → 录指标（A/A+，逐年目标与 S 归属）→ 定稿
+ *        → 分解下发到 C01 → 启动计划 + 激活 2026 → c01 接收/填报（含 PDF 材料）
+ *        → owner1 审核通过 → c01 发起延期 → owner1 初审 → leader 终审
+ *        → c01 确认「已生效」→ admin 大屏断言
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
  *
  * 运行：npm run smoke（需后端 :8080 与前端 :5173 已启动）
  * 环境变量：SMOKE_BASE_URL（默认 http://localhost:5173）、SMOKE_HEADFUL=1 可视化调试
@@ -48,10 +55,13 @@ const BASE = process.env.SMOKE_BASE_URL || 'http://localhost:5173'
 const PASSWORD = 'Test@123456'
 /** 已确认缺陷补丁模式：默认关闭，严格走 UI 并如实 FAIL；开启后用 page.route 修补载荷 */
 const PATCH_KNOWN_BUGS = process.env.SMOKE_PATCH_KNOWN_BUGS === '1'
+<<<<<<< HEAD
 const VIEWPORT_WIDTH = Number(process.env.SMOKE_VIEWPORT_WIDTH || 1600)
 const VIEWPORT_HEIGHT = Number(process.env.SMOKE_VIEWPORT_HEIGHT || 900)
 const FEISHU_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Lark/7.40.0'
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 const patchedBugs = []
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ARTIFACTS = path.join(__dirname, 'artifacts')
@@ -61,6 +71,7 @@ const now = new Date()
 const p2 = (n) => String(n).padStart(2, '0')
 const ts = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}-${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())}`
 
+<<<<<<< HEAD
 const PLAN_NAME = `智能生产装备与技术专业群建设规划（2026—2030年）-冒烟-${ts}`
 const DIRECTION_NAME = '打造“匹配需求、要素集聚”的金专业'
 const INDICATOR_NAME =
@@ -92,6 +103,15 @@ for (let i = 0; i < YEARS.length; i += 1) {
 }
 
 const state = { planId: '', taskCode: '', taskId: '' }
+=======
+const PLAN_NAME = `冒烟规划-${ts}`
+const DIRECTION_NAME = `冒烟S级-${ts}`
+const A_NAME = `冒烟A指标-${ts}`
+const AP_NAME = `冒烟A+指标-${ts}`
+const YEARS = [2026, 2027, 2028, 2029, 2030]
+
+const state = { planId: '', taskCode: '' }
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 
 let browser
 let context
@@ -156,6 +176,7 @@ async function login(username) {
   await page.locator('.page-title', { hasText: '我的计划' }).waitFor()
 }
 
+<<<<<<< HEAD
 const indicatorRecord = (name, code) => {
   const records = page.locator(VIEWPORT_WIDTH <= 768 ? '.indicator-card' : '.el-table__row', { hasText: name })
   return (code ? records.filter({ hasText: code }) : records).first()
@@ -209,6 +230,8 @@ async function installA16FixtureCodes() {
   )
 }
 
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 /** 安装已确认缺陷的网络补丁（仅 SMOKE_PATCH_KNOWN_BUGS=1；命中时记录 patchedBugs） */
 async function installKnownBugPatches() {
   // Bug#1：POST /auth/login 响应按 API 约定 16.1 补 data.user（取自 /auth/me）
@@ -340,6 +363,7 @@ async function installKnownBugPatches() {
 }
 
 async function logout() {
+<<<<<<< HEAD
   if (process.env.SMOKE_FEISHU === '1') {
     await page.evaluate(() => {
       localStorage.clear()
@@ -365,16 +389,42 @@ async function fillYearTargetsAndSave() {
     await fillNumber(cell, A_YEAR_TARGETS[i])
   }
   // 守恒校验：各年度之和 16290 = 五年总量 16290
+=======
+  await page.locator('.user-entry').click()
+  await page
+    .locator('.el-dropdown-menu__item:visible')
+    .filter({ hasText: '退出登录' })
+    .click()
+  await page.locator('input[placeholder="工号"]').waitFor()
+}
+
+/** 指标详情页 → 年度目标 tab：逐年填 2 并保存 */
+async function fillYearTargetsAndSave() {
+  await page.locator('.el-tabs__item', { hasText: '年度目标' }).click()
+  await page.locator('.year-grid').waitFor()
+  for (const year of YEARS) {
+    const cell = page.locator('.year-cell', { hasText: String(year) })
+    await fillNumber(cell, 2)
+  }
+  // 守恒校验：各年度之和 10 = 五年总量 10
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   await page.locator('.sum-check.sum-ok').waitFor()
   await page.getByRole('button', { name: '保存年度目标' }).click()
   await waitToast('年度目标已保存')
 }
 
 /** 在指标总表中点击某行的「详情」进入指标详情页 */
+<<<<<<< HEAD
 async function openIndicatorDetail(name, code) {
   const row = indicatorRecord(name, code)
   await row.waitFor()
   await row.getByRole('button', { name: VIEWPORT_WIDTH <= 768 ? '查看详情' : '详情', exact: true }).click()
+=======
+async function openIndicatorDetail(name) {
+  const row = page.locator('.el-table__row', { hasText: name }).first()
+  await row.waitFor()
+  await row.getByRole('button', { name: '详情' }).click()
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   await page.waitForURL(/\/indicators\/\d+/)
 }
 
@@ -437,16 +487,23 @@ const steps = [
       const drawer = page.locator('.el-drawer:visible')
       await drawer.waitFor()
       await fi(drawer, '指标名称').locator('input').fill(A_NAME)
+<<<<<<< HEAD
       await fi(drawer, '指标性质').locator('.el-radio', { hasText: '发展性' }).click()
       await fi(drawer, '计量单位').locator('input').fill('人')
       await selectInFormItem(drawer, '项目负责人', '（owner1）', { type: 'owner1' })
       await fillNumber(fi(drawer, '五年总量'), TOTAL_TARGET)
       await fi(drawer, '填写说明').locator('textarea').fill(DESCRIPTION)
       await fi(drawer, '材料要求').locator('textarea').fill(EVIDENCE_REQUIREMENT)
+=======
+      await fi(drawer, '计量单位').locator('input').fill('项')
+      await selectInFormItem(drawer, '项目负责人', '（owner1）', { type: 'owner1' })
+      await fillNumber(fi(drawer, '五年总量'), 10)
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       await drawer.getByRole('button', { name: '创建指标' }).click()
       await waitToast('指标已创建')
       await drawer.waitFor({ state: 'hidden' })
 
+<<<<<<< HEAD
       if (VIEWPORT_WIDTH > 768) {
         await page.goto(`${BASE}/system`)
         await page.locator('.el-tabs__item', { hasText: 'S 级任务' }).click()
@@ -468,10 +525,32 @@ const steps = [
     name: '04 设置 A16 逐年目标（2458/2858/3258/3658/4058 守恒）',
     fn: async () => {
       await openIndicatorDetail(A_NAME, 'A16')
+=======
+      await page.goto(`${BASE}/system`)
+      await page.locator('.el-tabs__item', { hasText: 'S 级任务' }).click()
+      await page.locator('.panel-toolbar .el-select__wrapper').click()
+      await pickOption(PLAN_NAME, true)
+      const aRow = page.locator('.el-table__row', { hasText: A_NAME }).first()
+      await aRow.waitFor()
+      await aRow.locator('.el-select__wrapper').click()
+      await page.keyboard.type(DIRECTION_NAME)
+      await pickOption(DIRECTION_NAME, true)
+      await aRow.getByRole('button', { name: '保存', exact: true }).click()
+      await waitToast('的 S 归属')
+      await page.goto(`${BASE}/plans/${state.planId}/indicators`)
+      await page.locator('.el-table__row', { hasText: A_NAME }).first().waitFor()
+    },
+  },
+  {
+    name: '04 设置 A 指标逐年目标（2/2/2/2/2 守恒）',
+    fn: async () => {
+      await openIndicatorDetail(A_NAME)
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       await fillYearTargetsAndSave()
     },
   },
   {
+<<<<<<< HEAD
     name: '05 一页式分解 A+、年度目标与学院分工',
     fn: async () => {
       await page.goto(`${BASE}/plans/${state.planId}/indicators`)
@@ -528,6 +607,27 @@ const steps = [
         .filter({ hasText: 'A16-1' })
         .count()
       if (duplicateCount !== 1) throw new Error('继续分工重复创建了 A+')
+=======
+    name: '05 拆出 A+ 并设置逐年目标',
+    fn: async () => {
+      await page.goto(`${BASE}/plans/${state.planId}/indicators`)
+      const row = page.locator('.el-table__row', { hasText: A_NAME }).first()
+      await row.waitFor()
+      await row.getByRole('button', { name: /更多/ }).click()
+      await page
+        .locator('.el-dropdown-menu:visible .el-dropdown-menu__item', { hasText: '拆出 A+' })
+        .click()
+      const drawer = page.locator('.el-drawer:visible')
+      await drawer.waitFor()
+      await fi(drawer, '指标名称').locator('input').fill(AP_NAME)
+      await fi(drawer, '计量单位').locator('input').fill('项')
+      await fillNumber(fi(drawer, '五年总量'), 10)
+      await drawer.getByRole('button', { name: '创建指标' }).click()
+      await waitToast('指标已创建')
+      await drawer.waitFor({ state: 'hidden' })
+      await openIndicatorDetail(AP_NAME)
+      await fillYearTargetsAndSave()
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     },
   },
   {
@@ -535,25 +635,55 @@ const steps = [
     fn: async () => {
       await page.goto(`${BASE}/plans/${state.planId}/indicators`)
       await page.getByRole('button', { name: '全部展开', exact: true }).click()
+<<<<<<< HEAD
       await indicatorRecord(AP_NAME, 'A16-1').waitFor()
       await page.getByRole('button', { name: '全部指标设置完成（定稿）', exact: true }).click()
+=======
+      await page.locator('.el-table__row', { hasText: AP_NAME }).first().waitFor()
+      await page.getByRole('button', { name: '定稿', exact: true }).click()
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       await confirmBox('确认定稿')
       await waitToast('指标体系已定稿', 30000)
     },
   },
   {
+<<<<<<< HEAD
     name: '07 分解矩阵保留向导数据且守恒',
+=======
+    name: '07 分解矩阵：C01 承接全部目标并校验平衡',
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     fn: async () => {
       await page.goto(`${BASE}/plans/${state.planId}/allocation`)
       const item = page.locator('.indicator-item', { hasText: AP_NAME }).first()
       await item.waitFor()
       await item.click()
       await page.locator('.matrix-panel').waitFor()
+<<<<<<< HEAD
       for (const unit of UNIT_ALLOCATIONS) {
         await page
           .locator(VIEWPORT_WIDTH <= 768 ? '.allocation-mobile-card' : '.matrix-card .el-table__row', { hasText: unit.code })
           .first()
           .waitFor()
+=======
+      // 新增 C01 行
+      const addBar = page.locator('.add-row-bar')
+      await addBar.locator('.el-select__wrapper').click()
+      await page.keyboard.type('C01')
+      await pickOption('C01 智能产业学院')
+      await addBar.getByRole('button', { name: '添加行' }).click()
+      const row = page.locator('.matrix-card .el-table__row', { hasText: 'C01' }).first()
+      await row.waitFor()
+      // 学院负责人 = c01
+      await row.locator('.el-select__wrapper').click()
+      await page.keyboard.type('c01')
+      await pickOption('（c01）')
+      // 逐年目标 2×5
+      const cells = row.locator('.cell-input input')
+      for (let i = 0; i < YEARS.length; i += 1) {
+        await cells.nth(i).click()
+        await cells.nth(i).fill('2')
+        await cells.nth(i).press('Enter')
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       }
       await page
         .locator('.el-alert--success', { hasText: '各年度合计与指标目标一致' })
@@ -561,6 +691,7 @@ const steps = [
     },
   },
   {
+<<<<<<< HEAD
     name: '08 正式交给学院（生成八院 B 任务）',
     fn: async () => {
       await page.locator('.sticky-bar').getByRole('button', { name: '正式交给学院', exact: true }).click()
@@ -568,6 +699,17 @@ const steps = [
       await dialog.locator('text=正式交给学院').first().waitFor()
       await dialog.getByRole('button', { name: '确认交给学院' }).click()
       await waitToast('已正式交给学院', 30000)
+=======
+    name: '08 存草稿并下发（生成 B 任务）',
+    fn: async () => {
+      await page.locator('.sticky-bar').getByRole('button', { name: '存草稿' }).click()
+      await waitToast('已保存')
+      await page.locator('.sticky-bar').getByRole('button', { name: '下发', exact: true }).click()
+      const dialog = page.locator('.el-dialog:visible')
+      await dialog.locator('text=将下发指标').waitFor()
+      await dialog.getByRole('button', { name: '确认下发' }).click()
+      await waitToast('下发成功', 30000)
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     },
   },
   {
@@ -589,6 +731,7 @@ const steps = [
       await logout()
       await login('c01')
       await page.goto(`${BASE}/workbench`)
+<<<<<<< HEAD
       // 预置库存在同名同编号的 A16-1-C01，按本 run 的计划 ID 定位，避免接收错任务
       let row = await currentPlanWorkbenchRecord('待确认接收', 'status', 'DISTRIBUTED')
       await row.waitFor()
@@ -604,6 +747,23 @@ const steps = [
       if (page.url().match(/\/tasks\/(\d+)\/submit/)?.[1] !== state.taskId) {
         throw new Error('填报页任务与当前计划的 A16-1-C01 不一致')
       }
+=======
+      // 便携库有历史冒烟数据，先切「待确认接收」Tab 缩小范围（历史任务均已接收）
+      await page.getByRole('tab', { name: '待确认接收' }).click()
+      let row = page.locator('.task-table .el-table__row', { hasText: AP_NAME }).first()
+      await row.waitFor()
+      state.taskCode = (await row.locator('td').first().innerText()).trim()
+      if (!state.taskCode) throw new Error('未取到任务编号')
+      await row.getByRole('button', { name: '确认接收' }).click()
+      await confirmBox('确认接收')
+      await waitToast('已接收')
+      // 接收后切「待填报」Tab 找本 run 任务去填报
+      await page.getByRole('tab', { name: '待填报' }).click()
+      row = page.locator('.task-table .el-table__row', { hasText: AP_NAME }).first()
+      await row.waitFor()
+      await row.getByRole('button', { name: '填报' }).click()
+      await page.waitForURL(/\/tasks\/\d+\/submit/)
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       // 本次新增数量 = 1
       const form = page.locator('.metric-form')
       await fillNumber(fi(form, '本次新增数量'), 1)
@@ -633,10 +793,17 @@ const steps = [
       await logout()
       await login('owner1')
       await page.goto(`${BASE}/reviews`)
+<<<<<<< HEAD
       // 预置库与本 run 均为 A16-1-C01，先选本 run 的计划，再选 A16-1 过滤
       const filterCard = page.locator('.filter-card')
       await selectInFormItem(filterCard, '计划', PLAN_NAME)
       await selectInFormItem(filterCard, '指标', `A16-1 ${AP_NAME}`, { type: 'A16-1', exact: true })
+=======
+      // 历史冒烟数据的任务编号与本 run 相同（A01-1-C01），先选本 run 的计划、再选唯一的 A+ 指标过滤
+      const filterCard = page.locator('.filter-card')
+      await selectInFormItem(filterCard, '计划', PLAN_NAME)
+      await selectInFormItem(filterCard, '指标', AP_NAME, { type: AP_NAME })
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       const item = page.locator('.pending-item', { hasText: state.taskCode }).first()
       await item.waitFor()
       await item.click()
@@ -653,9 +820,16 @@ const steps = [
     fn: async () => {
       await logout()
       await login('c01')
+<<<<<<< HEAD
       // 用填报阶段捕获的任务 ID 预选，避免选中预置库的同名同编号任务
       await page.goto(`${BASE}/adjustments/apply?taskId=${encodeURIComponent(state.taskId)}`)
       const formCard = page.locator('.form-card')
+=======
+      await page.goto(`${BASE}/adjustments/apply`)
+      const formCard = page.locator('.form-card')
+      // 任务选项 label = `${code} ${指标名}`，用带时间戳的指标名避免选中历史同名编号任务
+      await selectInFormItem(formCard, 'B 任务', AP_NAME, { type: AP_NAME })
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       // 等任务详情加载：「延期」单选由禁用变为可用（label 文本精确等于"延期"，排除"延期 + 转移"）
       await page.waitForFunction(() => {
         const radios = Array.from(document.querySelectorAll('.el-radio'))
@@ -724,8 +898,15 @@ const steps = [
         const item = [...document.querySelectorAll('.panel-core .core-item')].find((i) =>
           i.textContent?.includes('B 任务'),
         )
+<<<<<<< HEAD
         return item?.querySelector('.core-num')?.textContent?.trim() === '8'
       }, null, { timeout: 10000 })
+=======
+        return item?.querySelector('.core-num')?.textContent?.trim() === '1'
+      }, null, { timeout: 10000 })
+      const taskNum = '1'
+      if (taskNum !== '1') throw new Error(`大屏 B 任务数=${taskNum}，期望 1`)
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       await page.waitForFunction(() => {
         const item = [...document.querySelectorAll('.panel-adjust .adjust-item')].find((i) =>
           i.textContent?.includes('已生效'),
@@ -744,16 +925,24 @@ async function main() {
   }
   browser = await chromium.launch({ headless: process.env.SMOKE_HEADFUL !== '1' })
   context = await browser.newContext({
+<<<<<<< HEAD
     viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
     locale: 'zh-CN',
     hasTouch: VIEWPORT_WIDTH <= 768,
     isMobile: VIEWPORT_WIDTH <= 768,
     userAgent: process.env.SMOKE_FEISHU === '1' ? FEISHU_UA : undefined,
+=======
+    viewport: { width: 1600, height: 900 },
+    locale: 'zh-CN',
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   })
   context.setDefaultTimeout(15000)
   context.setDefaultNavigationTimeout(20000)
   page = await context.newPage()
+<<<<<<< HEAD
   await installA16FixtureCodes()
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   if (PATCH_KNOWN_BUGS) {
     await installKnownBugPatches()
   }

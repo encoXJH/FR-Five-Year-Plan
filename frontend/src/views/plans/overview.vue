@@ -1,5 +1,9 @@
 <script setup lang="ts">
+<<<<<<< HEAD
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+=======
+import { computed, ref, watch } from 'vue'
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ProgressWithTimeLine from '@/components/ProgressWithTimeLine.vue'
@@ -45,6 +49,7 @@ const canManage = computed(() => userStore.can('plan:manage'))
 const canSettle = computed(() => userStore.can('settlement:manage'))
 const isArchived = computed(() => plan.value?.status === 'ARCHIVED')
 
+<<<<<<< HEAD
 const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
 const descriptionColumns = computed(() => (viewportWidth.value <= 768 ? 1 : viewportWidth.value <= 1280 ? 2 : 4))
 const stepDirection = computed<'horizontal' | 'vertical'>(() =>
@@ -58,6 +63,8 @@ function syncViewportWidth(): void {
 onMounted(() => window.addEventListener('resize', syncViewportWidth, { passive: true }))
 onBeforeUnmount(() => window.removeEventListener('resize', syncViewportWidth))
 
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 /** 计划年度列表（里程碑关联年度下拉） */
 const planYears = computed<number[]>(() => {
   if (!plan.value) return []
@@ -366,7 +373,11 @@ watch(planId, async (id) => {
 </script>
 
 <template>
+<<<<<<< HEAD
   <div v-loading="loading" class="overview-page">
+=======
+  <div v-loading="loading">
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     <template v-if="plan">
       <el-alert
         v-if="isArchived"
@@ -400,7 +411,11 @@ watch(planId, async (id) => {
       </div>
 
       <el-card shadow="never" class="info-card">
+<<<<<<< HEAD
         <el-descriptions :column="descriptionColumns" border>
+=======
+        <el-descriptions :column="4" border>
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
           <el-descriptions-item label="计划周期">
             {{ plan.startYear }}–{{ plan.endYear }}（共 {{ plan.endYear - plan.startYear + 1 }} 年）
           </el-descriptions-item>
@@ -436,7 +451,11 @@ watch(planId, async (id) => {
             </el-button>
           </div>
         </template>
+<<<<<<< HEAD
         <el-steps align-center :direction="stepDirection" class="year-steps">
+=======
+        <el-steps align-center>
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
           <el-step
             v-for="year in plan.years"
             :key="year.year"
@@ -700,7 +719,11 @@ watch(planId, async (id) => {
     </template>
   </div>
 
+<<<<<<< HEAD
   <el-dialog v-model="templateDialogVisible" title="另存为模板" width="min(480px, calc(100vw - 32px))">
+=======
+  <el-dialog v-model="templateDialogVisible" title="另存为模板" width="480px">
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     <el-form label-width="90px">
       <el-form-item label="模板名称" required>
         <el-input v-model="templateName" maxlength="100" show-word-limit />
@@ -725,11 +748,14 @@ watch(planId, async (id) => {
 </template>
 
 <style scoped>
+<<<<<<< HEAD
 .overview-page {
   min-width: 0;
   max-width: 100%;
 }
 
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 .page-alert {
   margin-bottom: var(--space-4);
 }
@@ -738,6 +764,7 @@ watch(planId, async (id) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+<<<<<<< HEAD
   flex-wrap: wrap;
   gap: var(--space-3);
   margin-bottom: var(--space-4);
@@ -747,6 +774,11 @@ watch(planId, async (id) => {
   min-width: 0;
 }
 
+=======
+  margin-bottom: var(--space-4);
+}
+
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 .page-title {
   margin: 0;
   font-size: 20px;
@@ -754,9 +786,13 @@ watch(planId, async (id) => {
   line-height: 28px;
   display: flex;
   align-items: center;
+<<<<<<< HEAD
   flex-wrap: wrap;
   gap: var(--space-2);
   overflow-wrap: anywhere;
+=======
+  gap: var(--space-2);
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 }
 
 .page-subtitle {
@@ -767,12 +803,18 @@ watch(planId, async (id) => {
 
 .header-actions {
   display: flex;
+<<<<<<< HEAD
   flex-wrap: wrap;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   gap: var(--space-2);
 }
 
 .info-card {
+<<<<<<< HEAD
   min-width: 0;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   margin-bottom: var(--space-4);
   border-radius: var(--radius-card);
 }
@@ -786,8 +828,11 @@ watch(planId, async (id) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+<<<<<<< HEAD
   flex-wrap: wrap;
   gap: var(--space-2);
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 }
 
 .card-tip {
@@ -795,6 +840,7 @@ watch(planId, async (id) => {
   color: var(--el-text-color-secondary);
 }
 
+<<<<<<< HEAD
 .year-steps {
   min-width: 0;
 }
@@ -805,6 +851,8 @@ watch(planId, async (id) => {
   white-space: normal;
 }
 
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 .year-settled-at {
   margin-top: var(--space-1);
   font-size: 12px;
@@ -817,13 +865,20 @@ watch(planId, async (id) => {
 
 .kpi-row {
   display: grid;
+<<<<<<< HEAD
   grid-template-columns: repeat(6, minmax(0, 1fr));
+=======
+  grid-template-columns: repeat(6, 1fr);
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   gap: var(--space-4);
   margin-bottom: var(--space-4);
 }
 
 .kpi-card {
+<<<<<<< HEAD
   min-width: 0;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   border-radius: var(--radius-card);
   text-align: center;
 }
@@ -875,13 +930,20 @@ watch(planId, async (id) => {
 
 .stat-row {
   display: grid;
+<<<<<<< HEAD
   grid-template-columns: repeat(2, minmax(0, 1fr));
+=======
+  grid-template-columns: 1fr 1fr;
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   gap: var(--space-4);
   margin-bottom: var(--space-4);
 }
 
 .stat-card {
+<<<<<<< HEAD
   min-width: 0;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   border-radius: var(--radius-card);
 }
 
@@ -923,13 +985,19 @@ watch(planId, async (id) => {
 
 .progress-bar {
   flex: 1;
+<<<<<<< HEAD
   min-width: 0;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 }
 
 .settle-summary {
   display: flex;
   align-items: center;
+<<<<<<< HEAD
   flex-wrap: wrap;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   gap: var(--space-3);
   margin-bottom: var(--space-3);
   font-variant-numeric: tabular-nums;
@@ -949,13 +1017,20 @@ watch(planId, async (id) => {
 
 .triple-row {
   display: grid;
+<<<<<<< HEAD
   grid-template-columns: repeat(3, minmax(0, 1fr));
+=======
+  grid-template-columns: repeat(3, 1fr);
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   gap: var(--space-4);
   margin-bottom: var(--space-4);
 }
 
 .triple-card {
+<<<<<<< HEAD
   min-width: 0;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   border-radius: var(--radius-card);
 }
 
@@ -1014,6 +1089,7 @@ watch(planId, async (id) => {
   background-color: var(--el-color-danger);
 }
 
+<<<<<<< HEAD
 @media (max-width: 1280px) {
   .kpi-row {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1101,6 +1177,15 @@ watch(planId, async (id) => {
 
   .kpi-label {
     overflow-wrap: anywhere;
+=======
+@media (max-width: 1200px) {
+  .kpi-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .triple-row {
+    grid-template-columns: 1fr;
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   }
 }
 </style>

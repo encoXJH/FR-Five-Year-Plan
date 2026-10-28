@@ -155,9 +155,12 @@ public class IndicatorService {
 
     @Transactional
     public IndicatorDtos.Detail create(Long planId, IndicatorDtos.CreateRequest request) {
+<<<<<<< HEAD
         if (!StringUtils.hasText(request.getLevel())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "层级必填");
         }
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         Plan plan = planService.requirePlan(planId);
         planService.requireNotArchived(plan);
         planService.requireNotFinalized(plan);
@@ -532,8 +535,22 @@ public class IndicatorService {
         List<FieldError> errors = new ArrayList<>();
         List<FieldError> sumErrors = new ArrayList<>();
         List<FieldError> conservationErrors = new ArrayList<>();
+<<<<<<< HEAD
         for (Indicator indicator : all) {
             String prefix = indicator.getCode();
+=======
+        Set<Long> validDirectionIds = directionMapper.selectList(new LambdaQueryWrapper<Direction>()
+                        .eq(Direction::getPlanId, planId)
+                        .eq(Direction::getDeleted, 0L)
+                        .select(Direction::getId))
+                .stream().map(Direction::getId).collect(Collectors.toSet());
+        for (Indicator indicator : all) {
+            String prefix = indicator.getCode();
+            if (IndicatorRules.LEVEL_A.equals(indicator.getLevel())
+                    && (indicator.getDirectionId() == null || !validDirectionIds.contains(indicator.getDirectionId()))) {
+                errors.add(new FieldError(prefix + ".directionId", prefix + " 未归属本计划的 S"));
+            }
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
             if (effectiveOwners.get(indicator.getId()) == null) {
                 errors.add(new FieldError(prefix + ".ownerId", prefix + " 未指定校级项目负责人"));
             }

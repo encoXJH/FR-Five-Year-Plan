@@ -1,8 +1,14 @@
 <script setup lang="ts">
+<<<<<<< HEAD
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElNotification } from 'element-plus'
 import ResponsiveRecordView from '@/components/ResponsiveRecordView.vue'
+=======
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElNotification } from 'element-plus'
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 import StatusTag from '@/components/StatusTag.vue'
 import { listPlans, getPlan } from '@/api/plan'
 import {
@@ -59,7 +65,11 @@ type LazyStatsNode = Omit<StatsTreeNode, 'children'> & {
 }
 
 const statsTableRef = ref<{ updateKeyChildren: (id: string, children: LazyStatsNode[]) => void } | null>(null)
+<<<<<<< HEAD
 const expandedIds = reactive(new Set<string>())
+=======
+const expandedIds = new Set<string>()
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 
 function toLazyNode(node: StatsTreeNode): LazyStatsNode {
   const { children, ...fields } = node
@@ -80,6 +90,7 @@ const childrenById = computed<Record<string, LazyStatsNode[]>>(() => {
 
 const lazyTree = computed(() => tree.value.map(toLazyNode))
 
+<<<<<<< HEAD
 const mobileTreeRows = computed<(StatsTreeNode & { depth: number })[]>(() => {
   const rows: (StatsTreeNode & { depth: number })[] = []
   const walk = (nodes: StatsTreeNode[], depth: number): void => {
@@ -92,11 +103,17 @@ const mobileTreeRows = computed<(StatsTreeNode & { depth: number })[]>(() => {
   return rows
 })
 
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 function loadChildren(row: LazyStatsNode, _node: unknown, resolve: (children: LazyStatsNode[]) => void): void {
   resolve(childrenById.value[row.id] ?? [])
 }
 
+<<<<<<< HEAD
 function handleExpandChange(row: StatsTreeNode, expanded: boolean): void {
+=======
+function handleExpandChange(row: LazyStatsNode, expanded: boolean): void {
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   if (expanded) expandedIds.add(row.id)
   else expandedIds.delete(row.id)
 }
@@ -536,7 +553,11 @@ onMounted(async () => {
 </script>
 
 <template>
+<<<<<<< HEAD
   <div v-loading="loading" class="stats-page">
+=======
+  <div v-loading="loading">
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     <div class="page-header">
       <div>
         <h1 class="page-title">统计报表</h1>
@@ -551,20 +572,35 @@ onMounted(async () => {
     </div>
 
     <el-card shadow="never" class="filter-card">
+<<<<<<< HEAD
       <el-form inline class="stats-filter" @submit.prevent>
         <el-form-item label="计划">
           <el-select v-model="planId" class="plan-select" @change="handlePlanChange">
+=======
+      <el-form inline @submit.prevent>
+        <el-form-item label="计划">
+          <el-select v-model="planId" style="width: 280px" @change="handlePlanChange">
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
             <el-option v-for="p in plans" :key="p.id" :label="p.name" :value="p.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="年度">
+<<<<<<< HEAD
           <el-select v-model="year" class="year-select" @change="handleYearChange">
+=======
+          <el-select v-model="year" style="width: 140px" @change="handleYearChange">
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
             <el-option label="五年累计" :value="null" />
             <el-option v-for="y in yearOptions" :key="y" :label="`${y} 年`" :value="y" />
           </el-select>
         </el-form-item>
+<<<<<<< HEAD
         <el-form-item label="统计维度" class="dimension-item">
           <el-radio-group v-model="dimension" size="small" class="dimension-options">
+=======
+        <el-form-item label="统计维度">
+          <el-radio-group v-model="dimension" size="small">
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
             <el-radio-button
               v-for="option in dimensionOptions"
               :key="option.value"
@@ -640,6 +676,7 @@ onMounted(async () => {
             <span v-if="dimensionNote" class="card-tip">{{ dimensionNote }}</span>
           </div>
         </template>
+<<<<<<< HEAD
         <ResponsiveRecordView>
           <template #table>
             <el-table :data="detailRows" border size="small">
@@ -730,6 +767,46 @@ onMounted(async () => {
             </div>
           </template>
         </ResponsiveRecordView>
+=======
+        <el-table :data="detailRows" border size="small">
+          <el-table-column prop="name" label="名称" min-width="180" show-overflow-tooltip />
+          <el-table-column label="任务数" width="110" align="right">
+            <template #default="{ row }">{{ formatCount(row.taskCount) }}</template>
+          </el-table-column>
+          <el-table-column label="达标数" width="110" align="right">
+            <template #default="{ row }">{{ formatCount(row.achievedCount) }}</template>
+          </el-table-column>
+          <el-table-column label="完成率（当年）" width="170" align="right">
+            <template #default="{ row }">
+              <div class="rate-cell">
+                <el-progress
+                  :percentage="progressPercentage(row.completionRate)"
+                  :stroke-width="8"
+                  :show-text="false"
+                  class="rate-bar"
+                />
+                <span>{{ formatPercent(row.completionRate) }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="五年累计完成率" width="170" align="right">
+            <template #default="{ row }">
+              <div class="rate-cell">
+                <el-progress
+                  :percentage="progressPercentage(row.cumulativeRate)"
+                  :stroke-width="8"
+                  :show-text="false"
+                  class="rate-bar"
+                />
+                <span>{{ formatPercent(row.cumulativeRate) }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty :image-size="80" :description="dimensionNote || '暂无数据'" />
+          </template>
+        </el-table>
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       </el-card>
 
       <el-card shadow="never" class="table-card">
@@ -739,6 +816,7 @@ onMounted(async () => {
             <span class="card-tip">点击「趋势」查看指标 2026–2030 目标与实际对比</span>
           </div>
         </template>
+<<<<<<< HEAD
         <ResponsiveRecordView>
           <template #table>
             <el-table
@@ -752,6 +830,19 @@ onMounted(async () => {
               :tree-props="{ children: 'children', hasChildren: 'hasChildren' }"
               @expand-change="handleExpandChange"
             >
+=======
+        <el-table
+          ref="statsTableRef"
+          :data="lazyTree"
+          row-key="id"
+          border
+          size="small"
+          lazy
+          :load="loadChildren"
+          :tree-props="{ children: 'children', hasChildren: 'hasChildren' }"
+          @expand-change="handleExpandChange"
+        >
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
           <el-table-column label="名称" min-width="280">
             <template #default="{ row }">
               <span class="node-code">{{ row.code }}</span>
@@ -831,6 +922,7 @@ onMounted(async () => {
               </el-button>
             </template>
           </el-table-column>
+<<<<<<< HEAD
             </el-table>
           </template>
           <template #cards>
@@ -943,6 +1035,9 @@ onMounted(async () => {
             </div>
           </template>
         </ResponsiveRecordView>
+=======
+        </el-table>
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       </el-card>
 
       <el-card v-if="trendIndicator" v-loading="trendLoading" shadow="never" class="table-card">
@@ -961,7 +1056,11 @@ onMounted(async () => {
 
     <el-empty v-else-if="!loading" description="暂无统计数据（计划未选择或接口未就绪）" />
 
+<<<<<<< HEAD
     <el-dialog v-model="settlementVisible" title="年度核算结果" width="min(880px, calc(100vw - 32px))">
+=======
+    <el-dialog v-model="settlementVisible" title="年度核算结果" width="880px">
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       <el-form inline @submit.prevent>
         <el-form-item label="年度">
           <el-select v-model="settlementYear" style="width: 140px" @change="loadSettlement">
@@ -1011,15 +1110,19 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+<<<<<<< HEAD
 .stats-page {
   min-width: 0;
   max-width: 100%;
 }
 
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 .page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+<<<<<<< HEAD
   flex-wrap: wrap;
   gap: var(--space-3);
   margin-bottom: var(--space-4);
@@ -1029,6 +1132,11 @@ onMounted(async () => {
   min-width: 0;
 }
 
+=======
+  margin-bottom: var(--space-4);
+}
+
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 .page-title {
   margin: 0;
   font-size: 20px;
@@ -1040,22 +1148,32 @@ onMounted(async () => {
   margin: var(--space-1) 0 0;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+<<<<<<< HEAD
   overflow-wrap: anywhere;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 }
 
 .header-actions {
   display: flex;
+<<<<<<< HEAD
   flex-wrap: wrap;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   gap: var(--space-2);
 }
 
 .filter-card,
 .table-card {
+<<<<<<< HEAD
   min-width: 0;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   margin-bottom: var(--space-4);
   border-radius: var(--radius-card);
 }
 
+<<<<<<< HEAD
 .stats-filter {
   display: flex;
   flex-wrap: wrap;
@@ -1086,12 +1204,20 @@ onMounted(async () => {
 .kpi-row {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
+=======
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   gap: var(--space-4);
   margin-bottom: var(--space-4);
 }
 
 .kpi-card {
+<<<<<<< HEAD
   min-width: 0;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   border-radius: var(--radius-card);
   text-align: center;
 }
@@ -1138,29 +1264,44 @@ onMounted(async () => {
 
 .chart-row {
   display: grid;
+<<<<<<< HEAD
   grid-template-columns: repeat(2, minmax(0, 1fr));
+=======
+  grid-template-columns: 1fr 1fr;
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   gap: var(--space-4);
   margin-bottom: var(--space-4);
 }
 
 .chart-card {
+<<<<<<< HEAD
   min-width: 0;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   border-radius: var(--radius-card);
 }
 
 .card-title {
+<<<<<<< HEAD
   min-width: 0;
   font-size: 16px;
   font-weight: 600;
   overflow-wrap: anywhere;
+=======
+  font-size: 16px;
+  font-weight: 600;
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 }
 
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+<<<<<<< HEAD
   flex-wrap: wrap;
   gap: var(--space-2);
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 }
 
 .card-tip {
@@ -1204,6 +1345,7 @@ onMounted(async () => {
 
 .rate-bar {
   width: 56px;
+<<<<<<< HEAD
   flex-shrink: 0;
 }
 
@@ -1214,6 +1356,8 @@ onMounted(async () => {
 
 .tree-card-history {
   margin-top: var(--space-2);
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 }
 
 .empty-text {
@@ -1223,7 +1367,10 @@ onMounted(async () => {
 .settle-summary {
   display: flex;
   align-items: center;
+<<<<<<< HEAD
   flex-wrap: wrap;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   gap: var(--space-3);
   margin-bottom: var(--space-3);
   font-variant-numeric: tabular-nums;
@@ -1234,6 +1381,7 @@ onMounted(async () => {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
+<<<<<<< HEAD
 
 @media (max-width: 1440px) {
   .kpi-row {
@@ -1311,4 +1459,6 @@ onMounted(async () => {
     line-height: 30px;
   }
 }
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 </style>

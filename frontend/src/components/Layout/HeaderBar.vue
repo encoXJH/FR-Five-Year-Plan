@@ -146,8 +146,11 @@ async function handleCommand(command: string): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: space-between;
+<<<<<<< HEAD
   gap: var(--space-3);
   min-width: 0;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   height: 100%;
   padding: 0 var(--space-5);
   color: #ffffff;
@@ -156,6 +159,7 @@ async function handleCommand(command: string): Promise<void> {
 .brand {
   display: flex;
   align-items: center;
+<<<<<<< HEAD
   flex: 1;
   gap: var(--space-3);
   min-width: 0;
@@ -166,6 +170,12 @@ async function handleCommand(command: string): Promise<void> {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+=======
+  gap: var(--space-3);
+}
+
+.brand-name {
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   font-size: 16px;
   font-weight: 600;
   line-height: 24px;
@@ -174,7 +184,10 @@ async function handleCommand(command: string): Promise<void> {
 .plan-entry {
   display: flex;
   align-items: center;
+<<<<<<< HEAD
   min-width: 0;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   gap: var(--space-2);
   color: #ffffff;
   cursor: pointer;
@@ -196,7 +209,10 @@ async function handleCommand(command: string): Promise<void> {
 .header-right {
   display: flex;
   align-items: center;
+<<<<<<< HEAD
   flex-shrink: 0;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   gap: var(--space-5);
 }
 
@@ -260,6 +276,7 @@ async function handleCommand(command: string): Promise<void> {
   .header-right {
     gap: var(--space-3);
   }
+<<<<<<< HEAD
 
   .plan-name {
     max-width: 160px;
@@ -279,5 +296,7 @@ async function handleCommand(command: string): Promise<void> {
   .plan-name {
     max-width: 128px;
   }
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 }
 </style>

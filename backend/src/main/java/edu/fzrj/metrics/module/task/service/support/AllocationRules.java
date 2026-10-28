@@ -26,11 +26,19 @@ public final class AllocationRules {
     }
 
     /**
+<<<<<<< HEAD
      * 目标需要逐年求和校验的口径（比率类和是否型不做求和校验）。
      * INCREMENT / STOCK 需要：Σ各 B 年度目标 = A+ 当年目标。
      */
     public static boolean requiresAllocationSum(String statCaliber) {
         return "INCREMENT".equals(statCaliber) || "STOCK".equals(statCaliber);
+=======
+     * 目标需要逐年求和校验的口径（PRD 4.5：比率类 GROWTH / RATIO / DIRECT_PERCENT 不做求和校验）。
+     * INCREMENT / STOCK / BOOLEAN 需要：Σ各 B 年度目标 = A+ 当年目标。
+     */
+    public static boolean requiresAllocationSum(String statCaliber) {
+        return "INCREMENT".equals(statCaliber) || "STOCK".equals(statCaliber) || "BOOLEAN".equals(statCaliber);
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     }
 
     /** 仅 A+ 可生成分解矩阵 */

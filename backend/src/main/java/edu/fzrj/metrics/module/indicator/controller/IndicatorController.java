@@ -2,10 +2,15 @@ package edu.fzrj.metrics.module.indicator.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import edu.fzrj.metrics.common.audit.AuditLog;
+<<<<<<< HEAD
 import edu.fzrj.metrics.common.idempotent.Idempotent;
 import edu.fzrj.metrics.common.util.PatchHelper;
 import edu.fzrj.metrics.module.indicator.dto.IndicatorDtos;
 import edu.fzrj.metrics.module.indicator.service.DecompositionService;
+=======
+import edu.fzrj.metrics.common.util.PatchHelper;
+import edu.fzrj.metrics.module.indicator.dto.IndicatorDtos;
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 import edu.fzrj.metrics.module.indicator.service.IndicatorService;
 import edu.fzrj.metrics.module.plan.dto.PlanDtos;
 import io.swagger.v3.oas.annotations.Operation;
@@ -32,6 +37,7 @@ import java.util.List;
 public class IndicatorController {
 
     private final IndicatorService indicatorService;
+<<<<<<< HEAD
     private final DecompositionService decompositionService;
     private final edu.fzrj.metrics.module.indicator.service.ManualValueService manualValueService;
 
@@ -40,6 +46,13 @@ public class IndicatorController {
                                edu.fzrj.metrics.module.indicator.service.ManualValueService manualValueService) {
         this.indicatorService = indicatorService;
         this.decompositionService = decompositionService;
+=======
+    private final edu.fzrj.metrics.module.indicator.service.ManualValueService manualValueService;
+
+    public IndicatorController(IndicatorService indicatorService,
+                               edu.fzrj.metrics.module.indicator.service.ManualValueService manualValueService) {
+        this.indicatorService = indicatorService;
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         this.manualValueService = manualValueService;
     }
 
@@ -65,6 +78,7 @@ public class IndicatorController {
         return indicatorService.create(planId, request);
     }
 
+<<<<<<< HEAD
     @Operation(summary = "一页式新建 A+ 并保存 B 分解草稿",
             description = "权限：indicator:edit + allocation:edit；同一事务创建 A+（含年度目标）并整体保存 B 草稿；"
                     + "不定稿、不下发、不通知；必须带 Idempotency-Key")
@@ -78,6 +92,8 @@ public class IndicatorController {
         return decompositionService.decompose(planId, parentId, request);
     }
 
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     @Operation(summary = "指标详情（含年度目标、下属 A+ 与 B 概要；历史 A 直承 B 只读返回）")
     @GetMapping("/api/v1/indicators/{indicatorId}")
     public IndicatorDtos.Detail detail(@PathVariable Long indicatorId) {

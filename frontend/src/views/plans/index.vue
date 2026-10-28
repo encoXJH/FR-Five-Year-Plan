@@ -322,7 +322,11 @@ async function openNotification(item: NotificationItem): Promise<void> {
       <p class="page-subtitle">共 {{ plans.length }} 个计划</p>
     </div>
     <div class="header-filters">
+<<<<<<< HEAD
       <el-select v-model="statusFilter" placeholder="状态：全部" clearable class="filter-status">
+=======
+      <el-select v-model="statusFilter" placeholder="状态：全部" clearable style="width: 140px">
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         <el-option label="草稿" value="DRAFT" />
         <el-option label="执行中" value="ACTIVE" />
         <el-option label="已归档" value="ARCHIVED" />
@@ -331,7 +335,11 @@ async function openNotification(item: NotificationItem): Promise<void> {
         v-model="keyword"
         placeholder="搜索计划名称"
         clearable
+<<<<<<< HEAD
         class="filter-keyword"
+=======
+        style="width: 220px"
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       />
     </div>
   </div>
@@ -440,12 +448,16 @@ async function openNotification(item: NotificationItem): Promise<void> {
     </el-card>
   </div>
 
+<<<<<<< HEAD
   <el-dialog
     v-model="createVisible"
     title="新建计划"
     width="min(560px, calc(100vw - 32px))"
     :close-on-click-modal="false"
   >
+=======
+  <el-dialog v-model="createVisible" title="新建计划" width="560px" :close-on-click-modal="false">
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     <el-steps :active="createStep" align-center class="create-steps">
       <el-step title="选择方式" />
       <el-step title="填写属性" />
@@ -470,15 +482,24 @@ async function openNotification(item: NotificationItem): Promise<void> {
       :model="form"
       :rules="rules"
       label-width="120px"
+<<<<<<< HEAD
       class="create-form"
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     >
       <el-form-item label="计划名称" prop="name">
         <el-input v-model="form.name" maxlength="100" show-word-limit placeholder="如：2026–2030 五年发展规划" />
       </el-form-item>
       <el-form-item label="起止年份" required>
+<<<<<<< HEAD
         <el-input-number v-model="form.startYear" class="year-input" :min="2000" :max="2100" :controls="false" />
         <span class="year-sep">至</span>
         <el-input-number v-model="form.endYear" class="year-input" :min="2000" :max="2100" :controls="false" />
+=======
+        <el-input-number v-model="form.startYear" :min="2000" :max="2100" :controls="false" />
+        <span class="year-sep">至</span>
+        <el-input-number v-model="form.endYear" :min="2000" :max="2100" :controls="false" />
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       </el-form-item>
       <el-form-item label="基线年">
         <el-input-number v-model="form.baselineYear" :min="2000" :max="2100" :controls="false" />
@@ -513,7 +534,11 @@ async function openNotification(item: NotificationItem): Promise<void> {
     </template>
   </el-dialog>
 
+<<<<<<< HEAD
   <el-dialog v-model="templateDialogVisible" title="另存为模板" width="min(480px, calc(100vw - 32px))">
+=======
+  <el-dialog v-model="templateDialogVisible" title="另存为模板" width="480px">
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     <el-form label-width="90px">
       <el-form-item label="模板名称" required>
         <el-input v-model="templateName" maxlength="100" show-word-limit />
@@ -539,20 +564,27 @@ async function openNotification(item: NotificationItem): Promise<void> {
 
 <style scoped>
 .welcome-bar {
+<<<<<<< HEAD
   min-width: 0;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   margin-bottom: var(--space-4);
   padding: var(--space-3) var(--space-4);
   background: var(--el-bg-color);
   border-radius: var(--radius-card);
   font-size: 14px;
   color: var(--el-text-color-regular);
+<<<<<<< HEAD
   overflow-wrap: anywhere;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 }
 
 .page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+<<<<<<< HEAD
   flex-wrap: wrap;
   gap: var(--space-3);
   margin-bottom: var(--space-4);
@@ -562,6 +594,11 @@ async function openNotification(item: NotificationItem): Promise<void> {
   min-width: 0;
 }
 
+=======
+  margin-bottom: var(--space-4);
+}
+
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 .page-title {
   margin: 0;
   font-size: 20px;
@@ -577,6 +614,7 @@ async function openNotification(item: NotificationItem): Promise<void> {
 
 .header-filters {
   display: flex;
+<<<<<<< HEAD
   flex-wrap: wrap;
   gap: var(--space-2);
 }
@@ -596,14 +634,27 @@ async function openNotification(item: NotificationItem): Promise<void> {
   grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   gap: var(--space-4);
   min-width: 0;
+=======
+  gap: var(--space-2);
+}
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--space-4);
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   min-height: 240px;
 }
 
 .plan-card {
+<<<<<<< HEAD
   width: 100%;
   min-width: 0;
   height: auto;
   min-height: 220px;
+=======
+  height: 220px;
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   border-radius: var(--radius-dialog);
   cursor: pointer;
 }
@@ -635,7 +686,11 @@ async function openNotification(item: NotificationItem): Promise<void> {
 
 .card-top {
   display: flex;
+<<<<<<< HEAD
   align-items: flex-start;
+=======
+  align-items: center;
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   justify-content: space-between;
   gap: var(--space-2);
 }
@@ -657,12 +712,21 @@ async function openNotification(item: NotificationItem): Promise<void> {
 }
 
 .plan-name {
+<<<<<<< HEAD
   flex: 1;
   min-width: 0;
   font-size: 16px;
   font-weight: 600;
   line-height: 24px;
   overflow-wrap: anywhere;
+=======
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 }
 
 .plan-period {
@@ -686,6 +750,7 @@ async function openNotification(item: NotificationItem): Promise<void> {
 
 .plan-stats {
   display: flex;
+<<<<<<< HEAD
   flex: 1;
   flex-direction: column;
   gap: var(--space-1);
@@ -693,6 +758,12 @@ async function openNotification(item: NotificationItem): Promise<void> {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   overflow-wrap: anywhere;
+=======
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 }
 
 .grid-empty {
@@ -710,7 +781,10 @@ async function openNotification(item: NotificationItem): Promise<void> {
 
 .source-card {
   flex: 1;
+<<<<<<< HEAD
   min-width: 0;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   padding: var(--space-4);
   border: 1px solid var(--el-border-color);
   border-radius: var(--radius-card);
@@ -739,13 +813,20 @@ async function openNotification(item: NotificationItem): Promise<void> {
 
 .bottom-row {
   display: grid;
+<<<<<<< HEAD
   grid-template-columns: repeat(2, minmax(0, 1fr));
+=======
+  grid-template-columns: 1fr 1fr;
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   gap: var(--space-4);
   margin-top: var(--space-4);
 }
 
 .bottom-card {
+<<<<<<< HEAD
   min-width: 0;
+=======
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   border-radius: var(--radius-card);
 }
 
@@ -803,6 +884,7 @@ async function openNotification(item: NotificationItem): Promise<void> {
 }
 
 @media (max-width: 768px) {
+<<<<<<< HEAD
   .page-header {
     align-items: stretch;
     flex-direction: column;
@@ -880,6 +962,10 @@ async function openNotification(item: NotificationItem): Promise<void> {
   .filter-status,
   .filter-keyword {
     width: 100%;
+=======
+  .bottom-row {
+    grid-template-columns: 1fr;
+>>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   }
 }
 </style>
