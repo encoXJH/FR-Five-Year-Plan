@@ -58,6 +58,7 @@ const props = defineProps<{
   initialAPlusId: string | null
   allowCreate: boolean
   years: number[]
+  mode?: 'create' | 'allocate'
 }>()
 
 const emit = defineEmits<{
@@ -111,6 +112,7 @@ const rules: FormRules = {
   measureType: [{ required: true, message: '请选择计量类型', trigger: 'change' }],
   statCaliber: [{ required: true, message: '请选择统计口径', trigger: 'change' }],
   planYear: [{ required: true, message: '请选择计划完成年份', trigger: 'change' }],
+  ownerId: [{ required: true, message: '请选择校项目负责人', trigger: 'change' }],
 }
 
 const selectedId = ref(NEW_A_PLUS)
@@ -121,7 +123,6 @@ const saving = ref(false)
 const dirty = ref(false)
 const initialized = ref(false)
 const suppressDirty = ref(false)
-const advancedActive = ref<string[]>([])
 const decompositionKey = ref(newIdempotencyKey())
 
 const userOptions = ref<UserOption[]>([])
@@ -134,15 +135,13 @@ const allocationVersion = ref(0)
 const addRowUnitId = ref('')
 
 const isNew = computed(() => selectedId.value === NEW_A_PLUS)
+const isCreateMode = computed(() => props.mode !== 'allocate')
+const isAllocateMode = computed(() => props.mode === 'allocate')
 const title = computed(() => {
+  if (isAllocateMode.value) return '继续分工 · 分配学院 B 级任务'
   const parent = props.parent
   return parent ? `分解任务 · ${parent.code} ${parent.name}` : '分解任务'
 })
-const draftAPlusOptions = computed(() =>
-  (props.parent?.children ?? []).filter(
-    (item) => item.level === 'A_PLUS' && item.status === 'DRAFT',
-  ),
-)
 const caliber = computed<StatCaliber>(() =>
   isNew.value ? form.statCaliber : (currentAPlus.value?.statCaliber ?? 'INCREMENT'),
 )
@@ -218,7 +217,6 @@ function resetNewForm(): void {
   form.description = ''
   form.evidenceRequirement = ''
   resetTargets(form.targets)
-  advancedActive.value = []
 }
 
 async function ensureOptions(): Promise<void> {
@@ -301,29 +299,10 @@ async function loadSelection(): Promise<void> {
 
 async function initialize(): Promise<void> {
   if (!props.parent) return
-  const initial = props.initialAPlusId
-  const initialExists = draftAPlusOptions.value.some((item) => item.id === initial)
-  selectedId.value = initialExists && initial
-    ? initial
-    : (draftAPlusOptions.value[0]?.id ?? NEW_A_PLUS)
+  selectedId.value = isAllocateMode.value
+    ? (props.initialAPlusId ?? NEW_A_PLUS)
+    : NEW_A_PLUS
   void ensureOptions()
-  await loadSelection()
-}
-
-async function changeSelection(value: string): Promise<void> {
-  if (value === selectedId.value) return
-  if (dirty.value) {
-    try {
-      await ElMessageBox.confirm('切换分工对象将丢失当前未保存的修改，确认切换？', '未保存的修改', {
-        confirmButtonText: '放弃修改并切换',
-        cancelButtonText: '取消',
-        type: 'warning',
-      })
-    } catch {
-      return
-    }
-  }
-  selectedId.value = value
   await loadSelection()
 }
 
@@ -479,7 +458,9 @@ function completeSave(aPlusId: string): void {
   if (!props.parent) return
   dirty.value = false
   decompositionKey.value = newIdempotencyKey()
-  ElMessage.success('分工已保存；计划未锁定，也不会通知学院')
+  ElMessage.success(isCreateMode.value
+    ? 'A+ 已创建；可点击 A+ 行的「继续分工」分配学院'
+    : '分工已保存；计划未锁定，也不会通知学院')
   emit('saved', { parentId: props.parent.id, aPlusId })
   visible.value = false
 }
@@ -541,7 +522,7 @@ async function submit(): Promise<void> {
       const result = await decomposeIndicator(
         props.planId,
         props.parent.id,
-        { indicator: buildIndicatorPayload(), rows: buildRowsPayload() },
+        { indicator: buildIndicatorPayload(), rows: isCreateMode.value ? [] : buildRowsPayload() },
         decompositionKey.value,
       )
       completeSave(result.aPlus.id)
@@ -621,29 +602,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', syncViewportWidth))
         <el-alert
           type="info"
           :closable="false"
-          title="只保存分工，不锁定计划，也不通知学院"
+          :title="isAllocateMode
+            ? '只保存学院分工，不锁定计划，也不通知学院'
+            : '只创建 A+ 指标；保存后点击 A+ 行的「继续分工」再分配学院'"
         />
-
-        <section class="wizard-section selection-section">
-          <el-form label-position="top">
-            <el-form-item v-if="allowCreate || draftAPlusOptions.length > 0" label="本次要分工的 A+">
-              <el-select
-                :model-value="selectedId"
-                style="width: 100%"
-                @change="changeSelection"
-              >
-                <el-option v-if="allowCreate" label="新建一个 A+ 指标" :value="NEW_A_PLUS" />
-                <el-option
-                  v-for="item in draftAPlusOptions"
-                  :key="item.id"
-                  :label="`继续分工：${item.code} ${item.name}`"
-                  :value="item.id"
-                />
-              </el-select>
-              <div class="field-tip">选择已有草稿只会保存学院分工，不会重复创建 A+</div>
-            </el-form-item>
-          </el-form>
-        </section>
 
         <el-empty
           v-if="loadFailed"
@@ -716,8 +678,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', syncViewportWidth))
                 <el-form-item v-if="showTotalTarget" label="五年目标总量">
                   <el-input-number v-model="form.totalTarget" :min="0" controls-position="right" :precision="4" />
                 </el-form-item>
-                <el-form-item label="校级项目负责人">
-                  <el-select v-model="form.ownerId" filterable clearable placeholder="默认沿用 A 的负责人" style="width: 100%">
+                <el-form-item label="校级项目负责人" prop="ownerId">
+                  <el-select v-model="form.ownerId" filterable clearable placeholder="请选择校项目负责人" style="width: 100%">
                     <el-option
                       v-for="user in userOptions"
                       :key="user.id"
@@ -765,23 +727,22 @@ onBeforeUnmount(() => window.removeEventListener('resize', syncViewportWidth))
                 </div>
               </el-form-item>
 
-              <el-collapse v-model="advancedActive" class="advanced-collapse">
-                <el-collapse-item title="高级说明与材料要求（可选）" name="advanced">
-                  <el-form-item label="填写说明">
-                    <el-input v-model="form.description" type="textarea" :rows="3" maxlength="2000" show-word-limit />
-                  </el-form-item>
-                  <el-form-item label="佐证材料要求">
-                    <el-input
-                      v-model="form.evidenceRequirement"
-                      type="textarea"
-                      :rows="2"
-                      maxlength="500"
-                      show-word-limit
-                      placeholder="如：获奖文件、证书扫描件"
-                    />
-                  </el-form-item>
-                </el-collapse-item>
-              </el-collapse>
+              <div class="advanced-collapse">
+                <h3 class="advanced-heading">高级说明与材料要求（可选）</h3>
+                <el-form-item label="填写说明">
+                  <el-input v-model="form.description" type="textarea" :rows="3" maxlength="2000" show-word-limit />
+                </el-form-item>
+                <el-form-item label="佐证材料要求">
+                  <el-input
+                    v-model="form.evidenceRequirement"
+                    type="textarea"
+                    :rows="2"
+                    maxlength="500"
+                    show-word-limit
+                    placeholder="如：获奖文件、证书扫描件"
+                  />
+                </el-form-item>
+              </div>
             </el-form>
 
             <template v-else-if="currentAPlus">
@@ -831,7 +792,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', syncViewportWidth))
             </template>
           </section>
 
-          <section class="wizard-section">
+          <section v-if="isAllocateMode" class="wizard-section">
             <div class="section-heading">
               <div>
                 <span class="section-step">2</span>
@@ -974,7 +935,9 @@ onBeforeUnmount(() => window.removeEventListener('resize', syncViewportWidth))
 
     <template #footer>
       <div class="wizard-footer">
-        <span>保存后仍可继续修改；不会自动定稿、正式交给学院或发送通知</span>
+        <span>{{ isAllocateMode
+          ? '保存后仍可继续修改；不会自动定稿、正式交给学院或发送通知'
+          : '只创建 A+，不分配学院、不定稿、不通知' }}</span>
         <div class="footer-actions">
           <el-button @click="requestClose">取消</el-button>
           <el-button
@@ -983,7 +946,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', syncViewportWidth))
             :disabled="loading || loadFailed || (!isNew && !currentAPlus)"
             @click="submit"
           >
-            保存分工
+            保存{{ isCreateMode ? ' A+' : '分工' }}
           </el-button>
         </div>
       </div>
@@ -1134,6 +1097,13 @@ onBeforeUnmount(() => window.removeEventListener('resize', syncViewportWidth))
 
 .advanced-collapse {
   margin-top: var(--space-2);
+}
+
+.advanced-heading {
+  margin: 0 0 var(--space-1);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
 }
 
 .readonly-alert,

@@ -8,6 +8,7 @@ import { getStatsTree } from '@/api/stats'
 import { useCountUp, useEChart } from '@/utils/chart'
 import { computeScreenScale, throttleTrailing } from '@/utils/screenScale'
 import { formatCount, formatLargeNumber, formatPercent, timeProgressOfPlan } from '@/utils/format'
+import { getCurrentPlan, setCurrentPlan } from '@/utils/currentPlan'
 import type { PlanCard } from '@/types/plan'
 import type {
   IndicatorStat,
@@ -340,6 +341,8 @@ async function refresh(): Promise<void> {
 }
 
 function handlePlanChange(): void {
+  const selected = plans.value.find((p) => p.id === planId.value)
+  if (selected) setCurrentPlan(selected)
   year.value = null
   syncUrl()
   void refresh()
@@ -403,7 +406,11 @@ onMounted(async () => {
     }
   }
   if (!planId.value && plans.value.length > 0) {
-    planId.value = (plans.value.find((p) => p.status === 'ACTIVE') ?? plans.value[0]).id
+    const current = getCurrentPlan()
+    const fallback = plans.value.find((p) => p.id === current?.id)
+      ?? plans.value.find((p) => p.status === 'ACTIVE')
+      ?? plans.value[0]
+    planId.value = fallback.id
     syncUrl()
   }
   await refresh()

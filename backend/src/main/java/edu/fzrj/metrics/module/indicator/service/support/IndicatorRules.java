@@ -124,11 +124,7 @@ public final class IndicatorRules {
         if (statCaliber == null || statCaliber.isBlank()) {
             throw new BizException(ErrorCode.PARAM_INVALID, "统计口径必填");
         }
-<<<<<<< HEAD
         if (!"BOOLEAN".equals(statCaliber) && (unitLabel == null || unitLabel.isBlank())) {
-=======
-        if (unitLabel == null || unitLabel.isBlank()) {
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
             throw new BizException(ErrorCode.PARAM_INVALID, "计量单位必填");
         }
         if (targetDirection == null || targetDirection.isBlank()) {
@@ -170,19 +166,11 @@ public final class IndicatorRules {
     }
 
     /**
-<<<<<<< HEAD
      * A → A+ 拆分守恒（AUTO_SUM 的数量型口径）：Σ A+ 五年总量 = A 五年总量，不等抛 40003；比率类和是否型跳过。
      */
     public static void requireAutoSumConservation(String statCaliber, String rollupMode,
                                                   BigDecimal aTotal, Collection<BigDecimal> aPlusTotals) {
         if (!"AUTO_SUM".equals(rollupMode) || isRatioCaliber(statCaliber) || "BOOLEAN".equals(statCaliber)) {
-=======
-     * A → A+ 拆分守恒（汇总方式 AUTO_SUM 且非比率类口径时）：Σ A+ 五年总量 = A 五年总量，不等抛 40003。
-     */
-    public static void requireAutoSumConservation(String statCaliber, String rollupMode,
-                                                  BigDecimal aTotal, Collection<BigDecimal> aPlusTotals) {
-        if (!"AUTO_SUM".equals(rollupMode) || isRatioCaliber(statCaliber)) {
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
             return;
         }
         if (aTotal == null) {

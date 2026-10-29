@@ -1,9 +1,5 @@
 import type { UnitRef, UserRef } from './api'
-<<<<<<< HEAD
 import type { CreateIndicatorRequest, IndicatorDetail, YearTarget } from './indicator'
-=======
-import type { YearTarget } from './indicator'
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 
 /** 分解矩阵行（一个执行单元）（API 16.3） */
 export interface AllocationRow {
@@ -43,7 +39,6 @@ export interface SaveAllocationRequest {
   }[]
 }
 
-<<<<<<< HEAD
 /** POST /plans/{planId}/indicators/{parentId}/decomposition 请求体 */
 export interface DecompositionRequest {
   indicator: Omit<CreateIndicatorRequest, 'level' | 'parentId'>
@@ -56,8 +51,6 @@ export interface DecompositionResult {
   allocation: Allocation
 }
 
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 /** POST /plans/{planId}/distribute 请求体 */
 export interface DistributeRequest {
   /** 为空时下发所有可下发的指标 */

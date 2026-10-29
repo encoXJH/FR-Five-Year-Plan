@@ -20,11 +20,7 @@ class ImportValidatorTest {
         ctx.existingCodes = Set.of("A09");
         ctx.duplicatedCodesInFile = Set.of();
         Map<String, Boolean> aQuantifiable = new HashMap<>();
-<<<<<<< HEAD
         aQuantifiable.put("A16", true);
-=======
-        aQuantifiable.put("A09", true);
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         aQuantifiable.put("A08", false);
         ctx.aQuantifiableByCode = aQuantifiable;
         ctx.validUsernames = Set.of("owner1", "owner2");
@@ -35,7 +31,6 @@ class ImportValidatorTest {
         ImportRowData row = new ImportRowData();
         row.rowNum = 2;
         row.level = "A";
-<<<<<<< HEAD
         row.code = "A16";
         row.name = "整校订单式人才培养人数。订单式人才培养包含订单班、冠名班、现代学徒制、现场工程师、企业新型学徒制、产业学院、工匠班、校企合作工作室、校企微专业等培养方式。逐年增长";
         row.nature = "发展性";
@@ -48,20 +43,6 @@ class ImportValidatorTest {
         row.totalTarget = "16290";
         row.ownerUsername = "owner1";
         row.yearTargets = years("2458", "2858", "3258", "3658", "4058");
-=======
-        row.code = "A01";
-        row.name = "新增省级及以上教学成果奖";
-        row.nature = "约束性";
-        row.measureType = "数值";
-        row.statCaliber = "增量累计型";
-        row.unitLabel = "项";
-        row.targetDirection = "越大越好";
-        row.rollupMode = "自动汇总";
-        row.quantifiable = "是";
-        row.totalTarget = "5";
-        row.ownerUsername = "owner1";
-        row.yearTargets = years("1", "1", "1", "1", "1");
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         return row;
     }
 
@@ -99,11 +80,7 @@ class ImportValidatorTest {
     @Test
     void 编号文件内重复() {
         ImportRowData.Context ctx = ctx();
-<<<<<<< HEAD
         ctx.duplicatedCodesInFile = Set.of("A16");
-=======
-        ctx.duplicatedCodesInFile = Set.of("A01");
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         assertTrue(hasError(ImportValidator.validate(validARow(), ctx), "文件内重复"));
     }
 
@@ -253,7 +230,6 @@ class ImportValidatorTest {
         ImportRowData row = new ImportRowData();
         row.rowNum = 3;
         row.level = "A+";
-<<<<<<< HEAD
         row.code = "A16-1";
         row.parentCode = "A16";
         row.name = "整校订单式人才培养人数。订单式人才培养包含订单班、冠名班、现代学徒制、现场工程师、企业新型学徒制、产业学院、工匠班、校企合作工作室、校企微专业等培养方式。逐年增长";
@@ -265,19 +241,6 @@ class ImportValidatorTest {
         row.totalTarget = "16290";
         row.ownerUsername = "owner1";
         row.yearTargets = years("2458", "2858", "3258", "3658", "4058");
-=======
-        row.code = "A09-1";
-        row.parentCode = "A09";
-        row.name = "新增国家级教学成果奖";
-        row.nature = "约束性";
-        row.measureType = "数值";
-        row.statCaliber = "增量累计型";
-        row.unitLabel = "项";
-        row.targetDirection = "越大越好";
-        row.totalTarget = "1";
-        row.ownerUsername = "owner1";
-        row.yearTargets = years("0", "1", "0", "0", "0");
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         return row;
     }
 

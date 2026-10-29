@@ -334,10 +334,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 - 下发、确认接收、提交填报、审核；
 - 发起调整、调整审批（`decision`）；
 - 导入确认、年度核算、五年核算、解锁；
-<<<<<<< HEAD
 - 一页式分解（新建 A+ 并保存 B 草稿）；
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 - 创建导出任务。
 
 规则：
@@ -772,10 +769,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | --- | --- | --- | --- |
 | GET | `/plans/{planId}/indicators` | 指标列表；`view=tree` 返回 A → A+ 树；可按 `level`、`isQuantifiable`、`ownerId`、`keyword` 过滤，不支持 S/方向过滤，响应不含 S 信息 | 已登录（按数据范围） |
 | POST | `/plans/{planId}/indicators` | 新增 A（带 `isQuantifiable`），或在可量化 A 下新增 A+（必须带 `parentId`）；不可量化 A 只校验基础字段 | `indicator:edit` |
-<<<<<<< HEAD
 | POST ⚡ | `/plans/{planId}/indicators/{parentId}/decomposition` | 一页式分解：请求 `{ indicator, rows }`，在一个事务中新建 A+、保存年度目标和 B 草稿，响应 `{ aPlus, allocation }`；任一步失败整体回滚，不定稿、不下发、不通知学院 | `indicator:edit` + `allocation:edit` + 负责人数据范围 |
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 | GET | `/indicators/{indicatorId}` | 指标详情（含量化指标的年度目标、下属 A+，以及 `bSummaries`）；不返回 S 信息 | 按数据范围 |
 | PATCH | `/indicators/{indicatorId}` | 修改指标（带 `version`）；不可量化 A 仅可修改名称、性质、说明、负责人，S 归属须走系统管理接口 | `indicator:edit` |
 | DELETE | `/indicators/{indicatorId}` | 删除（未下发时才可以） | `indicator:edit` |
@@ -784,11 +778,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | GET | `/plans/{planId}/indicators/import-template` | 下载 Excel 导入模板（含 `isQuantifiable`，不含 S 展示列；S 归属由系统管理维护） | `indicator:edit` |
 | POST | `/plans/{planId}/indicators/import-preview` | 上传 Excel，返回 `importId`、逐行解析结果和错误 | `indicator:edit` |
 | POST ⚡ | `/plans/{planId}/indicators/import-confirm` | 确认导入 `{ importId }` | `indicator:edit` |
-<<<<<<< HEAD
 | POST ⚡ | `/plans/{planId}/indicators/finalize` | 定稿：S 归属可选，不作为普通用户定稿门槛；可量化 A/A+ 校验量化字段及数量型拆分守恒，不可量化 A 跳过量化校验，BOOLEAN 不做数量求和 | `plan:manage` |
-=======
-| POST ⚡ | `/plans/{planId}/indicators/finalize` | 定稿：所有 A 必须归属 S；可量化 A/A+ 校验量化字段及拆分守恒，不可量化 A 跳过量化校验 | `plan:manage` |
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 
 > 非量化 A 的 `measureType`、`statCaliber`、`unit`、`targetDirection`、`rollupMode`、`baselineValue`、`totalTarget`、`yearTargets`、材料要求等量化字段均返回 `null`（数组按 3.2 返回 `[]`），不得用于分解、下发、填报、审核、核算或完成率计算。S 结构与 A 归属定稿后锁定，S 总负责人可在执行期更换。
 
@@ -798,11 +788,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | --- | --- | --- | --- |
 | GET | `/indicators/{indicatorId}/allocation` | 仅获取 A+ 的分解矩阵：合格执行单元 × 年度、历史冻结目标及合计校验结果；其他层级返回 40006 | `allocation:edit` |
 | PUT | `/indicators/{indicatorId}/allocation` | 保存非历史 B 草稿，允许合计不一致；仅接受启用且 `isBAssignable=true` 的单元，不得修改历史冻结目标 | `allocation:edit` |
-<<<<<<< HEAD
 | POST ⚡ | `/plans/{planId}/distribute` | 仅下发 A+ 下的非历史 B；`indicatorIds` 为空时处理全部可下发 A+，数量型强制校验“历史冻结目标 + 非历史目标 = A+ 目标”（BOOLEAN 与比率类不求和），并再次校验单元资格 | `task:distribute` |
-=======
-| POST ⚡ | `/plans/{planId}/distribute` | 仅下发 A+ 下的非历史 B；`indicatorIds` 为空时处理全部可下发 A+，强制校验“历史冻结目标 + 非历史目标 = A+ 目标”并再次校验单元资格 | `task:distribute` |
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 | POST ⚡ | `/plans/{planId}/years/{year}/activate` | 激活非历史任务年度，激活后才能填报；历史任务跳过且不生成待办或提醒 | `settlement:manage` |
 | GET | `/tasks` | B 任务列表（可按 `unitId`、`indicatorId`、`year`、`status`、`yearStatus`、`isHistorical` 过滤），每项返回 `isHistorical` | 按数据范围 |
 | GET | `/tasks/{taskId}` | B 任务详情（各年度目标、完成值、状态、`isHistorical`）；历史任务及既有记录只读可见 | 按数据范围 |

@@ -5,10 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CircleCheck, Warning } from '@element-plus/icons-vue'
 import StatusTag from '@/components/StatusTag.vue'
-<<<<<<< HEAD
 import ResponsiveRecordView from '@/components/ResponsiveRecordView.vue'
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 import DistributePreviewDialog from './components/DistributePreviewDialog.vue'
 import type { PreviewRow } from './components/DistributePreviewDialog.vue'
 import { getPlan, listPlans } from '@/api/plan'
@@ -158,7 +155,6 @@ const liveSummary = computed(() =>
 const balanced = computed(() =>
   summable.value ? isSummaryBalanced(liveSummary.value) : true,
 )
-<<<<<<< HEAD
 const allocatedFiveYear = computed(() =>
   rows.value.reduce((sum, row) => sum + rowTotalTarget(row.targets), 0),
 )
@@ -167,8 +163,6 @@ const fiveYearDiff = computed(() =>
     ? allocatedFiveYear.value - current.value.totalTarget
     : null,
 )
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 const missingOwners = computed(() => rowsMissingOwner(rows.value))
 const hasAnyTarget = computed(() =>
   rows.value.some((row) => !row.isHistorical && rowHasTarget(row.targets)),
@@ -552,11 +546,7 @@ async function handleDistribute(): Promise<void> {
       distributeKey.value,
     )
     distributeKey.value = newIdempotencyKey()
-<<<<<<< HEAD
     ElMessage.success(`「${current.value.code}」已正式交给学院，B 任务已生成并通知负责人`)
-=======
-    ElMessage.success(`「${current.value.code}」下发成功，已生成 B 任务`)
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     previewVisible.value = false
     await loadTree()
     await selectIndicator(selectedId.value, true)
@@ -587,19 +577,11 @@ async function handleBatchDistribute(): Promise<void> {
   }
   try {
     await ElMessageBox.confirm(
-<<<<<<< HEAD
       `将把以下 ${ready.length} 个已平衡的指标正式交给学院：${ready
         .map((item) => item.code)
         .join('、')}。确认后生成 B 任务并通知学院负责人，任务编号与负责人不可修改。`,
       '批量正式交给学院',
       { confirmButtonText: '确认交给学院', cancelButtonText: '取消' },
-=======
-      `将批量下发以下 ${ready.length} 个已平衡的指标：${ready
-        .map((item) => item.code)
-        .join('、')}。下发后生成 B 任务，任务编号与负责人不可修改。确认下发？`,
-      '批量下发已平衡的指标',
-      { confirmButtonText: '确认下发', cancelButtonText: '取消' },
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     )
   } catch {
     return
@@ -612,11 +594,7 @@ async function handleBatchDistribute(): Promise<void> {
       batchDistributeKey.value,
     )
     batchDistributeKey.value = newIdempotencyKey()
-<<<<<<< HEAD
     ElMessage.success(`已将 ${ready.length} 个指标正式交给学院`)
-=======
-    ElMessage.success(`已批量下发 ${ready.length} 个指标`)
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     await loadTree()
     if (selectedId.value) {
       await selectIndicator(selectedId.value, true)
@@ -651,14 +629,10 @@ function yearHeaderClass(year: number): string {
 
 /** 顶部 alert 点击年份：横向滚动到该年度列并短暂高亮（UI 规范 10.1-3） */
 function locateYear(year: number): void {
-<<<<<<< HEAD
   const selector = window.innerWidth <= 768
     ? `.matrix-card .mobile-year-col-${year}`
     : `.matrix-card .year-col-${year}`
   const el = document.querySelector(selector)
-=======
-  const el = document.querySelector(`.matrix-card .year-col-${year}`)
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   if (!(el instanceof HTMLElement)) return
   el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
   el.classList.add('col-highlight')
@@ -676,10 +650,6 @@ function summaryMethod({ columns }: { columns: SummaryColumn[] }): (string | VNo
   const diffRow: (string | VNode)[] = []
   const caliber = current.value?.statCaliber ?? 'INCREMENT'
   const yearTotal = sumYearTargets(current.value?.yearTargets)
-<<<<<<< HEAD
-=======
-  const allocatedFiveYear = rows.value.reduce((sum, row) => sum + rowTotalTarget(row.targets), 0)
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   columns.forEach((column, index) => {
     const yearIdx = index - 2
     if (index === 0) {
@@ -695,19 +665,9 @@ function summaryMethod({ columns }: { columns: SummaryColumn[] }): (string | VNo
       return
     }
     if (column.property === '__five__') {
-<<<<<<< HEAD
       totalRow.push(formatNumber(allocatedFiveYear.value))
       targetRow.push(formatTargetValue(current.value?.totalTarget ?? yearTotal, caliber))
       diffRow.push(diffCell(fiveYearDiff.value))
-=======
-      totalRow.push(formatNumber(allocatedFiveYear))
-      targetRow.push(formatTargetValue(current.value?.totalTarget ?? yearTotal, caliber))
-      const diff =
-        current.value?.totalTarget !== null && current.value?.totalTarget !== undefined
-          ? allocatedFiveYear - current.value.totalTarget
-          : null
-      diffRow.push(diffCell(diff))
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       return
     }
     const year = years.value[yearIdx]
@@ -807,20 +767,12 @@ onMounted(() => {
           :disabled="plan?.status === 'ARCHIVED'"
           @click="handleBatchDistribute"
         >
-<<<<<<< HEAD
           批量正式交给学院
-=======
-          批量下发已平衡的指标
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         </el-button>
         <el-tooltip :disabled="distributeEnabled" :content="distributeTooltip" placement="top">
           <span>
             <el-button type="primary" :disabled="!distributeEnabled" @click="openPreview">
-<<<<<<< HEAD
               正式交给学院
-=======
-              下发预览
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
             </el-button>
           </span>
         </el-tooltip>
@@ -943,13 +895,9 @@ onMounted(() => {
         </template>
 
         <el-card shadow="never" class="matrix-card">
-<<<<<<< HEAD
           <ResponsiveRecordView class="matrix-records">
             <template #table>
               <el-table
-=======
-          <el-table
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
             :data="rows"
             border
             size="small"
@@ -1065,7 +1013,6 @@ onMounted(() => {
             <template #empty>
               <el-empty :image-size="80" description="暂无分解行，请在下方新增执行单元" />
             </template>
-<<<<<<< HEAD
               </el-table>
             </template>
             <template #cards>
@@ -1203,9 +1150,6 @@ onMounted(() => {
               </div>
             </template>
           </ResponsiveRecordView>
-=======
-          </el-table>
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 
           <div v-if="!readOnly" class="add-row-bar">
             <el-select
@@ -1240,11 +1184,7 @@ onMounted(() => {
             <el-tooltip :disabled="distributeEnabled" :content="distributeTooltip" placement="top">
               <span>
                 <el-button type="primary" :disabled="!distributeEnabled" @click="openPreview">
-<<<<<<< HEAD
                   正式交给学院
-=======
-                  下发
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
                 </el-button>
               </span>
             </el-tooltip>
@@ -1396,7 +1336,6 @@ onMounted(() => {
 }
 
 .matrix-card {
-<<<<<<< HEAD
   min-width: 0;
   border-radius: var(--radius-card);
 }
@@ -1530,11 +1469,6 @@ onMounted(() => {
   font-variant-numeric: tabular-nums;
 }
 
-=======
-  border-radius: var(--radius-card);
-}
-
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 .mono {
   font-family: var(--app-font-mono);
 }
@@ -1642,7 +1576,6 @@ onMounted(() => {
 :deep(.diff-na) {
   color: var(--el-text-color-placeholder);
 }
-<<<<<<< HEAD
 
 @media (max-width: 900px) {
   .allocation-body {
@@ -1748,6 +1681,4 @@ onMounted(() => {
     gap: var(--space-1);
   }
 }
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 </style>

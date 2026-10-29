@@ -330,11 +330,7 @@ onMounted(() => {
 </script>
 
 <template>
-<<<<<<< HEAD
   <div class="workbench-page">
-=======
-  <div>
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     <div class="page-header">
       <div>
         <h1 class="page-title">{{ isAdminView ? '任务代填' : `${unitName} · 学院工作台` }}</h1>
@@ -397,22 +393,14 @@ onMounted(() => {
     </div>
 
     <el-card shadow="never" class="filter-card">
-<<<<<<< HEAD
       <el-form inline class="workbench-filter" @submit.prevent>
-=======
-      <el-form inline @submit.prevent>
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         <el-form-item v-if="isAdminView" label="执行单元">
           <el-select
             v-model="filters.unitId"
             clearable
             filterable
             placeholder="全部单元"
-<<<<<<< HEAD
             class="unit-select"
-=======
-            style="width: 220px"
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
             @change="applyFilters"
           >
             <el-option
@@ -428,11 +416,7 @@ onMounted(() => {
             v-model="filters.year"
             clearable
             placeholder="全部年份"
-<<<<<<< HEAD
             class="year-select"
-=======
-            style="width: 120px"
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
             @change="applyFilters"
           >
             <el-option v-for="year in yearOptions" :key="year" :label="`${year} 年`" :value="year" />
@@ -618,14 +602,11 @@ onMounted(() => {
 </template>
 
 <style scoped>
-<<<<<<< HEAD
 .workbench-page {
   min-width: 0;
   max-width: 100%;
 }
 
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 .page-alert {
   margin-bottom: var(--space-4);
 }
@@ -642,10 +623,7 @@ onMounted(() => {
   font-size: 20px;
   font-weight: 600;
   line-height: 28px;
-<<<<<<< HEAD
   overflow-wrap: anywhere;
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 }
 
 .page-subtitle {
@@ -656,20 +634,13 @@ onMounted(() => {
 
 .kpi-row {
   display: grid;
-<<<<<<< HEAD
   grid-template-columns: repeat(7, minmax(0, 1fr));
-=======
-  grid-template-columns: repeat(6, 1fr);
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   gap: var(--space-4);
   margin-bottom: var(--space-4);
 }
 
 .kpi-card {
-<<<<<<< HEAD
   min-width: 0;
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   border-radius: var(--radius-card);
   text-align: center;
 }
@@ -688,15 +659,11 @@ onMounted(() => {
 }
 
 .filter-card {
-<<<<<<< HEAD
   min-width: 0;
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   margin-bottom: var(--space-4);
   border-radius: var(--radius-card);
 }
 
-<<<<<<< HEAD
 .workbench-filter {
   display: flex;
   flex-wrap: wrap;
@@ -718,8 +685,6 @@ onMounted(() => {
   max-width: 100%;
 }
 
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 .mono {
   font-family: var(--app-font-mono);
 }
@@ -746,7 +711,6 @@ onMounted(() => {
 .pager {
   display: flex;
   justify-content: flex-end;
-<<<<<<< HEAD
   min-width: 0;
   margin-top: var(--space-4);
 }
@@ -760,17 +724,11 @@ onMounted(() => {
   white-space: normal;
 }
 
-=======
-  margin-top: var(--space-4);
-}
-
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 /* 移动端任务卡片：默认隐藏，仅 ≤768px 显示 */
 .task-cards {
   display: none;
 }
 
-<<<<<<< HEAD
 @media (max-width: 1280px) {
   .kpi-row {
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -781,12 +739,6 @@ onMounted(() => {
 @media (max-width: 768px) {
   .kpi-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-=======
-/* 移动端（≤768px，UI 规范 5.2）：KPI 两列三行、表格改卡片单列堆叠 */
-@media (max-width: 768px) {
-  .kpi-row {
-    grid-template-columns: repeat(3, 1fr);
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     gap: var(--space-2);
   }
 
@@ -868,7 +820,6 @@ onMounted(() => {
     justify-content: center;
   }
 
-<<<<<<< HEAD
   .pager :deep(.el-pagination) {
     justify-content: center;
   }
@@ -915,11 +866,6 @@ onMounted(() => {
 
   .kpi-label {
     overflow-wrap: anywhere;
-=======
-  .pager :deep(.el-pagination__sizes),
-  .pager :deep(.el-pagination__jump) {
-    display: none;
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   }
 }
 </style>

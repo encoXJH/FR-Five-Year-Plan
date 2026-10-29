@@ -89,7 +89,7 @@ async function checkWizard(page, viewport) {
   const geometry = await page.evaluate(() => {
     const drawer = document.querySelector('.decomposition-wizard')
     const save = Array.from(drawer?.querySelectorAll('button') ?? []).find((button) =>
-      button.textContent?.includes('保存分工'),
+      button.textContent?.includes('保存') && /保存( A\+|分工)/.test(button.textContent),
     )
     const drawerRect = drawer?.getBoundingClientRect()
     const saveRect = save?.getBoundingClientRect()

@@ -21,3 +21,6 @@ backups/
 frontend/tests/artifacts/
 frontend/test-results/
 frontend/playwright-report/
+
+# 演示与 Excel 导入填充数据（不提交）
+db/demo/

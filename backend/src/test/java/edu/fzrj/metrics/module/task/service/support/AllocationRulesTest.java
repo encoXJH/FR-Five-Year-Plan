@@ -36,17 +36,10 @@ class AllocationRulesTest {
     }
 
     @Test
-<<<<<<< HEAD
     void 求和口径_INCREMENT_STOCK需要求和() {
         assertTrue(AllocationRules.requiresAllocationSum("INCREMENT"));
         assertTrue(AllocationRules.requiresAllocationSum("STOCK"));
         assertFalse(AllocationRules.requiresAllocationSum("BOOLEAN"));
-=======
-    void 求和口径_INCREMENT_STOCK_BOOLEAN需要求和() {
-        assertTrue(AllocationRules.requiresAllocationSum("INCREMENT"));
-        assertTrue(AllocationRules.requiresAllocationSum("STOCK"));
-        assertTrue(AllocationRules.requiresAllocationSum("BOOLEAN"));
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     }
 
     @Test
@@ -119,25 +112,15 @@ class AllocationRulesTest {
     }
 
     @Test
-<<<<<<< HEAD
     void BOOLEAN完成年_子任务可分别设置年份不求和() {
-=======
-    void BOOLEAN完成年_分解落在不同年份不平衡() {
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         Map<Integer, BigDecimal> indicator = new HashMap<>();
         indicator.put(2027, BigDecimal.ONE);
         Map<Integer, BigDecimal> allocated = new HashMap<>();
         allocated.put(2028, BigDecimal.ONE);
         List<TaskDtos.SummaryItem> summary = AllocationRules.buildSummary(YEARS, indicator, allocated);
-<<<<<<< HEAD
         assertTrue(AllocationRules.isBalanced("BOOLEAN", summary));
         List<FieldError> errors = AllocationRules.balanceErrors("A03", "BOOLEAN", summary);
         assertTrue(errors.isEmpty());
-=======
-        assertFalse(AllocationRules.isBalanced("BOOLEAN", summary));
-        List<FieldError> errors = AllocationRules.balanceErrors("A03", "BOOLEAN", summary);
-        assertEquals(2, errors.size());
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     }
 
     @Test

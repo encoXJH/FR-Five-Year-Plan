@@ -4,13 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { ArrowDown } from '@element-plus/icons-vue'
 import StatusTag from '@/components/StatusTag.vue'
-<<<<<<< HEAD
 import ResponsiveRecordView from '@/components/ResponsiveRecordView.vue'
 import IndicatorEditDrawer from './components/IndicatorEditDrawer.vue'
 import DecompositionWizardDrawer from './components/DecompositionWizardDrawer.vue'
-=======
-import IndicatorEditDrawer from './components/IndicatorEditDrawer.vue'
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 import ImportDialog from './components/ImportDialog.vue'
 import RollupBadge from './components/RollupBadge.vue'
 import { getPlan, listPlans } from '@/api/plan'
@@ -19,10 +15,7 @@ import { createExport, pollExport } from '@/api/export'
 import { getUserOptions } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 import { ApiError } from '@/utils/request'
-<<<<<<< HEAD
 import { enumLabel } from '@/utils/enumLabels'
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { booleanPlanYear, formatTargetValue, hasQuantitativeFields, yearTargetMap } from '@/utils/indicator'
 import { formatDateTime } from '@/utils/format'
@@ -109,7 +102,22 @@ function applyFilters(): void {
   })
 }
 
+/** 关键字输入防抖自动检索（无需点击查询按钮） */
+let keywordTimer: ReturnType<typeof setTimeout> | null = null
+
+function onKeywordInput(): void {
+  if (keywordTimer !== null) clearTimeout(keywordTimer)
+  keywordTimer = setTimeout(() => {
+    keywordTimer = null
+    applyFilters()
+  }, 300)
+}
+
 function resetFilters(): void {
+  if (keywordTimer !== null) {
+    clearTimeout(keywordTimer)
+    keywordTimer = null
+  }
   filters.level = ''
   filters.subjectType = ''
   filters.nature = ''
@@ -148,11 +156,7 @@ type IndicatorTable = {
 
 const tableRef = ref<IndicatorTable | null>(null)
 const expandAll = ref(false)
-<<<<<<< HEAD
 const expandedIds = reactive(new Set<string>())
-=======
-const expandedIds = new Set<string>()
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 
 const childrenById = computed<Record<string, IndicatorTreeNode[]>>(() =>
   Object.fromEntries(visibleTree.value.map((node) => [node.id, node.children])),
@@ -174,15 +178,11 @@ function loadChildren(
   resolve(childrenById.value[row.id] ?? [])
 }
 
-<<<<<<< HEAD
 function indicatorRowClass({ row }: { row: IndicatorTreeNode }): string {
   return row.level === 'A_PLUS' ? 'indicator-row-a-plus' : 'indicator-row-a-collapsed'
 }
 
 function handleExpandChange(row: { id: string }, expanded: boolean): void {
-=======
-function handleExpandChange(row: LazyIndicatorNode, expanded: boolean): void {
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   if (expanded) expandedIds.add(row.id)
   else expandedIds.delete(row.id)
   expandAll.value = lazyTree.value.length > 0 && lazyTree.value.every((node) => !node.hasChildren || expandedIds.has(node.id))
@@ -210,7 +210,6 @@ async function syncExpandedNodes(): Promise<void> {
   expandAll.value = lazyTree.value.length > 0 && lazyTree.value.every((node) => !node.hasChildren || expandedIds.has(node.id))
 }
 
-<<<<<<< HEAD
 const mobileRows = computed<Array<{ node: IndicatorTreeNode; depth: number }>>(() => {
   const result: Array<{ node: IndicatorTreeNode; depth: number }> = []
   for (const node of visibleTree.value) {
@@ -228,8 +227,6 @@ function toggleMobileExpansion(row: IndicatorTreeNode): void {
   handleExpandChange(row, expanded)
 }
 
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 /** 底部统计：A 类按性质计数 */
 const aRows = computed(() => tree.value.filter((node) => node.level === 'A'))
 const aPlusCount = computed(() => tree.value.reduce((sum, node) => sum + node.children.length, 0))
@@ -277,12 +274,12 @@ function openCreateA(): void {
   drawerVisible.value = true
 }
 
-<<<<<<< HEAD
 const decompositionVisible = ref(false)
 const decompositionParent = ref<IndicatorTreeNode | null>(null)
 const decompositionAPlusId = ref<string | null>(null)
+const decompositionMode = ref<'create' | 'allocate'>('create')
 
-function openDecomposition(row: IndicatorTreeNode): void {
+function openDecomposition(row: IndicatorTreeNode, mode: 'create' | 'allocate'): void {
   if (row.level === 'A_PLUS') {
     if (row.status !== 'DRAFT') {
       goAllocation(row)
@@ -298,6 +295,7 @@ function openDecomposition(row: IndicatorTreeNode): void {
   } else {
     return
   }
+  decompositionMode.value = mode
   decompositionVisible.value = true
 }
 
@@ -309,13 +307,6 @@ async function onDecompositionSaved(payload: { parentId: string }): Promise<void
     tableRef.value?.toggleRowExpansion(parent, true)
     await nextTick()
   }
-=======
-function openCreateAPlus(parent: Indicator): void {
-  if (parent.level !== 'A' || !parent.isQuantifiable) return
-  editingIndicator.value = null
-  presetParentId.value = parent.id
-  drawerVisible.value = true
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 }
 
 function openEdit(row: Indicator): void {
@@ -338,7 +329,6 @@ async function onSaved(): Promise<void> {
 }
 
 // ---------- 行操作 ----------
-<<<<<<< HEAD
 const activeRowActionsId = ref<string | null>(null)
 const rowActionsDropdownRef = ref<{ handleOpen: () => void } | null>(null)
 
@@ -352,8 +342,6 @@ function handleRowActionsVisible(visible: boolean): void {
   if (!visible) activeRowActionsId.value = null
 }
 
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 function goDetail(row: Indicator): void {
   router.push(`/indicators/${row.id}`)
 }
@@ -443,17 +431,10 @@ const FINALIZE_CHECKLIST = [
 
 async function handleFinalize(): Promise<void> {
   await ElMessageBox.confirm(
-<<<<<<< HEAD
     `<p><strong>此操作会校验并锁定整个计划的全部指标，不只是当前这一条。</strong></p><p>定稿将逐项校验：</p><ul style="margin:4px 0 8px;padding-left:20px;">${FINALIZE_CHECKLIST.map(
       (item) => `<li>${item}</li>`,
     ).join('')}</ul><p>定稿后修改目标需发起「目标调整」。确认全部指标已设置完成？</p>`,
     '全部指标设置完成（定稿）',
-=======
-    `<p>定稿将逐项校验：</p><ul style="margin:4px 0 8px;padding-left:20px;">${FINALIZE_CHECKLIST.map(
-      (item) => `<li>${item}</li>`,
-    ).join('')}</ul><p>定稿后修改目标需发起「目标调整」。确认定稿？</p>`,
-    '指标体系定稿',
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     {
       confirmButtonText: '确认定稿',
       cancelButtonText: '取消',
@@ -467,19 +448,11 @@ async function handleFinalize(): Promise<void> {
     ElMessage.success('指标体系已定稿')
     await loadAll()
   } catch (error) {
-<<<<<<< HEAD
     if (error instanceof ApiError && (error.code === 10001 || error.code === 40003 || error.code === 40002)) {
       const details = error.fieldErrors.map((item) => item.message)
       ElMessageBox.alert(
         details.length > 0 ? details.join('\n') : error.message,
         `定稿前还需完成（${error.code}）`,
-=======
-    if (error instanceof ApiError && (error.code === 40003 || error.code === 40002)) {
-      const details = error.fieldErrors.map((item) => `${item.field}：${item.message}`)
-      ElMessageBox.alert(
-        details.length > 0 ? details.join('\n') : error.message,
-        `定稿校验未通过（${error.code}）`,
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         { confirmButtonText: '我知道了', type: 'error' },
       )
     }
@@ -563,11 +536,7 @@ onMounted(() => {
               :loading="finalizing"
               @click="handleFinalize"
             >
-<<<<<<< HEAD
               全部指标设置完成（定稿）
-=======
-              定稿
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
             </el-button>
           </span>
         </el-tooltip>
@@ -575,11 +544,7 @@ onMounted(() => {
     </div>
 
     <el-card shadow="never" class="filter-card">
-<<<<<<< HEAD
       <el-form inline class="filter-form" @submit.prevent>
-=======
-      <el-form inline @submit.prevent>
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         <el-form-item label="主体">
           <el-select v-model="filters.subjectType" clearable placeholder="全部" style="width: 120px">
             <el-option label="校级" value="SCHOOL" />
@@ -587,7 +552,13 @@ onMounted(() => {
           </el-select>
         </el-form-item>
         <el-form-item label="层级">
-          <el-select v-model="filters.level" clearable placeholder="全部" style="width: 120px">
+          <el-select
+            v-model="filters.level"
+            clearable
+            placeholder="全部"
+            style="width: 120px"
+            @change="applyFilters"
+          >
             <el-option label="A 类" value="A" />
             <el-option label="A+ 类" value="A_PLUS" />
           </el-select>
@@ -606,6 +577,7 @@ onMounted(() => {
             placeholder="全部"
             style="width: 180px"
             :disabled="filters.onlyMine"
+            @change="applyFilters"
           >
             <el-option
               v-for="user in userOptions"
@@ -621,14 +593,13 @@ onMounted(() => {
             clearable
             placeholder="编号 / 名称"
             style="width: 200px"
-            @keyup.enter="applyFilters"
+            @input="onKeywordInput"
           />
         </el-form-item>
         <el-form-item>
           <el-checkbox v-model="filters.onlyMine" @change="applyFilters">只看我负责的</el-checkbox>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="applyFilters">查询</el-button>
           <el-button @click="resetFilters">重置</el-button>
         </el-form-item>
       </el-form>
@@ -640,7 +611,6 @@ onMounted(() => {
           {{ expandAll ? '全部收起' : '全部展开' }}
         </el-button>
       </div>
-<<<<<<< HEAD
       <ResponsiveRecordView class="indicator-records">
         <template #table>
           <el-table
@@ -648,12 +618,6 @@ onMounted(() => {
         :data="lazyTree"
         row-key="id"
         :row-class-name="indicatorRowClass"
-=======
-      <el-table
-        ref="tableRef"
-        :data="lazyTree"
-        row-key="id"
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
         border
         size="small"
         max-height="calc(100vh - 330px)"
@@ -726,20 +690,15 @@ onMounted(() => {
             <StatusTag kind="IndicatorStatus" :value="row.status" />
           </template>
         </el-table-column>
-<<<<<<< HEAD
         <el-table-column label="操作" width="258" fixed="right" align="center">
-=======
-        <el-table-column label="操作" width="148" fixed="right" align="center">
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
           <template #default="{ row }">
             <div class="row-actions">
               <el-button link type="primary" @click="goDetail(row)">详情</el-button>
               <el-button
-<<<<<<< HEAD
                 v-if="canEdit && canAllocate && !readOnly && row.level === 'A' && row.isQuantifiable"
                 type="primary"
                 size="small"
-                @click="openDecomposition(row)"
+                @click="openDecomposition(row, 'create')"
               >
                 分解任务
               </el-button>
@@ -748,7 +707,7 @@ onMounted(() => {
                 type="primary"
                 size="small"
                 plain
-                @click="openDecomposition(row)"
+                @click="openDecomposition(row, 'allocate')"
               >
                 {{ row.status === 'DRAFT' ? '继续分工' : '分工管理' }}
               </el-button>
@@ -758,16 +717,6 @@ onMounted(() => {
                 trigger="click"
                 @visible-change="handleRowActionsVisible"
               >
-=======
-                v-if="canAllocate && allocatableRow(row)"
-                link
-                type="primary"
-                @click="goAllocation(row)"
-              >
-                分解
-              </el-button>
-              <el-dropdown trigger="click">
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
                 <el-button link type="primary">
                   更多<el-icon :size="12"><ArrowDown /></el-icon>
                 </el-button>
@@ -783,15 +732,6 @@ onMounted(() => {
                       年度目标
                     </el-dropdown-item>
                     <el-dropdown-item
-<<<<<<< HEAD
-=======
-                      v-if="canEdit && !readOnly && row.level === 'A' && row.isQuantifiable"
-                      @click="openCreateAPlus(row)"
-                    >
-                      拆出 A+
-                    </el-dropdown-item>
-                    <el-dropdown-item
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
                       v-if="canEdit && !readOnly"
                       class="danger-item"
                       @click="handleDelete(row)"
@@ -801,12 +741,9 @@ onMounted(() => {
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
-<<<<<<< HEAD
               <el-button v-else link type="primary" @click="openRowActions(row.id)">
                 更多<el-icon :size="12"><ArrowDown /></el-icon>
               </el-button>
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
             </div>
           </template>
         </el-table-column>
@@ -818,7 +755,6 @@ onMounted(() => {
             </template>
           </el-empty>
         </template>
-<<<<<<< HEAD
           </el-table>
         </template>
         <template #cards>
@@ -927,7 +863,7 @@ onMounted(() => {
                 <el-button
                   v-if="canEdit && canAllocate && !readOnly && node.level === 'A' && node.isQuantifiable"
                   type="primary"
-                  @click="openDecomposition(node)"
+                  @click="openDecomposition(node, 'create')"
                 >
                   分解任务
                 </el-button>
@@ -935,7 +871,7 @@ onMounted(() => {
                   v-if="canAllocate && allocatableRow(node)"
                   type="primary"
                   plain
-                  @click="openDecomposition(node)"
+                  @click="openDecomposition(node, 'allocate')"
                 >
                   {{ node.status === 'DRAFT' ? '继续分工' : '分工管理' }}
                 </el-button>
@@ -978,9 +914,6 @@ onMounted(() => {
           </div>
         </template>
       </ResponsiveRecordView>
-=======
-      </el-table>
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
       <div class="table-footer">
         共 A 类 {{ aRows.length }} 条、A+ 类 {{ aPlusCount }} 条；约束性 {{ aConstraintCount }} /
         发展性 {{ aDevelopmentCount }}
@@ -997,7 +930,6 @@ onMounted(() => {
       @saved="onSaved"
     />
 
-<<<<<<< HEAD
     <DecompositionWizardDrawer
       v-model="decompositionVisible"
       :plan-id="planId"
@@ -1005,11 +937,10 @@ onMounted(() => {
       :initial-a-plus-id="decompositionAPlusId"
       :allow-create="canEdit && !readOnly"
       :years="years"
+      :mode="decompositionMode"
       @saved="onDecompositionSaved"
     />
 
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
     <ImportDialog v-model="importVisible" :plan-id="planId" @imported="loadTree" />
   </div>
 </template>
@@ -1041,10 +972,7 @@ onMounted(() => {
 
 .header-actions {
   display: flex;
-<<<<<<< HEAD
   flex-wrap: wrap;
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   gap: var(--space-2);
 }
 
@@ -1097,18 +1025,14 @@ onMounted(() => {
   padding: 0;
 }
 
-<<<<<<< HEAD
 .row-actions :deep(.el-button--small) {
   padding: 0 10px;
 }
 
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 .danger-text {
   color: var(--el-color-danger);
 }
 
-<<<<<<< HEAD
 .indicator-records,
 .indicator-card-list,
 .indicator-card-heading {
@@ -1248,14 +1172,11 @@ onMounted(() => {
   margin: 0;
 }
 
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 .table-footer {
   margin-top: var(--space-3);
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
-<<<<<<< HEAD
 
 @media (max-width: 768px) {
   .page-header {
@@ -1327,6 +1248,4 @@ onMounted(() => {
     margin-left: var(--space-2);
   }
 }
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 </style>

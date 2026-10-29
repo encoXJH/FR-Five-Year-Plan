@@ -1,11 +1,8 @@
 import { http } from '@/utils/request'
 import type {
   Allocation,
-<<<<<<< HEAD
   DecompositionRequest,
   DecompositionResult,
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   DistributeRequest,
   DistributeResult,
   SaveAllocationRequest,
@@ -23,7 +20,6 @@ export function saveAllocation(
   return http.put(`/indicators/${indicatorId}/allocation`, data, { silent })
 }
 
-<<<<<<< HEAD
 export function decomposeIndicator(
   planId: string,
   parentId: string,
@@ -35,8 +31,6 @@ export function decomposeIndicator(
   })
 }
 
-=======
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
 export function distributePlan(
   planId: string,
   data: DistributeRequest,

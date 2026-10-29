@@ -8,13 +8,7 @@ defineProps<{
 </script>
 
 <template>
-<<<<<<< HEAD
   <span v-if="mode === 'AUTO_SUM'" class="rollup-sigma" title="自动汇总 = A+ 之和">Σ</span>
-=======
-  <el-tooltip v-if="mode === 'AUTO_SUM'" content="自动汇总 = A+ 之和" placement="top">
-    <span class="rollup-sigma">Σ</span>
-  </el-tooltip>
->>>>>>> fe5ddcd2a9c737aa5a2faaeb19f4cef3e55b9e1d
   <el-tag v-else size="small" effect="plain" class="rollup-manual">认定</el-tag>
 </template>
 
