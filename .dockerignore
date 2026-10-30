@@ -1,0 +1,11 @@
+.git
+.trae
+frontend/node_modules
+frontend/dist
+backend/platform.db
+backend/storage
+backend/.venv
+backend/.pytest_cache
+backend/tests
+**/__pycache__
+*.pyc

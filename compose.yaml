@@ -1,0 +1,19 @@
+services:
+  platform:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENVIRONMENT: production
+      APP_JWT_SECRET: ${APP_JWT_SECRET:?Set APP_JWT_SECRET before starting}
+      APP_COOKIE_SECURE: ${APP_COOKIE_SECURE:-false}
+      APP_DATABASE_URL: ${APP_DATABASE_URL:-sqlite:////data/platform.db}
+      APP_STORAGE_DIR: /data/storage
+    volumes:
+      - platform-data:/data
+    restart: unless-stopped
+
+volumes:
+  platform-data:
