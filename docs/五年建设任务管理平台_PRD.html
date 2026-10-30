@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="基于建设目标量化清单与任务说明编制的五年建设任务管理平台产品需求文档">
+  <title>五年建设任务管理平台｜产品需求文档 V1.0</title>
+  <style>
+    :root {
+      --ink: #17233c;
+      --muted: #647087;
+      --navy: #132c4e;
+      --blue: #246bfd;
+      --blue-soft: #edf4ff;
+      --teal: #087e75;
+      --teal-soft: #eaf8f5;
+      --amber: #9b5d00;
+      --amber-soft: #fff6df;
+      --red: #b84040;
+      --red-soft: #fff0ef;
+      --line: #dfe5ee;
+      --surface: #ffffff;
+      --canvas: #f4f6fa;
+      --code: #eef1f6;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.75;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    .layout { display: grid; grid-template-columns: 258px minmax(0, 1fr); min-height: 100vh; }
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 28px 20px;
+      color: #dce8f8;
+      background: var(--navy);
+      z-index: 10;
+    }
+    .brand { padding: 0 10px 22px; border-bottom: 1px solid rgba(255,255,255,.15); }
+    .brand-kicker { color: #8fb6eb; font-size: 11px; letter-spacing: 2px; font-weight: 700; }
+    .brand-title { margin-top: 8px; color: #fff; font-size: 20px; line-height: 1.45; font-weight: 700; }
+    .brand-version { margin-top: 8px; color: #a9bad0; font-size: 12px; }
+    .nav { margin-top: 20px; }
+    .nav a {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      padding: 8px 10px;
+      margin: 2px 0;
+      border-radius: 7px;
+      color: #c8d5e6;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .nav a:hover { color: #fff; background: rgba(255,255,255,.08); }
+    .nav-num { width: 20px; color: #729bca; font-variant-numeric: tabular-nums; }
+    .sidebar-note { margin: 24px 10px 0; color: #8fa5bf; font-size: 11px; line-height: 1.7; }
+    main { min-width: 0; }
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 58px 64px 48px;
+      color: #fff;
+      background: linear-gradient(125deg, #17395f 0%, #1f568a 62%, #167f82 130%);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -80px;
+      top: -140px;
+      width: 420px;
+      height: 420px;
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 50%;
+      box-shadow: 0 0 0 55px rgba(255,255,255,.035), 0 0 0 110px rgba(255,255,255,.025);
+    }
+    .eyebrow { position: relative; z-index: 1; color: #a8d2f5; font-size: 12px; font-weight: 700; letter-spacing: 2px; }
+    h1 { position: relative; z-index: 1; max-width: 800px; margin: 13px 0 12px; font-size: 38px; line-height: 1.3; letter-spacing: -.5px; }
+    .hero-sub { position: relative; z-index: 1; max-width: 850px; margin: 0; color: #d9e7f4; font-size: 16px; }
+    .hero-tags { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 25px; }
+    .hero-tag { padding: 4px 11px; border: 1px solid rgba(255,255,255,.25); border-radius: 20px; color: #eaf4ff; background: rgba(255,255,255,.07); font-size: 12px; }
+    .doc-meta { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; margin-top: 35px; padding-top: 22px; border-top: 1px solid rgba(255,255,255,.18); }
+    .meta-label { color: #9db7d0; font-size: 11px; }
+    .meta-value { margin-top: 3px; color: #fff; font-size: 13px; font-weight: 600; }
+    .content { max-width: 1180px; margin: 0 auto; padding: 34px 48px 80px; }
+    section { scroll-margin-top: 20px; margin-bottom: 38px; }
+    .card { padding: 30px 32px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 3px 12px rgba(23,35,60,.035); }
+    .section-head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 22px; }
+    .section-index { flex: 0 0 auto; padding-top: 3px; color: var(--blue); font-size: 12px; font-weight: 800; letter-spacing: 1px; }
+    h2 { margin: 0; color: var(--navy); font-size: 25px; line-height: 1.4; }
+    .section-desc { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+    h3 { margin: 30px 0 12px; color: var(--navy); font-size: 18px; line-height: 1.5; }
+    h4 { margin: 23px 0 9px; color: #243d60; font-size: 15px; }
+    p { margin: 9px 0; }
+    ul, ol { margin: 8px 0; padding-left: 22px; }
+    li { margin: 5px 0; }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+    .strong { color: var(--navy); font-weight: 700; }
+    .tbd { padding: 1px 6px; border-radius: 4px; color: var(--amber); background: var(--amber-soft); font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .rule { padding: 3px 7px; border-radius: 4px; color: #24507d; background: var(--blue-soft); font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .stats { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; margin-bottom: 22px; }
+    .stat { padding: 17px 18px; border: 1px solid var(--line); border-radius: 9px; background: #fbfcfe; }
+    .stat-value { color: var(--navy); font-size: 28px; line-height: 1.2; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .stat-label { margin-top: 6px; color: var(--muted); font-size: 12px; }
+    .callout { margin: 16px 0; padding: 14px 17px; border-left: 3px solid var(--blue); border-radius: 0 7px 7px 0; background: var(--blue-soft); }
+    .callout.warning { border-left-color: #d18a16; background: var(--amber-soft); }
+    .callout.success { border-left-color: var(--teal); background: var(--teal-soft); }
+    .callout-title { color: var(--navy); font-weight: 700; }
+    .callout p { margin: 3px 0; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; }
+    .mini-card { padding: 17px 18px; border: 1px solid var(--line); border-radius: 8px; background: #fcfdff; }
+    .mini-card h4 { margin: 0 0 7px; }
+    .mini-card p { margin: 0; color: var(--muted); font-size: 13px; }
+    .table-wrap { width: 100%; margin: 12px 0 20px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; font-size: 13px; line-height: 1.6; }
+    th { padding: 11px 13px; color: #2b4467; background: #f0f4f9; font-size: 12px; text-align: left; font-weight: 700; white-space: nowrap; }
+    td { padding: 11px 13px; border-top: 1px solid #e8edf3; vertical-align: top; }
+    tbody tr:nth-child(even) td { background: #fbfcfe; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .req { margin-top: 24px; padding-top: 23px; border-top: 1px solid var(--line); }
+    .req:first-of-type { margin-top: 10px; }
+    .req-head { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-bottom: 9px; }
+    .req-id { padding: 3px 8px; border-radius: 5px; color: #fff; background: var(--blue); font-size: 11px; font-weight: 800; letter-spacing: .4px; }
+    .req-title { color: var(--navy); font-size: 18px; font-weight: 700; }
+    .p0 { padding: 2px 6px; border: 1px solid #b8d2fb; border-radius: 4px; color: var(--blue); font-size: 10px; font-weight: 800; }
+    .flow { display: flex; align-items: stretch; gap: 8px; margin: 15px 0; overflow-x: auto; padding-bottom: 4px; }
+    .flow-node { flex: 1 0 116px; display: flex; align-items: center; justify-content: center; min-height: 65px; padding: 10px; border: 1px solid #cfdceb; border-radius: 8px; color: #294567; background: #f7faff; text-align: center; font-size: 12px; font-weight: 600; }
+    .flow-arrow { align-self: center; flex: 0 0 auto; color: #88a0bd; }
+    .model { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: 7px; margin: 16px 0; }
+    .model-node { position: relative; padding: 14px 8px; border: 1px solid var(--line); border-radius: 7px; background: #f9fbfe; text-align: center; }
+    .model-node:not(:last-child)::after { content: "›"; position: absolute; right: -7px; top: 18px; z-index: 2; color: var(--blue); font-weight: 800; }
+    .model-level { color: var(--blue); font-size: 11px; font-weight: 800; }
+    .model-name { margin-top: 4px; color: var(--navy); font-size: 12px; font-weight: 700; }
+    .status { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .s-blue { color: #245fb5; background: #eaf2ff; }
+    .s-green { color: #087367; background: #e5f6f2; }
+    .s-amber { color: #94600d; background: #fff2d7; }
+    .s-red { color: #a33d3d; background: #ffedeb; }
+    .s-gray { color: #5f6c7e; background: #edf0f4; }
+    .demo { margin: 18px 0; overflow: hidden; border: 1px solid #cdd9e8; border-radius: 10px; background: #f8faff; }
+    .demo-head { display: flex; justify-content: space-between; gap: 10px; padding: 11px 15px; border-bottom: 1px solid #dce5f0; color: #365579; background: #edf3fa; font-size: 12px; font-weight: 700; }
+    .demo-body { padding: 17px; }
+    .demo-note { color: var(--muted); font-size: 11px; font-weight: 400; }
+    .demo-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .btn { padding: 6px 12px; border: 1px solid #b9c8da; border-radius: 6px; color: #294567; background: #fff; font-size: 12px; }
+    .btn:hover { border-color: var(--blue); color: var(--blue); }
+    .btn-primary { border-color: var(--blue); color: #fff; background: var(--blue); }
+    .btn-primary:hover { color: #fff; background: #195bd8; }
+    .btn:disabled { cursor: not-allowed; opacity: .45; }
+    .demo-feedback { min-height: 28px; margin-top: 11px; padding: 7px 10px; border-radius: 5px; color: #375270; background: #edf2f8; font-size: 12px; }
+    .demo-feedback.ok { color: #086b60; background: #e5f6f2; }
+    .demo-feedback.error { color: #9c3d3d; background: #ffedeb; }
+    .demo-table td, .demo-table th { padding: 8px 10px; }
+    .demo-input { width: 70px; padding: 4px 6px; border: 1px solid #b9c8da; border-radius: 4px; background: #fff; }
+    .review-panel { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; }
+    .review-box { padding: 14px; border: 1px solid var(--line); border-radius: 7px; background: #fff; }
+    .review-line { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px dashed #e6ebf1; font-size: 12px; }
+    .review-line:last-child { border-bottom: 0; }
+    .file-chip { display: inline-block; margin-top: 8px; padding: 5px 9px; border: 1px solid #cbd9e9; border-radius: 5px; color: #315e91; background: #f5f9ff; font-size: 11px; }
+    .progress-track { height: 8px; margin-top: 10px; overflow: hidden; border-radius: 8px; background: #e5eaf1; }
+    .progress-bar { width: 0; height: 100%; border-radius: 8px; background: var(--teal); transition: width .25s ease; }
+    .gantt-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 7px; background: #fff; }
+    .gantt { min-width: 690px; display: grid; grid-template-columns: 190px repeat(5, 1fr); }
+    .gantt > div { min-height: 38px; padding: 8px; border-right: 1px solid #edf0f4; border-bottom: 1px solid #edf0f4; font-size: 11px; }
+    .gantt .gh { color: #46617f; background: #f0f4f8; text-align: center; font-weight: 700; }
+    .gantt .gname { cursor: pointer; color: #294567; font-weight: 600; }
+    .gantt .gname:hover, .gantt .gname.active { color: var(--blue); background: var(--blue-soft); }
+    .gbar { align-self: center; height: 10px; border-radius: 5px; background: #9bb9e6; }
+    .gbar.done { background: #49a99b; }
+    .gbar.late { background: #d79a3c; }
+    .gmile { width: 12px; height: 12px; margin: auto; transform: rotate(45deg); background: #49a99b; }
+    .steps { display: grid; grid-template-columns: repeat(4,1fr); gap: 7px; margin-bottom: 15px; }
+    .step { padding: 10px 7px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: #fff; text-align: center; font-size: 11px; }
+    .step.active { border-color: var(--blue); color: var(--blue); background: var(--blue-soft); font-weight: 700; }
+    .step.done { border-color: #8ac9bc; color: var(--teal); background: var(--teal-soft); }
+    .formula { margin: 10px 0; padding: 11px 14px; overflow-x: auto; border-radius: 6px; color: #253e5f; background: var(--code); font-family: Consolas, "Microsoft YaHei", monospace; font-size: 12px; white-space: nowrap; }
+    .direction-list { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0; }
+    .direction { padding: 4px 9px; border: 1px solid var(--line); border-radius: 15px; color: #4c6079; background: #fafbfd; font-size: 11px; }
+    .footer { padding: 24px 32px; color: #7b8798; text-align: center; font-size: 11px; }
+    .print-btn { position: fixed; right: 22px; bottom: 22px; z-index: 20; padding: 9px 15px; border: 0; border-radius: 22px; color: #fff; background: var(--navy); box-shadow: 0 4px 16px rgba(19,44,78,.25); font-size: 12px; }
+    @media (max-width: 1050px) {
+      .layout { grid-template-columns: 215px minmax(0,1fr); }
+      .content { padding: 28px 26px 70px; }
+      .hero { padding: 45px 36px; }
+      .stats { grid-template-columns: repeat(3,1fr); }
+      .model { grid-template-columns: repeat(3,1fr); }
+      .model-node::after { display: none; }
+    }
+    @media (max-width: 760px) {
+      .layout { display: block; }
+      .sidebar { position: relative; width: 100%; height: auto; padding: 18px; }
+      .nav { display: grid; grid-template-columns: repeat(2,1fr); }
+      .sidebar-note { display: none; }
+      .hero { padding: 36px 24px; }
+      h1 { font-size: 29px; }
+      .doc-meta { grid-template-columns: repeat(2,1fr); }
+      .content { padding: 20px 14px 60px; }
+      .card { padding: 22px 18px; }
+      .stats, .grid-2, .grid-3, .review-panel { grid-template-columns: 1fr; }
+      .model { grid-template-columns: repeat(2,1fr); }
+      .steps { grid-template-columns: repeat(2,1fr); }
+    }
+    @media print {
+      body { background: #fff; font-size: 11px; }
+      .layout { display: block; }
+      .sidebar, .print-btn { display: none; }
+      .hero { padding: 28px; color: #fff; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      h1 { font-size: 28px; }
+      .content { max-width: none; padding: 20px 0; }
+      .card { padding: 20px; box-shadow: none; break-inside: auto; }
+      section { margin-bottom: 20px; }
+      .req, .demo, table, .callout { break-inside: avoid; }
+      .table-wrap { overflow: visible; }
+      table { font-size: 10px; }
+      th, td { padding: 7px; }
+      .demo-body { padding: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-kicker">PRODUCT REQUIREMENTS</div>
+        <div class="brand-title">五年建设任务<br>管理平台</div>
+        <div class="brand-version">PRD V1.0 · 评审稿</div>
+      </div>
+      <nav class="nav" aria-label="文档目录">
+        <a href="#overview"><span class="nav-num">00</span><span>文档概览</span></a>
+        <a href="#background"><span class="nav-num">01</span><span>背景与目标</span></a>
+        <a href="#scope"><span class="nav-num">02</span><span>产品契约与范围</span></a>
+        <a href="#roles"><span class="nav-num">03</span><span>角色与权限</span></a>
+        <a href="#model"><span class="nav-num">04</span><span>对象模型与主流程</span></a>
+        <a href="#requirements"><span class="nav-num">05</span><span>功能需求</span></a>
+        <a href="#rules"><span class="nav-num">06</span><span>状态与核算规则</span></a>
+        <a href="#fields"><span class="nav-num">07</span><span>业务字段要求</span></a>
+        <a href="#initialization"><span class="nav-num">08</span><span>首批数据初始化</span></a>
+        <a href="#nonfunctional"><span class="nav-num">09</span><span>通用与非功能要求</span></a>
+        <a href="#questions"><span class="nav-num">10</span><span>待确认事项</span></a>
+      </nav>
+      <div class="sidebar-note">本文件是产品行为与业务规则的唯一评审底稿。所有 [TBD] 项须在对应模块开发前确认，不以开发默认值替代业务决策。</div>
+    </aside>
+
+    <main>
+      <header class="hero">
+        <div class="eyebrow">五年建设任务全周期数字化管理</div>
+        <h1>五年建设任务管理平台<br>产品需求文档</h1>
+        <p class="hero-sub">以主要建设方向、关键产出指标和学院任务为主线，贯通目标量化、学院下发、佐证填报、校级审核、年度里程碑、甘特图和动态调整，形成可追溯的建设任务闭环。</p>
+        <div class="hero-tags">
+          <span class="hero-tag">三级任务体系</span><span class="hero-tag">2026—2030</span><span class="hero-tag">人工审核</span><span class="hero-tag">甘特图</span><span class="hero-tag">双记录留痕</span>
+        </div>
+        <div class="doc-meta">
+          <div><div class="meta-label">文档版本</div><div class="meta-value">V1.0 · 完整评审稿</div></div>
+          <div><div class="meta-label">编制日期</div><div class="meta-value">2026-10-29</div></div>
+          <div><div class="meta-label">首个数据范围</div><div class="meta-value">智能生产装备与技术专业群</div></div>
+          <div><div class="meta-label">需求依据</div><div class="meta-value">任务说明 + 97 项指标清单</div></div>
+        </div>
+      </header>
+
+      <div class="content">
+        <section id="overview" class="card">
+          <div class="section-head"><div class="section-index">00</div><div><h2>文档概览</h2><p class="section-desc">先统一数据事实和产品边界，再评审具体功能。</p></div></div>
+          <div class="stats">
+            <div class="stat"><div class="stat-value">97</div><div class="stat-label">源表指标</div></div>
+            <div class="stat"><div class="stat-value">15</div><div class="stat-label">主要建设方向</div></div>
+            <div class="stat"><div class="stat-value">4</div><div class="stat-label">平台角色</div></div>
+            <div class="stat"><div class="stat-value">10</div><div class="stat-label">标准学院名录</div></div>
+            <div class="stat"><div class="stat-value">5</div><div class="stat-label">建设年度</div></div>
+          </div>
+          <div class="grid-2">
+            <div>
+              <h3 style="margin-top:0">输入材料</h3>
+              <ul>
+                <li>《任务.txt》：角色、三级任务体系定义、审核流程、动态调整、甘特图、模板复用、材料预览及操作日志要求。</li>
+                <li>《智能生产装备与技术专业群建设目标量化清单_合并去重版.xlsx》：1 个工作表、97 项指标、16 个字段。</li>
+              </ul>
+            </div>
+            <div>
+              <h3 style="margin-top:0">表格事实</h3>
+              <ul>
+                <li>指标类型：约束性 28 项、发展性 59 项、特色 10 项。</li>
+                <li>专业群五年目标与 2026 年目标各有 7 项为空；空值不得自动转为 0。</li>
+                <li>2027、2028、2029、2030 年分工字段分别仅 5 项非空，其余年度目标需校级后续量化。</li>
+              </ul>
+            </div>
+          </div>
+          <h3>15 个建设方向</h3>
+          <div class="direction-list">
+            <span class="direction">落实立德树人根本任务</span><span class="direction">金专业</span><span class="direction">金课程</span><span class="direction">金教材</span><span class="direction">金教师</span><span class="direction">金基地</span><span class="direction">创新产教融合机制</span><span class="direction">打造高水平专业群</span><span class="direction">教学要素改革机制及成果</span><span class="direction">构建数字化教学生态</span><span class="direction">拓展国际交流与合作</span><span class="direction">服务两岸融合发展</span><span class="direction">社会服务和科研</span><span class="direction">专业人才培养类</span><span class="direction">过程管理与机制建设</span>
+          </div>
+          <div class="callout warning">
+            <div class="callout-title">源表不等于可直接执行的任务分解</div>
+            <p>“专业群指标分配”同时包含数值、比例、牵头部门、候选学院和备注，且部分括号数值简单求和与总目标不一致。平台须保留原文、执行结构化解析，再由校级负责人确认后下发。</p>
+          </div>
+          <p class="small muted">标记约定：未提供但必须明确的业务条件以 <span class="tbd">TBD</span> 标识；文中交互示意图仅解释产品行为，不代表源表已确认的分解结果。</p>
+        </section>
+
+        <section id="background" class="card">
+          <div class="section-head"><div class="section-index">01</div><div><h2>背景与产品目标</h2><p class="section-desc">从表格分工转为可执行、可审核、可追责的任务闭环。</p></div></div>
+          <h3>1.1 背景与问题</h3>
+          <p>五年建设目标涉及学校、专业群、学院和校级协同部门。现有清单能够描述目标，但年度拆解、学院执行、材料审核和指标调整仍需要统一的产品规则。若仅靠表格流转，容易出现目标口径不一致、审核进度不可见、调整后责任不清和历史记录缺失。</p>
+          <div class="flow">
+            <div class="flow-node">表格中的建设目标<br>缺少统一执行口径</div><div class="flow-arrow">→</div>
+            <div class="flow-node">校级量化并拆解<br>学院任务</div><div class="flow-arrow">→</div>
+            <div class="flow-node">学院以佐证材料<br>证明完成结果</div><div class="flow-arrow">→</div>
+            <div class="flow-node">校级人工认定<br>同步年度里程碑</div><div class="flow-arrow">→</div>
+            <div class="flow-node">甘特图呈现<br>调整全程留痕</div>
+          </div>
+          <h3>1.2 产品目标</h3>
+          <div class="grid-3">
+            <div class="mini-card"><h4>目标可执行</h4><p>将主要建设方向量化为关键产出指标，再分解为学院任务并设置年度里程碑。</p></div>
+            <div class="mini-card"><h4>结果可认定</h4><p>学院提交完成值与在线可预览的佐证，校级人工审核后形成年度达成结论。</p></div>
+            <div class="mini-card"><h4>过程可追溯</h4><p>保留原目标、调整目标、审核版本、确认记录和操作日志，支持按时间导出。</p></div>
+          </div>
+          <h3>1.3 可观察的完成结果</h3>
+          <ul>
+            <li>校级负责人能把同一关键产出指标配置到 2026—2030 年，并下发至一个或多个学院。</li>
+            <li>学院负责人只处理本学院任务，可保存草稿、上传材料、提交审核和在退回后修订重报。</li>
+            <li>审核结论自动更新里程碑与甘特图；未审核的填报不计入认定完成值。</li>
+            <li>年度顺延、跨学院划转和后续年度补位均不覆盖原始记录。</li>
+          </ul>
+        </section>
+
+        <section id="scope" class="card">
+          <div class="section-head"><div class="section-index">02</div><div><h2>产品契约与范围</h2><p class="section-desc">P0 以最小完整业务闭环为边界，同时覆盖源任务明确要求的支撑能力。</p></div></div>
+          <h3>2.1 产品契约</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>契约项</th><th>定义</th></tr></thead>
+            <tbody>
+              <tr><td class="strong">主要用户</td><td>校级项目干系人（每个项目 1 名校级项目负责人）与学院项目干系人；校领导承担目录负责与划转审批，平台管理员提供基础维护。</td></tr>
+              <tr><td class="strong">核心任务</td><td>把五年建设目标转化为学院可执行、学校可审核、领导可查看的年度任务。</td></tr>
+              <tr><td class="strong">业务触发</td><td>校级负责人新建或复制建设计划，并完成关键产出指标量化。</td></tr>
+              <tr><td class="strong">共享业务对象</td><td>关键产出指标及其下属学院任务、年度里程碑、填报审核和调整记录。</td></tr>
+              <tr><td class="strong">单次闭环完成条件</td><td>学院提交某年度完成值和佐证，校级审核形成认定结论，里程碑与甘特图同步更新。</td></tr>
+              <tr><td class="strong">信任基础</td><td>数据权限清晰、人工审核有意见、原值与调整值双记录、关键操作不可被普通业务用户抹除。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>2.2 P0 范围</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>范围</th><th>包含能力</th><th>闭环价值</th></tr></thead>
+            <tbody>
+              <tr><td>计划与模板</td><td>建设目录、计划、五年周期、模板复制与复用</td><td>建立多套任务计划的统一结构</td></tr>
+              <tr><td>三级任务体系</td><td>主要建设方向、量化关键产出指标、学院任务、年度里程碑</td><td>从目标到执行完整分解</td></tr>
+              <tr><td>数据初始化</td><td>源表字段映射、原文保留、结构化解析、导入校验、人工确认</td><td>形成首批 97 项指标数据</td></tr>
+              <tr><td>执行与审核</td><td>任务接收、草稿、完成值填报、多格式佐证、在线预览、人工审核、退回重报</td><td>完成年度任务认定</td></tr>
+              <tr><td>进度呈现</td><td>主要建设方向—关键产出指标—学院任务分层甘特图、年度里程碑、目标与实际对照</td><td>替代原“查看详细数据”主入口</td></tr>
+              <tr><td>动态调整</td><td>年度顺延、后续超额补位、跨学院划转、双方确认、校领导审批</td><td>适应实际执行且避免责任扯皮</td></tr>
+              <tr><td>治理支撑</td><td>待办通知、角色权限、组织与字典维护、全链路日志及按时间导出</td><td>确保数据边界与责任追踪</td></tr>
+            </tbody>
+          </table></div>
+          <h3>2.3 后续迭代边界</h3>
+          <p>第一版校级审核为纯人工审核，不自动判定材料真实性或完成合规性。后续可优化审核辅助能力，具体规则另行定义 <span class="tbd">TBD</span>。P0 不预设任何源表之外的年度指标数值，不代替校方老师作业务量化决策。</p>
+        </section>
+
+        <section id="roles" class="card">
+          <div class="section-head"><div class="section-index">03</div><div><h2>角色、责任与权限</h2><p class="section-desc">角色决定可执行动作，项目归属与学院归属共同决定数据范围。</p></div></div>
+          <h3>3.1 角色定义</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>角色</th><th>责任定位</th><th>数据范围</th><th>明确限制</th></tr></thead>
+            <tbody>
+              <tr><td class="strong">平台管理员</td><td>维护用户、角色、学院、年度、指标类型、指标单位及平台运行配置。</td><td>基础配置与运行日志；业务数据查看权限 <span class="tbd">TBD</span></td><td>不因管理员身份获得业务审核、双方确认或校领导审批权。</td></tr>
+              <tr><td class="strong">校领导</td><td>可作为大模块／目录总负责人；查看全局进度；审批跨学院指标划转。</td><td>所负责目录及被授权查看的计划。</td><td>不代替学院填报，不默认承担每次校级业务审核。</td></tr>
+              <tr><td class="strong">校级项目干系人</td><td>每个项目设 1 名校级项目负责人；负责主要建设方向与关键产出指标量化、学院任务下发、学院填报审核与日常调整。</td><td>本人负责项目内的全部主要建设方向、关键产出指标和学院任务、材料和日志。</td><td>跨院划转不能自行终审；不能修改已审填报的原始版本。</td></tr>
+              <tr><td class="strong">学院项目干系人</td><td>接收本学院任务，填报完成值，上传佐证，修订重报，确认涉及本学院的划转。</td><td>本学院被下发的任务及关联计划摘要。</td><td>不可查看其他学院填报明细，不可自行审核或改变总目标。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>3.2 功能权限矩阵</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>能力</th><th>平台管理员</th><th>校领导</th><th>校级负责人</th><th>学院负责人</th></tr></thead>
+            <tbody>
+              <tr><td>组织、账号与字典维护</td><td>操作</td><td>—</td><td>查看</td><td>查看本院信息</td></tr>
+              <tr><td>设置目录总负责人</td><td>配置</td><td>被授权后查看</td><td>查看</td><td>—</td></tr>
+              <tr><td>新建计划、主要建设方向与关键产出指标年度量化</td><td>—</td><td>查看</td><td>本项目操作</td><td>查看已下发摘要</td></tr>
+              <tr><td>分解并下发学院任务</td><td>—</td><td>查看</td><td>本项目操作</td><td>接收本学院任务</td></tr>
+              <tr><td>填报与上传佐证</td><td>—</td><td>查看</td><td>查看</td><td>本学院操作</td></tr>
+              <tr><td>人工审核</td><td>—</td><td>查看结果</td><td>本项目操作</td><td>查看本学院结果</td></tr>
+              <tr><td>年度顺延</td><td>—</td><td>查看／审批权限待确认</td><td>发起或审批，见 5.8</td><td>查看本学院结果</td></tr>
+              <tr><td>跨院划转</td><td>—</td><td>最终审批</td><td>发起与执行</td><td>双方学院分别确认</td></tr>
+              <tr><td>甘特图</td><td>按授权</td><td>全局或负责范围</td><td>本项目</td><td>本学院</td></tr>
+              <tr><td>日志查询与导出</td><td>运行维护范围</td><td>负责范围</td><td>本项目</td><td>本学院记录，导出权限 <span class="tbd">TBD</span></td></tr>
+            </tbody>
+          </table></div>
+          <div class="callout"><div class="callout-title">校级协同部门的处理方式</div><p>源表出现教务处、双高办、财务处、党委组织部、教学发展与 AI 研究中心等牵头单位。P0 将其记录为关键产出指标的“校级牵头／协同单位”，不新增第五种平台角色；这些单位是否需要独立账号及操作权限 <span class="tbd">TBD</span>。</p></div>
+        </section>
+
+        <section id="model" class="card">
+          <div class="section-head"><div class="section-index">04</div><div><h2>业务对象与核心流程</h2><p class="section-desc">统一定义对象，避免把建设方向、量化指标和学院执行任务混为一谈。</p></div></div>
+          <h3>4.1 指标层级与对象关系</h3>
+          <div class="model">
+            <div class="model-node"><div class="model-level">目录级</div><div class="model-name">大模块／建设目录</div></div>
+            <div class="model-node"><div class="model-level">计划级</div><div class="model-name">五年建设计划</div></div>
+            <div class="model-node"><div class="model-level">方向级</div><div class="model-name">主要建设方向</div></div>
+            <div class="model-node"><div class="model-level">指标级</div><div class="model-name">关键产出指标</div></div>
+            <div class="model-node"><div class="model-level">任务级</div><div class="model-name">学院任务</div></div>
+            <div class="model-node"><div class="model-level">年度级</div><div class="model-name">里程碑与填报</div></div>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>对象</th><th>产品定义</th><th>关键规则</th></tr></thead>
+            <tbody>
+              <tr><td class="strong">建设目录</td><td>承载一套或多套建设计划的大模块。</td><td>可设置 1 名校领导为总负责人；目录不是指标，不参与数值汇总。</td></tr>
+              <tr><td class="strong">建设计划</td><td>具有名称、建设范围、起止年度和校级负责人的任务集合。</td><td>首个计划周期为 2026—2030；模板化计划可设置其他周期。</td></tr>
+              <tr><td class="strong">主要建设方向</td><td>专家下发的原始主要建设方向。</td><td>对应源表“建设任务/主要建设方向”，仅表达方向，不直接填报。</td></tr>
+              <tr><td class="strong">关键产出指标</td><td>经校方量化后的关键产出指标。</td><td>对应“关键产出指标”；配置类型、单位、五年目标和多年度目标，是下发与核算的统一口径。</td></tr>
+              <tr><td class="strong">学院任务</td><td>校级给各学院下发的执行任务，由关键产出指标分解形成。</td><td>继承关键产出指标类型、单位和核算方式；一项关键产出指标可生成多项学院任务，校级直管指标可不生成学院任务。</td></tr>
+              <tr><td class="strong">年度里程碑</td><td>学院任务在某个建设年度应达成的目标及认定状态。</td><td>以年度目标是否达成为单位；审核认定后更新，不用上传动作直接代替完成。</td></tr>
+              <tr><td class="strong">填报与佐证</td><td>学院对某里程碑的完成说明、完成值和证据版本。</td><td>每次提交形成独立版本；退回不覆盖旧版本。</td></tr>
+              <tr><td class="strong">调整单</td><td>年度顺延或跨学院划转的业务记录。</td><td>保存调整前后快照、原因、确认和审批过程。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>4.2 P0 主流程</h3>
+          <div class="flow">
+            <div class="flow-node">校级建立计划<br>导入／选择主要建设方向与关键产出指标</div><div class="flow-arrow">→</div>
+            <div class="flow-node">配置五年与年度目标<br>分解并下发学院任务</div><div class="flow-arrow">→</div>
+            <div class="flow-node">学院接收任务<br>填报并上传佐证</div><div class="flow-arrow">→</div>
+            <div class="flow-node">校级在线预览<br>人工审核认定</div><div class="flow-arrow">→</div>
+            <div class="flow-node">里程碑更新<br>甘特图同步</div>
+          </div>
+          <p><span class="strong">恢复路径：</span>填报被退回后，学院保留原填写内容，依据审核意见修订并生成新版本重新提交；未达标里程碑可进入顺延或后续补位流程，涉及其他学院时转入跨院划转流程。</p>
+        </section>
+
+        <section id="requirements" class="card">
+          <div class="section-head"><div class="section-index">05</div><div><h2>功能需求</h2><p class="section-desc">每项需求均说明触发、处理、结果、状态和异常，是设计与管理端开发的主要依据。</p></div></div>
+
+          <article class="req" id="fr01">
+            <div class="req-head"><span class="req-id">FR-01</span><span class="req-title">建设目录、计划与模板复用</span><span class="p0">P0</span></div>
+            <p><span class="strong">目的：</span>用统一的流程骨架承载不同专业群或不同批次建设任务，降低重复配置成本。</p>
+            <h4>触发与处理</h4>
+            <ol>
+              <li>校级负责人选择建设目录，新建空白计划或从已有计划复制；新建时填写名称、建设范围、起止年度和项目负责人。</li>
+              <li>从已有计划复制时，平台复制目录结构、主要建设方向、关键产出指标和学院任务层级、指标核算配置、责任角色和流程规则。</li>
+              <li>复制后生成独立计划。后续修改新计划，不反向影响源计划。</li>
+              <li>用户可选择“仅复制结构”或“复制结构及目标值”。无论选择哪种方式，均不得复制完成值、佐证、审核结论、待办、调整单和历史日志。</li>
+            </ol>
+            <h4>结果与边界</h4>
+            <ul>
+              <li>新计划初始状态为“草稿”；只有必填量化与校验完成后才能发布。</li>
+              <li>计划发布后周期不可直接修改；如确需变更，须通过新版本计划处理 <span class="tbd">TBD</span>。</li>
+              <li>复制存在未完成校验的源指标时，允许复制但保留“待完善”标记，不允许直接下发。</li>
+            </ul>
+          </article>
+
+          <article class="req" id="fr02">
+            <div class="req-head"><span class="req-id">FR-02</span><span class="req-title">指标库、Excel 导入与结构化校验</span><span class="p0">P0</span></div>
+            <p><span class="strong">目的：</span>把首批清单转为可管理的数据，同时保留源文以便追溯，不把自由文本误当成最终任务。</p>
+            <h4>源字段映射</h4>
+            <div class="table-wrap"><table>
+              <thead><tr><th>源字段</th><th>平台业务字段</th><th>导入处理规则</th></tr></thead>
+              <tbody>
+                <tr><td>序号</td><td>来源序号</td><td>仅作溯源与排序，不作为跨计划唯一标识。</td></tr>
+                <tr><td>建设任务/主要建设方向</td><td>主要建设方向名称</td><td>同名方向合并关联，保留来源序号顺序。</td></tr>
+                <tr><td>关键产出指标</td><td>关键产出指标名称与原始描述</td><td>完整保留，不截断括号内的统计口径。</td></tr>
+                <tr><td>指标类型</td><td>指标类型字典</td><td>仅接受约束性、发展性、特色；其他值进入异常清单。</td></tr>
+                <tr><td>指标单位</td><td>单位原文与标准单位</td><td>保留“门/个”“个或人”等复合单位；标准化需人工选择，不擅自拆项。</td></tr>
+                <tr><td>专业群5年量化目标</td><td>关键产出指标专业群五年目标原文／解析值</td><td>空值、0、“—”分别表示未提供、数值零、不适用，三者不得混淆。</td></tr>
+                <tr><td>专业群2026年量化目标</td><td>关键产出指标2026 目标原文／解析值</td><td>写入 2026 年里程碑待确认值。</td></tr>
+                <tr><td>专业群五年指标分配</td><td>学院任务五年分配参考原文</td><td>提取学院、括号数值和备注，形成待确认分解，不直接发布。</td></tr>
+                <tr><td>专业群2026年指标分配</td><td>学院任务2026 分配参考原文</td><td>同上；“无”仅表示该字段未分配，不自动等于数值 0。</td></tr>
+                <tr><td>学校5年量化目标</td><td>学校整体五年目标原文／解析值</td><td>与专业群目标分字段保存，不相互覆盖，不自动加总。</td></tr>
+                <tr><td>学校2026年量化目标</td><td>学校整体 2026 目标原文／解析值</td><td>保留“专业群为 X、余 Y”等结构说明。</td></tr>
+                <tr><td>学校2026年任务分工</td><td>2026 校级分工原文</td><td>识别牵头部门、学院及年度说明；不自动将牵头部门变成学院。</td></tr>
+                <tr><td>学校2027—2030年任务分工</td><td>对应年度分工原文</td><td>分别进入对应年度；空白保持空白，由校级后续量化。</td></tr>
+              </tbody>
+            </table></div>
+            <h4>导入流程</h4>
+            <ol>
+              <li>校级负责人上传清单并选择目标计划；系统先显示工作表、字段和指标数量预览，不直接写入正式计划。</li>
+              <li>系统执行必填、字典、学院名称、数值格式、年度、目标与分配一致性检查，输出“可导入、需确认、不可导入”三类结果。</li>
+              <li>用户逐项处理异常；可导入项与已确认项进入计划草稿，源文件与源行号随记录保存。</li>
+              <li>同一源文件重复导入时，按“计划 + 来源文件 + 来源序号”提示重复，由用户选择跳过或重新生成草稿，禁止静默重复。</li>
+            </ol>
+            <h4>校验与异常</h4>
+            <ul>
+              <li>数值型单位的目标须为可解析数值；百分比可配置为 15 或 15% 的输入显示，但内部业务口径必须统一为百分比值。</li>
+              <li>“是/否”只接受是、否或空白；“比值”保留比例表达式并要求配置可核算口径。</li>
+              <li>学院别名无法映射到标准名录时，不生成学院任务，进入人工匹配。</li>
+              <li>目标与括号分配值不一致时标记“分配待确认”，不阻止保留关键产出指标草稿，但阻止下发相关学院任务。</li>
+              <li>对“省厅统计、学校无需填写”等指标，允许标记为“外部数据／免填报”，数据来源与更新责任 <span class="tbd">TBD</span>。</li>
+            </ul>
+          </article>
+
+          <article class="req" id="fr03">
+            <div class="req-head"><span class="req-id">FR-03</span><span class="req-title">主要建设方向与关键产出指标量化及多年度里程碑配置</span><span class="p0">P0</span></div>
+            <p><span class="strong">目的：</span>由校方老师自行设置各年度指标，不由开发侧预设具体数值。</p>
+            <h4>配置规则</h4>
+            <ol>
+              <li>主要建设方向仅需维护方向名称、排序、说明和目录归属；关键产出指标继承主要建设方向并补充完整量化定义。</li>
+              <li>关键产出指标编辑区同时展示五年总目标和 2026—2030 五个年度字段。首年可从源表带入，其他年度允许逐年编辑。</li>
+              <li>校级负责人须选择核算方式：累计型、年度定额型、期末型、比率型、增长率型、是否型或外部数据型。不同方式的目标校验、进度和补位规则统一引用第 6 章。</li>
+              <li>百分比或比率指标必须填写基期、分子来源、分母来源、目标方向和统计口径；增长率指标须先填写可核算的基期绝对值与年度绝对值。</li>
+              <li>约束性、发展性、特色是指标管理属性，不直接决定公式；同一类型可使用不同核算方式。</li>
+            </ol>
+            <h4>发布与变更</h4>
+            <ul>
+              <li>关键产出指标保存草稿时不要求五年全部年度一次性填满，但发布学院任务时，被发布年度必须有合法目标或明确“不设置年度目标”的期末型规则。</li>
+              <li>已下发关键产出指标的类型、单位、核算方式及已执行年度目标不可直接覆盖；须通过调整流程生成变更记录。</li>
+              <li>未来未开始年度允许校级修改目标，但若已有关联填报、待确认调整或审核记录，则冻结并提示先处理关联业务。</li>
+              <li>空值表示未量化；0 表示目标值为零；“—”表示不适用。发布前必须显式确认。</li>
+            </ul>
+            <div class="callout"><div class="callout-title">源表示例对应</div><p>“专业群每年系统绘制不少于 2 门专业核心课程能力图谱”为约束性、单位“门”、五年 10 门、2026 年 2 门，适合累计型；“订单式人才培养比例”适合比率型／每年达标，不应把五年百分比按年度相加。</p></div>
+          </article>
+
+          <article class="req" id="fr04">
+            <div class="req-head"><span class="req-id">FR-04</span><span class="req-title">关键产出指标分解与学院任务下发</span><span class="p0">P0</span></div>
+            <p><span class="strong">触发：</span>关键产出指标量化达到发布条件，校级负责人在指标详情中选择“分解至学院”。</p>
+            <h4>处理规则</h4>
+            <ol>
+              <li>选择一个或多个学院，为每个学院创建独立的学院任务；学院任务默认继承关键产出指标描述、指标类型、单位和核算方式。</li>
+              <li>按年度填写各学院目标、学院负责人和执行说明。可引用源表分配原文，但最终值以校级确认的结构化字段为准。</li>
+              <li>累计型、年度定额型等可分解数量指标须校验学院任务目标合计与关键产出指标分配口径；比率型、是否型允许“共同承担”，不得强行相加。</li>
+              <li>若源表仅表达候选学院或牵头关系，校级可标记“非加总分配”，并填写原因；该原因随下发记录保存。</li>
+              <li>下发前显示关键产出指标总目标、已分配、未分配、各学院年度目标和差异。存在未解释差异、负责人缺失或目标非法时阻止下发。</li>
+              <li>确认下发后，学院任务状态为“待接收”，学院产生待办；关键产出指标和学院任务均保存下发快照。</li>
+            </ol>
+            <h4>撤销与冲突</h4>
+            <ul>
+              <li>学院接收前，校级可撤销下发并填写原因；撤销后任务回到草稿，保留日志。</li>
+              <li>学院已接收或已有填报后不可直接撤销，只能通过调整或终止流程处理；终止规则 <span class="tbd">TBD</span>。</li>
+              <li>同一关键产出指标可向同学院分解多项学院任务时，必须填写不同执行范围，防止重复计算。</li>
+            </ul>
+            <div class="demo">
+              <div class="demo-head"><span>交互示意 · 下发前差异校验</span><span class="demo-note">示意数据，不代表源表最终分配</span></div>
+              <div class="demo-body">
+                <div class="demo-toolbar"><span>关键产出指标2026 目标：<strong>2 门</strong></span><span class="status s-blue">累计型</span><button class="btn btn-primary" type="button" id="dispatchCheck">校验并下发</button><button class="btn" type="button" id="dispatchReset">重置</button></div>
+                <div class="table-wrap" style="margin:0"><table class="demo-table">
+                  <thead><tr><th>学院</th><th>2026 目标（门）</th><th>负责人</th><th>状态</th></tr></thead>
+                  <tbody>
+                    <tr><td>学院甲</td><td><input class="demo-input dispatch-value" id="dispatchA" type="number" value="1" min="0" step="1" aria-label="学院甲目标"></td><td>已设置</td><td class="dispatch-status">草稿</td></tr>
+                    <tr><td>学院乙</td><td><input class="demo-input dispatch-value" id="dispatchB" type="number" value="0" min="0" step="1" aria-label="学院乙目标"></td><td>已设置</td><td class="dispatch-status">草稿</td></tr>
+                  </tbody>
+                </table></div>
+                <div class="demo-feedback" id="dispatchFeedback">当前已分配 1 门，与关键产出指标目标相差 1 门；请修正后再下发。</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="req" id="fr05">
+            <div class="req-head"><span class="req-id">FR-05</span><span class="req-title">学院任务接收、填报与佐证管理</span><span class="p0">P0</span></div>
+            <p><span class="strong">触发：</span>学院负责人收到本学院任务待办。</p>
+            <h4>接收与填报</h4>
+            <ol>
+              <li>学院查看关键产出指标目标摘要、本学院任务目标、年度里程碑、统计口径和校级说明后执行“接收任务”；学院任务进入“执行中”。</li>
+              <li>对任务口径有异议时，学院可提交异议说明，不直接修改目标；校级处理前可继续查看但不能下发新的调整 <span class="tbd">TBD</span>。</li>
+              <li>在年度里程碑中填写完成值、完成说明、成果名称、完成日期和佐证材料；支持保存草稿并稍后继续。</li>
+              <li>提交前校验必填项、数值范围、完成日期、材料数量与在线可预览性。至少上传 1 项有效佐证；外部数据型按单独规则处理。</li>
+              <li>提交后生成不可变填报版本，里程碑进入“审核中”，原填写内容不可直接编辑。</li>
+            </ol>
+            <h4>佐证材料</h4>
+            <ul>
+              <li>支持文档、图片、PDF、视频；常见文档具体扩展名、单文件大小、单次数量及视频时长上限 <span class="tbd">TBD</span>。</li>
+              <li>每份材料记录文件名、格式、上传人、上传时间、说明和所属填报版本。</li>
+              <li>上传失败不得丢失已保存的文本草稿；可单独重试材料。材料未具备预览条件时不能提交。</li>
+              <li>审核中不可删除该版本材料；退回后修订须生成新版本，旧材料仍可追溯。</li>
+            </ul>
+          </article>
+
+          <article class="req" id="fr06">
+            <div class="req-head"><span class="req-id">FR-06</span><span class="req-title">校级人工审核与年度认定</span><span class="p0">P0</span></div>
+            <p><span class="strong">触发：</span>学院提交年度填报，进入校级负责人的审核待办。</p>
+            <h4>审核界面与动作</h4>
+            <ol>
+              <li>同屏展示关键产出指标统计口径、学院任务年度目标、学院填报值、历史版本、完成说明和佐证材料。</li>
+              <li>文档、图片、PDF、视频须在平台内直接预览；审核人员无需下载即可完成审核。</li>
+              <li>校级负责人选择“通过”或“退回”，填写审核意见。退回必须说明需修订的具体内容。</li>
+              <li>通过时可填写“认定完成值”。认定值与学院填报值不同，必须填写认定依据；学院原始填报值保持不变。</li>
+              <li>审核提交需二次确认，结论记录审核人、时间、意见和材料版本。</li>
+            </ol>
+            <h4>结果与状态</h4>
+            <ul>
+              <li>“通过”表示完成值与材料被人工认定，不表示所有类型都必然达标。系统按年度规则比较认定值与目标：达标则里程碑“已完成”，未达标则“已认定未达标”。</li>
+              <li>“退回”后里程碑进入“已退回”，学院可修订重报；已退回版本只读。</li>
+              <li>审核中的填报可由学院撤回，前提是尚未形成审核结论；撤回到草稿并记录原因。</li>
+              <li>已审核结论若需纠错，不直接编辑，须发起审核更正流程；更正审批权限 <span class="tbd">TBD</span>。</li>
+            </ul>
+            <div class="demo">
+              <div class="demo-head"><span>交互示意 · 填报、审核与里程碑同步</span><span class="demo-note">依次点击体验状态变化</span></div>
+              <div class="demo-body">
+                <div class="review-panel">
+                  <div class="review-box">
+                    <div class="review-line"><span>年度任务</span><strong>课程能力图谱 · 2026</strong></div>
+                    <div class="review-line"><span>年度目标</span><strong>1 门</strong></div>
+                    <div class="review-line"><span>填报完成值</span><strong>1 门</strong></div>
+                    <div class="review-line"><span>里程碑</span><span id="reviewStatus" class="status s-gray">填报中</span></div>
+                    <span class="file-chip">课程能力图谱.pdf · 在线预览</span>
+                  </div>
+                  <div class="review-box">
+                    <strong style="font-size:12px">认定进度</strong>
+                    <div class="progress-track"><div class="progress-bar" id="reviewProgress"></div></div>
+                    <p class="small muted" id="reviewHint">草稿尚未提交，不计入认定完成值。</p>
+                    <div class="demo-toolbar" style="margin:8px 0 0">
+                      <button class="btn btn-primary" type="button" id="submitReport">提交审核</button>
+                      <button class="btn" type="button" id="approveReport" disabled>审核通过</button>
+                      <button class="btn" type="button" id="returnReport" disabled>退回</button>
+                      <button class="btn" type="button" id="resetReview">重置</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="demo-feedback" id="reviewFeedback">当前状态：学院草稿。</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="req" id="fr07">
+            <div class="req-head"><span class="req-id">FR-07</span><span class="req-title">分层甘特图与年度里程碑视图</span><span class="p0">P0</span></div>
+            <p><span class="strong">目的：</span>将原“查看详细数据”主入口改为“甘特图”，用时间、层级和状态表达执行情况。</p>
+            <h4>布局与交互</h4>
+            <ol>
+              <li>左侧为主要建设方向→ 关键产出指标→ 学院任务可展开树，右侧为计划年度时间轴；首个计划显示 2026—2030 五列。</li>
+              <li>主要建设方向与关键产出指标行用于聚合查看，学院任务行展示年度执行条或里程碑节点；是否型和期末型以节点呈现，累计型可显示跨年度条。</li>
+              <li>每个年度单元显示目标值、认定值和状态。状态除颜色外必须有文字或图形标识，避免仅凭颜色判断。</li>
+              <li>点击节点打开侧栏，显示目标、认定完成值、差额、审核状态、最近填报、调整标记及佐证入口。</li>
+              <li>支持按计划、主要建设方向、学院、负责人、指标类型、年度和里程碑状态筛选；筛选结果与当前用户数据权限一致。</li>
+              <li>未下发、未填报、审核中、已完成、已认定未达标、已退回和已调整采用不同样式；发生顺延或补位时显示关联年度。</li>
+            </ol>
+            <h4>空态与汇总</h4>
+            <ul>
+              <li>无任务时显示当前筛选条件和“清除筛选”，不展示伪造的空进度条。</li>
+              <li>主要建设方向与关键产出指标聚合以里程碑状态数量呈现，不对不同单位、不同核算方式的百分比做简单平均。</li>
+              <li>当前年度之后的目标可展示但不计入逾期的当前执行统计；逾期判定需结合计划年度截止日期，具体日期 <span class="tbd">TBD</span>。</li>
+            </ul>
+            <div class="demo">
+              <div class="demo-head"><span>交互示意 · 甘特图节点联动</span><span class="demo-note">点击左侧任务；状态为示意</span></div>
+              <div class="demo-body">
+                <div class="gantt-wrap"><div class="gantt">
+                  <div class="gh">任务／年度</div><div class="gh">2026</div><div class="gh">2027</div><div class="gh">2028</div><div class="gh">2029</div><div class="gh">2030</div>
+                  <div class="gname active" data-gantt="a">关键产出指标课程能力图谱</div><div><div class="gbar done"></div></div><div><div class="gbar done"></div></div><div><div class="gbar"></div></div><div><div class="gbar"></div></div><div><div class="gbar"></div></div>
+                  <div class="gname" data-gantt="b">└ 学院任务学院甲</div><div><div class="gbar done"></div></div><div><div class="gbar late"></div></div><div><div class="gbar"></div></div><div><div class="gbar"></div></div><div><div class="gbar"></div></div>
+                  <div class="gname" data-gantt="c">关键产出指标三主编教材机制</div><div><div class="gmile"></div></div><div></div><div></div><div></div><div></div>
+                </div></div>
+                <div class="demo-feedback" id="ganttFeedback">关键产出指标课程能力图谱｜五年目标 10 门｜2026—2030 每年 2 门｜点击学院任务行查看学院口径。</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="req" id="fr08">
+            <div class="req-head"><span class="req-id">FR-08</span><span class="req-title">年度指标顺延与后续超额补位</span><span class="p0">P0</span></div>
+            <p><span class="strong">适用：</span>同一学院任务内的累计型指标。年度定额型、比率型等是否允许特殊顺延，须由校级另行配置并说明，不默认抵扣。</p>
+            <h4>年度顺延</h4>
+            <ol>
+              <li>年度认定后存在缺口，或校级确认当年无法完成时，可发起顺延。</li>
+              <li>顺延量不得超过该年度未弥补缺口；接收年度必须是同一计划内尚未结束的下一年度或以后年度。</li>
+              <li>保存原年度目标、原认定值、顺延量、接收年度、原因和发起人。原年度记录保留“已顺延”关联标记，不改写历史。</li>
+              <li>生效后，接收年度目标 = 原接收年度目标 + 本年顺延量 + 其他已生效顺延误；五年总目标保持不变。</li>
+              <li>同一年度存在审核中填报或待审批调整时，不允许重复顺延同一缺口。</li>
+            </ol>
+            <h4>后续年度补位</h4>
+            <ul>
+              <li>后续年度认定值超过当年调整后目标时产生可补位余量。</li>
+              <li>系统按年度先后，将余量优先用于同一学院任务内最早未弥补缺口；保留缺口年度与补位年度的双向关联。</li>
+              <li>补位只改变缺口的“已弥补量”，不修改任一年度原目标和原认定值。</li>
+              <li>五年认定完成值使用实际认定总量核算，不能把同一余量同时计入两个年度的总完成量。</li>
+            </ul>
+            <p><span class="tbd">Assumption, TBD</span> 年度顺延误由校级项目负责人审批后生效，校领导可查；若需校领导审批，应在实施前调整权限矩阵。</p>
+          </article>
+
+          <article class="req" id="fr09">
+            <div class="req-head"><span class="req-id">FR-09</span><span class="req-title">跨学院指标划转与三方审批</span><span class="p0">P0</span></div>
+            <p><span class="strong">目的：</span>将无法由原学院完成的指标调配到其他学院，同时明确双方责任和校领导最终审批。</p>
+            <h4>发起条件</h4>
+            <ul>
+              <li>仅允许同一关键产出指标下、单位与核算方式一致的学院任务之间划转；必须指定五年总目标或具体年度目标。</li>
+              <li>可划转量 ≤ 原学院目标剩余可调整量。已认定完成量、审核中填报占用量和进行中调整占用量不得重复划转。</li>
+              <li>发起人填写原因、转出学院、转入学院、划转量、影响年度和说明材料；转出与转入双方均看到同一调整单。</li>
+            </ul>
+            <h4>审批顺序</h4>
+            <div class="flow">
+              <div class="flow-node">校级负责人<br>发起划转</div><div class="flow-arrow">→</div>
+              <div class="flow-node">转出学院<br>确认或退回</div><div class="flow-arrow">→</div>
+              <div class="flow-node">转入学院<br>确认或退回</div><div class="flow-arrow">→</div>
+              <div class="flow-node">校领导<br>最终审批</div><div class="flow-arrow">→</div>
+              <div class="flow-node">双方目标生效<br>快照与日志留存</div>
+            </div>
+            <ol>
+              <li>任一方退回时必须填写意见，调整单终止，不改变目标；校级可复制原单修订后重新发起。</li>
+              <li>校领导审批前，发起人可撤回，撤回后释放占用量并留痕。</li>
+              <li>校领导批准后，转出任务扣减目标，转入任务增加既有目标或生成新的学院任务；关键产出指标总目标不变。</li>
+              <li>系统同时保存原指标记录、调整后指标记录、双方确认、审批意见、时间和完整前后快照。</li>
+              <li>生效后甘特图显示“跨院划转”标记，双方学院只看到与自身相关的执行明细，校级与校领导可查看完整链路。</li>
+            </ol>
+            <div class="demo">
+              <div class="demo-head"><span>交互示意 · 跨院划转审批链</span><span class="demo-note">点击“推进下一步”查看确认过程</span></div>
+              <div class="demo-body">
+                <div class="steps" id="transferSteps"><div class="step active">1 校级发起</div><div class="step">2 转出学院确认</div><div class="step">3 转入学院确认</div><div class="step">4 校领导审批</div></div>
+                <div class="demo-toolbar"><span>学院甲 → 学院乙</span><strong>1 项</strong><button class="btn btn-primary" type="button" id="transferNext">推进下一步</button><button class="btn" type="button" id="transferReset">重置</button></div>
+                <div class="demo-feedback" id="transferFeedback">调整单草稿已建立，原目标尚未改变。</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="req" id="fr10">
+            <div class="req-head"><span class="req-id">FR-10</span><span class="req-title">进度核算与双维度结算</span><span class="p0">P0</span></div>
+            <p><span class="strong">触发：</span>审核通过、审核更正生效、年度顺延生效或跨院划转生效。</p>
+            <ol>
+              <li>平台只将已审核认定值纳入正式完成量；草稿、审核中和已退回版本单独显示，不计入。</li>
+              <li>每次核算保存目标版本、认定值、公式口径和计算时间；目标调整后显示“按原目标”和“按调整后目标”的可追溯记录。</li>
+              <li>累计型同时计算年度认定量、五年累计认定量、未弥补缺口和后续补位量。</li>
+              <li>增长率型执行年度结算与五年总周期结算；年度与总周期均显示基期值、报告期值、增长量和增长率。</li>
+              <li>核算失败时保留已审核业务事实，将指标标为“待补充核算口径”，不得将失败结果显示为 0 或已完成。</li>
+            </ol>
+            <p>具体公式和不同指标类型的达成规则见 <a href="#rules">第 6 章</a>。</p>
+          </article>
+
+          <article class="req" id="fr11">
+            <div class="req-head"><span class="req-id">FR-11</span><span class="req-title">待办与过程通知</span><span class="p0">P0</span></div>
+            <p>通知服务于核心闭环，不扩展为独立消息中心。平台在列表和登录后的待办区呈现以下事项：</p>
+            <div class="table-wrap"><table>
+              <thead><tr><th>事件</th><th>接收人</th><th>待办结束条件</th></tr></thead>
+              <tbody>
+                <tr><td>学院任务下发</td><td>对应学院负责人</td><td>学院接收或校级撤销</td></tr>
+                <tr><td>填报提交／退回后重报</td><td>校级项目负责人</td><td>形成审核结论或学院撤回</td></tr>
+                <tr><td>审核退回</td><td>对应学院负责人</td><td>重新提交；是否长期保留已读记录不影响版本留存</td></tr>
+                <tr><td>跨院划转待确认</td><td>当前顺序中的学院负责人</td><td>确认、退回或发起人撤回</td></tr>
+                <tr><td>跨院划转待终审</td><td>有权限的校领导</td><td>批准、退回或发起人撤回</td></tr>
+                <tr><td>年度目标已认定未达标</td><td>校级项目负责人及本学院负责人</td><td>仅提示；完成顺延或后续补位后更新关联状态</td></tr>
+              </tbody>
+            </table></div>
+            <p>通知包含计划、指标、年度、状态和业务入口，不通过消息正文修改任何业务数据。站外短信、邮件或即时通讯集成不在已确认范围内 <span class="tbd">TBD</span>。</p>
+          </article>
+
+          <article class="req" id="fr12">
+            <div class="req-head"><span class="req-id">FR-12</span><span class="req-title">全链路操作日志与按时间导出</span><span class="p0">P0</span></div>
+            <ol>
+              <li>记录计划发布、指标量化、学院任务下发／接收／撤销、填报提交／撤回、材料上传、审核、顺延、补位、划转、确认、审批和权限变更等关键操作。</li>
+              <li>日志字段至少包括操作时间、操作人、角色、所属计划、对象层级、对象名称、动作、业务原因、调整前摘要、调整后摘要和关联单据。</li>
+              <li>支持按开始时间、结束时间筛选，并可叠加计划、学院、对象和操作类型；导出范围不得超出当前用户数据权限。</li>
+              <li>导出文件记录筛选条件和导出时间。导出格式 <span class="tbd">TBD</span>；日志保留期限 <span class="tbd">TBD</span>。</li>
+              <li>普通业务用户不得修改或删除日志。日志导出本身也记入日志。</li>
+            </ol>
+          </article>
+
+          <article class="req" id="fr13">
+            <div class="req-head"><span class="req-id">FR-13</span><span class="req-title">基础组织与业务字典维护</span><span class="p0">P0</span></div>
+            <ul>
+              <li>平台管理员维护四类角色、用户与学院／校级部门归属，以及用户是否在具体项目中担任校级或学院负责人。</li>
+              <li>维护指标类型、指标单位、建设年度和材料格式等字典；已被业务引用的字典项不可物理删除，只能停用并保留历史显示。</li>
+              <li>标准学院名录采用任务说明中的 10 个学院；别名映射用于导入，不在业务页面重复生成多个学院。</li>
+              <li>负责人变更需记录生效时间和交接人。历史填报、审核仍显示操作发生时的责任人，不回写为新负责人。</li>
+              <li>账号停用不删除历史记录；停用后不可继续操作，但已有待办须提示校级或管理员完成交接。</li>
+            </ul>
+          </article>
+        </section>
+
+        <section id="rules" class="card">
+          <div class="section-head"><div class="section-index">06</div><div><h2>状态、计算与共享业务规则</h2><p class="section-desc">跨模块只使用本章的一套定义，功能章节不另设相互矛盾的规则。</p></div></div>
+          <h3>6.1 状态机</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>对象</th><th>状态</th><th>允许转换</th><th>关键限制</th></tr></thead>
+            <tbody>
+              <tr><td>建设计划</td><td>草稿 → 已发布 → 执行中 → 已结项</td><td>发布后进入执行；结项条件 <span class="tbd">TBD</span></td><td>已发布周期不可直接改；结项不删除历史。</td></tr>
+              <tr><td>学院任务</td><td>草稿 → 待接收 → 执行中 → 已完成</td><td>接收前可撤销；接收后通过调整改变执行责任</td><td>全部必需里程碑满足完成条件后才可完成。</td></tr>
+              <tr><td>填报版本</td><td>草稿 → 审核中 → 已通过／已退回</td><td>审核中且无结论时可撤回至草稿；已退回可另建版本重报</td><td>旧版本只读；每次提交产生新版本号。</td></tr>
+              <tr><td>年度里程碑</td><td>未开始 → 待填报 → 填报中 → 审核中 → 已完成／已认定未达标／已退回</td><td>未达标可关联顺延或后续补位；退回后重报</td><td>上传材料不直接等于完成；必须有审核认定。</td></tr>
+              <tr><td>跨院划转单</td><td>待转出确认 → 待转入确认 → 待校领导审批 → 已生效</td><td>任一环节退回则已终止；终审前发起方可撤回</td><td>只有已生效才改变执行目标。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>6.2 指标核算方式</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>核算方式</th><th>典型源表单位／示例</th><th>年度达成</th><th>五年结算与补位</th></tr></thead>
+            <tbody>
+              <tr><td class="strong">累计型</td><td>项、个、门、本、人次；如五年建设 5 门在线精品课程</td><td>当年认定增量达到调整后年度目标</td><td>五年认定增量合计达到五年总目标；支持顺延和后续超额补位。</td></tr>
+              <tr><td class="strong">年度定额型</td><td>%/每年、每年完成次数</td><td>每年独立达标</td><td>展示各年度达标情况，不默认用其他年度超额抵扣。</td></tr>
+              <tr><td class="strong">期末型</td><td>2030 年达到 15%、期末建成数量</td><td>阶段性里程碑按配置认定</td><td>以指定期末值结算；中期缺口不自动视为最终未完成。</td></tr>
+              <tr><td class="strong">比率型</td><td>%、比值、每生比例</td><td>按同一分子、分母和统计时点计算并比较</td><td>不将各年百分比相加；需明确按年度、期末或五年整体口径。</td></tr>
+              <tr><td class="strong">增长率型</td><td>科研与社会服务到账经费五年增长 15%</td><td>年度增长率与当年绝对值双显示</td><td>执行年度结算 + 五年总周期结算；先量化基期总量／增量。</td></tr>
+              <tr><td class="strong">是否型</td><td>制度建立、专项审计是否完成</td><td>审核认定“是”方可完成</td><td>按指定年度完成节点统计，不把“是”转换为数值与其他指标加总。</td></tr>
+              <tr><td class="strong">外部数据型</td><td>省厅统计、学校无需填写</td><td>依外部认定结果更新</td><td>来源、更新频率和责任人 <span class="tbd">TBD</span>；不生成学院填报。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>6.3 统一公式</h3>
+          <div class="formula">累计认定完成量 = Σ 已审核认定增量（草稿、审核中、已退回均不计入）</div>
+          <div class="formula">累计目标达成率 = 累计认定完成量 ÷ 调整后五年目标 × 100%</div>
+          <div class="formula">年度缺口 = max（调整后年度目标 − 当年认定完成量 − 已弥补量，0）</div>
+          <div class="formula">可补位余量 = max（当年认定完成量 − 调整后年度目标，0），仅适用于允许补位的累计型指标</div>
+          <div class="formula">年度增长率 =（本年度认定绝对值 − 上年度基期绝对值）÷ 上年度基期绝对值 × 100%</div>
+          <div class="formula">五年增长率 =（期末认定绝对值 − 周期基期绝对值）÷ 周期基期绝对值 × 100%</div>
+          <ul>
+            <li>目标方向为“不少于／不低于”时按 ≥ 判定；目标方向为“不超过／不高于”时按 ≤ 判定；精确值按 = 判定。</li>
+            <li>基期为 0 或分母为 0 时，不计算增长率或比率，显示“无法自动核算”，由校级补充口径。</li>
+            <li>达成率可显示超过 100% 的实际数值，甘特图条形长度 capped 至 100%，超额部分另标“超额 +X”。</li>
+            <li>计算保留原始精度，显示小数位和四舍五入规则 <span class="tbd">TBD</span>；判断达成时不得因显示取反造成误判。</li>
+            <li>跨指标聚合只统计任务数、里程碑数和状态数，不把不同单位的目标值或完成值相加。</li>
+          </ul>
+          <h3>6.4 调整与审计的共同规则</h3>
+          <ul>
+            <li>所有调整均记录原目标、调整后目标、业务原因、发起人、生效时间和关联审批；禁止覆盖原始值。</li>
+            <li>待审填报、待确认调整与目标修改之间互斥，系统明确提示被占用的对象和数量。</li>
+            <li>关键动作（下发、提交、审核、撤回、顺延生效、划转确认与终审）需要明确确认；失败时不产生半生效状态，可基于原记录重试。</li>
+            <li>所有页面、导出与待办遵循同一权限范围；直接访问无权限对象时显示无权提示，不泄露指标内容。</li>
+          </ul>
+        </section>
+
+        <section id="fields" class="card">
+          <div class="section-head"><div class="section-index">07</div><div><h2>核心业务字段要求</h2><p class="section-desc">以下是产品必须持久化并向用户呈现的字段，不限定技术数据库或接口设计。</p></div></div>
+          <h3>7.1 计划、主要建设方向与关键产出指标</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>字段组</th><th>必备字段</th><th>必填／校验</th></tr></thead>
+            <tbody>
+              <tr><td>建设目录</td><td>目录名称、说明、总负责人、状态</td><td>名称与总负责人必填；负责人须为校领导。</td></tr>
+              <tr><td>建设计划</td><td>计划名称、建设范围、开始年度、结束年度、校级负责人、模板来源、计划状态、发布时间</td><td>开始年度 ≤ 结束年度；每个项目仅 1 名校级项目负责人。</td></tr>
+              <tr><td>主要建设方向</td><td>所属计划、方向名称、来源序号、排序、说明</td><td>方向名称必填；允许同名跨计划，不在不同计划间擅自合并。</td></tr>
+              <tr><td>关键产出指标基础</td><td>所属主要建设方向、指标名称、完整描述、指标类型、单位原文、标准单位、目标方向、统计口径、校级牵头／协同单位</td><td>发布前均须明确；复合单位须人工确认。</td></tr>
+              <tr><td>关键产出指标量化</td><td>核算方式、专业群五年目标、学校五年目标、各年度目标、基期值、分子／分母说明、目标精度、外部数据来源</td><td>按核算方式动态必填；空值、0、不适用分别保存。</td></tr>
+              <tr><td>溯源</td><td>来源文件、来源工作表、来源行号、源字段原文、解析状态、确认人、确认时间</td><td>导入数据必备；手工新建可为空。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>7.2 学院任务、填报与审核</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>对象</th><th>必备字段</th><th>关键说明</th></tr></thead>
+            <tbody>
+              <tr><td>学院任务</td><td>所属关键产出指标、执行学院、学院负责人、执行范围、五年目标、各年度目标、接收状态、下发快照、当前版本</td><td>继承类型、单位和核算方式；同学院多项学院任务必须可区分。</td></tr>
+              <tr><td>年度里程碑</td><td>所属学院任务、年度、原目标、调整后目标、认定完成值、缺口、已弥补量、里程碑状态、截止日期</td><td>任何调整不改写原目标；状态与填报版本分开。</td></tr>
+              <tr><td>填报版本</td><td>里程碑、版本号、完成值、完成说明、成果名称、完成日期、提交人、提交时间、版本状态、撤回原因</td><td>提交后只读；退回重报产生新版本。</td></tr>
+              <tr><td>佐证材料</td><td>所属版本、文件名、格式、材料说明、上传人、上传时间、预览状态</td><td>材料与具体版本绑定；至少一项有效材料方可提交。</td></tr>
+              <tr><td>审核记录</td><td>填报版本、审核结论、审核意见、认定完成值、认定依据、审核人、审核时间</td><td>认定值变化必须写依据；审核动作只追加不覆盖。</td></tr>
+            </tbody>
+          </table></div>
+          <h3>7.3 调整与日志</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>对象</th><th>必备字段</th><th>关键说明</th></tr></thead>
+            <tbody>
+              <tr><td>年度顺延单</td><td>所属学院任务、缺口年度、接收年度、顺延量、原因、前后目标快照、审批人、生效时间</td><td>仅累计型默认可用；同一缺口不可重复占用。</td></tr>
+              <tr><td>补位关联</td><td>缺口年度、补位年度、补位量、关联认定记录、形成时间</td><td>只关联实际余量，不重复增加五年总完成量。</td></tr>
+              <tr><td>跨院划转单</td><td>关键产出指标、转出任务、转入学院／转入任务、划转年度、划转量、原因、双方确认、校领导审批、前后快照、状态</td><td>确认与审批按顺序记录；生效后才修改当前执行目标。</td></tr>
+              <tr><td>操作日志</td><td>时间、操作人、当时角色、计划、对象、动作、原因、前后摘要、关联单据</td><td>普通用户不可编辑或删除；导出继承权限。</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <section id="initialization" class="card">
+          <div class="section-head"><div class="section-index">08</div><div><h2>首批数据初始化要求</h2><p class="section-desc">将 97 项源指标迁移为可评审草稿，而非未经确认直接形成学院责任。</p></div></div>
+          <h3>8.1 初始化结果</h3>
+          <ol>
+            <li>建立“智能生产装备与技术专业群”首个计划，周期为 2026—2030，归属建设目录与校级负责人待指定。</li>
+            <li>形成 15 个主要建设方向和 97 个关键产出指标草稿，完整保存 16 个源字段及源行号。</li>
+            <li>导入约束性 28 项、发展性 59 项、特色 10 项；保留源表全部单位字典。</li>
+            <li>已有专业群五年／2026 目标的字段进入待确认量化值，7 项空值保持未量化；学校整体目标独立保存。</li>
+            <li>2027—2030 年仅将已有分工写入对应年度参考信息，其余保持空白，由校级负责人补录。</li>
+          </ol>
+          <h3>8.2 标准学院名录与别名</h3>
+          <p>标准名录为：智能产业学院、游戏产业学院、数字金融产业学院、智能建造产业学院、数字影视传媒产业学院、现代通信产业学院、数据产业学院、未来技术产业学院、马克思主义学院（马院）、国际学院。</p>
+          <div class="callout warning">
+            <div class="callout-title">导入前必须确认名称映射</div>
+            <p>源表同时出现“大数据学院／大数据产业学院”“数据学院／数据产业学院”“现代通信学院”“数传学院”等简称或别名。平台可建议映射，但必须由有权限的用户确认；尤其“数据产业学院”和“大数据产业学院”不得未经确认自动视为同一主体。</p>
+          </div>
+          <h3>8.3 必须在初始化评审中处理的数据情形</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>情形</th><th>源表例证</th><th>平台处理</th></tr></thead>
+            <tbody>
+              <tr><td>分配值与总目标不能简单求和</td><td>如来源序号 20、38 等</td><td>保留原文，标记分配待确认；禁止自动按括号值直接下发。</td></tr>
+              <tr><td>学校目标含专业群与其余部分</td><td>“6（专业群为 3，余 3 项）”等</td><td>分别保存学校总值、专业群值和说明；是否满足加总关系由校验提示。</td></tr>
+              <tr><td>百分比与绝对人数混合</td><td>订单式人才培养、培训人次、获证率</td><td>要求补充分子、分母、统计时点和人数口径，不用自由文本公式直接计算。</td></tr>
+              <tr><td>增长百分比缺少基期</td><td>科研事业收入、社会服务收入五年增长 15%</td><td>发布前补齐基期绝对值和年度绝对值字段。</td></tr>
+              <tr><td>校级部门牵头</td><td>教务处、双高办、财务处等</td><td>保留为关键产出指标牵头／协同单位，不错误生成学院任务。</td></tr>
+              <tr><td>无、空、0、— 并存</td><td>多个无分配或学校直管指标</td><td>按语义分别处理，不得统一替换为 0。</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <section id="nonfunctional" class="card">
+          <div class="section-head"><div class="section-index">09</div><div><h2>通用与非功能要求</h2><p class="section-desc">只规定影响产品使用的质量边界，不限定技术实现方案。</p></div></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>类别</th><th>产品要求</th></tr></thead>
+            <tbody>
+              <tr><td class="strong">权限与隐私</td><td>所有列表、详情、材料预览、甘特图、日志和导出执行一致的数据权限；学院不可通过链接访问其他学院未授权材料。</td></tr>
+              <tr><td class="strong">审核可用性</td><td>目标、填报、材料和审核动作在同一审核上下文中可达；常见材料在线预览失败时明确提示原因并允许重新上传，不强制下载审核。</td></tr>
+              <tr><td class="strong">数据一致性</td><td>下发、提交、审批等动作避免重复生效；重复点击或超时重试不得生成重复任务、重复审核或重复划转。</td></tr>
+              <tr><td class="strong">草稿与恢复</td><td>文本草稿与材料上传状态清晰分离；上传失败、页面刷新或审核退回后，不丢失已确认保存的内容。</td></tr>
+              <tr><td class="strong">可理解性</td><td>状态不仅依靠颜色；所有数值显示单位、年度和目标版本；空值、0、不适用及无法核算使用不同文案。</td></tr>
+              <tr><td class="strong">可追溯性</td><td>任何当前目标均能追溯到原目标与调整链，任何认定完成值均能追溯到填报版本、材料和审核人。</td></tr>
+              <tr><td class="strong">终端与性能</td><td>优先支持桌面端管理场景；浏览器范围、材料预览大小、并发量、响应时间和可用性指标 <span class="tbd">TBD</span>。</td></tr>
+              <tr><td class="strong">数据保留</td><td>建设周期内保留完整版本、审核、调整与日志；周期后的保留和归档年限 <span class="tbd">TBD</span>。</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <section id="questions" class="card">
+          <div class="section-head"><div class="section-index">10</div><div><h2>待确认事项</h2><p class="section-desc">以下事项会实质影响权限、核算或首批数据责任，须在相应功能实施前形成业务结论。</p></div></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>编号</th><th>待确认决策</th><th>影响范围</th><th>本稿临时处理</th></tr></thead>
+            <tbody>
+              <tr><td>Q-01</td><td>10 个标准学院与源表简称、别名的唯一映射，尤其“数据产业学院／大数据产业学院”。</td><td>学院任务下发、权限、首批导入</td><td>不自动合并，进入人工匹配。</td></tr>
+              <tr><td>Q-02</td><td>教务处、双高办等校级单位是否需要独立账号、填报或审核权限。</td><td>角色、校级直管指标</td><td>P0 仅作为关键产出指标牵头／协同单位。</td></tr>
+              <tr><td>Q-03</td><td>每项比率、增长率、复合单位指标的核算方式、基期、分子、分母和统计时点。</td><td>发布、进度、双维度结算</td><td>未补齐前允许草稿，不允许正式核算。</td></tr>
+              <tr><td>Q-04</td><td>年度顺延是否只需校级项目负责人审批，还是也需校领导审批。</td><td>审批权限、待办</td><td><span class="tbd">Assumption, TBD</span> 暂按校级负责人审批。</td></tr>
+              <tr><td>Q-05</td><td>来源序号 20、38 等总目标与分配参考不一致时的最终学院分解，以及其他“非加总分配”指标清单。</td><td>首批学院任务目标与责任</td><td>保存源文，不下发未经确认的学院任务。</td></tr>
+              <tr><td>Q-06</td><td>已审核填报的更正权限、年度截止日期、计划结项条件和接收异议处理流程。</td><td>状态恢复、逾期、结项</td><td>相关动作保持 TBD，不开放直接覆盖历史。</td></tr>
+            </tbody>
+          </table></div>
+          <div class="callout success">
+            <div class="callout-title">评审通过的产品基线</div>
+            <p>除上述待确认项外，本稿将三级任务体系、五年与年度量化、学院下发、人工审核、在线预览、甘特图、年度顺延／补位、跨院划转双方确认与校领导审批、模板复用及日志导出定义为 P0 统一基线。</p>
+          </div>
+        </section>
+
+        <div class="footer">五年建设任务管理平台 PRD V1.0 · 基于所提供任务说明与量化清单编制 · 2026-10-29</div>
+      </div>
+    </main>
+  </div>
+  <button class="print-btn" type="button" onclick="window.print()">打印／另存为 PDF</button>
+  <script>
+    (function () {
+      const dispatchButton = document.getElementById('dispatchCheck');
+      const dispatchFeedback = document.getElementById('dispatchFeedback');
+      const dispatchStatuses = Array.from(document.querySelectorAll('.dispatch-status'));
+      function dispatchValues() {
+        return [Number(document.getElementById('dispatchA').value), Number(document.getElementById('dispatchB').value)];
+      }
+      function updateDispatch() {
+        const values = dispatchValues();
+        const total = values[0] + values[1];
+        dispatchStatuses.forEach(s => { s.textContent = '草稿'; s.className = 'dispatch-status'; });
+        dispatchFeedback.className = 'demo-feedback';
+        if (values.some(v => !Number.isInteger(v) || v < 0)) {
+          dispatchFeedback.classList.add('error');
+          dispatchFeedback.textContent = '目标必须为大于或等于 0 的整数，请修正后再下发。';
+        } else if (total === 2) {
+          dispatchFeedback.classList.add('ok');
+          dispatchFeedback.textContent = '校验通过：已分配 2 门，与关键产出指标目标一致，可以下发。';
+        } else {
+          dispatchFeedback.textContent = '当前已分配 ' + total + ' 门，与关键产出指标目标相差 ' + (2 - total) + ' 门；请修正后再下发。';
+        }
+      }
+      document.querySelectorAll('.dispatch-value').forEach(input => input.addEventListener('input', updateDispatch));
+      dispatchButton.addEventListener('click', function () {
+        const values = dispatchValues();
+        const total = values[0] + values[1];
+        if (values.every(v => Number.isInteger(v) && v >= 0) && total === 2) {
+          dispatchStatuses.forEach(s => { s.textContent = '待接收'; s.className = 'dispatch-status status s-blue'; });
+          dispatchFeedback.className = 'demo-feedback ok';
+          dispatchFeedback.textContent = '下发成功：两项学院任务已进入待接收，并保存下发快照。';
+        } else {
+          dispatchFeedback.className = 'demo-feedback error';
+          dispatchFeedback.textContent = '下发被阻止：目标合计必须等于 2 门，且各项目标须为非负整数。';
+        }
+      });
+      document.getElementById('dispatchReset').addEventListener('click', function () {
+        document.getElementById('dispatchA').value = 1;
+        document.getElementById('dispatchB').value = 0;
+        updateDispatch();
+      });
+
+      const reviewStatus = document.getElementById('reviewStatus');
+      const reviewFeedback = document.getElementById('reviewFeedback');
+      const reviewHint = document.getElementById('reviewHint');
+      const reviewProgress = document.getElementById('reviewProgress');
+      const submitReport = document.getElementById('submitReport');
+      const approveReport = document.getElementById('approveReport');
+      const returnReport = document.getElementById('returnReport');
+      function setReviewState(state) {
+        approveReport.disabled = state !== 'pending';
+        returnReport.disabled = state !== 'pending';
+        submitReport.disabled = state === 'pending' || state === 'done';
+        if (state === 'draft') {
+          reviewStatus.textContent = '填报中'; reviewStatus.className = 'status s-gray';
+          reviewProgress.style.width = '0'; reviewHint.textContent = '草稿尚未提交，不计入认定完成值。';
+          reviewFeedback.textContent = '当前状态：学院草稿。'; reviewFeedback.className = 'demo-feedback';
+          submitReport.textContent = '提交审核';
+        } else if (state === 'pending') {
+          reviewStatus.textContent = '审核中'; reviewStatus.className = 'status s-blue';
+          reviewProgress.style.width = '45%'; reviewHint.textContent = '材料已提交，等待校级人工审核。';
+          reviewFeedback.textContent = '学院已提交新版本，校级可在线预览材料并审核。'; reviewFeedback.className = 'demo-feedback';
+        } else if (state === 'done') {
+          reviewStatus.textContent = '已完成'; reviewStatus.className = 'status s-green';
+          reviewProgress.style.width = '100%'; reviewHint.textContent = '认定值 1 门，达到年度目标。';
+          reviewFeedback.textContent = '审核通过：认定完成值已计入，年度里程碑与甘特图同步为已完成。'; reviewFeedback.className = 'demo-feedback ok';
+        } else if (state === 'returned') {
+          reviewStatus.textContent = '已退回'; reviewStatus.className = 'status s-red';
+          reviewProgress.style.width = '15%'; reviewHint.textContent = '原版本只读，修订后将生成新版本。';
+          reviewFeedback.textContent = '已退回：学院可保留原填写内容，按审核意见修订重报。'; reviewFeedback.className = 'demo-feedback error';
+          submitReport.textContent = '重新提交';
+        }
+      }
+      submitReport.addEventListener('click', () => setReviewState('pending'));
+      approveReport.addEventListener('click', () => setReviewState('done'));
+      returnReport.addEventListener('click', () => setReviewState('returned'));
+      document.getElementById('resetReview').addEventListener('click', () => setReviewState('draft'));
+
+      const ganttText = {
+        a: '关键产出指标课程能力图谱｜五年目标 10 门｜2026—2030 每年 2 门｜点击学院任务行查看学院口径。',
+        b: '学院任务学院甲｜2027 显示未达标缺口｜可从侧栏进入顺延或后续补位流程｜原目标不被覆盖。',
+        c: '关键产出指标三主编教材机制｜是否型里程碑｜审核认定“是”后节点完成，不与数量指标加总。'
+      };
+      document.querySelectorAll('[data-gantt]').forEach(node => node.addEventListener('click', function () {
+        document.querySelectorAll('[data-gantt]').forEach(n => n.classList.remove('active'));
+        this.classList.add('active');
+        document.getElementById('ganttFeedback').textContent = ganttText[this.dataset.gantt];
+      }));
+
+      let transferStep = 0;
+      const transferMessages = [
+        '调整单草稿已建立，原目标尚未改变。',
+        '校级已发起：等待转出学院确认，划转量已暂时占用。',
+        '转出学院已确认：等待转入学院确认，目标仍未改变。',
+        '转入学院已确认：等待校领导最终审批。',
+        '校领导已批准：双方调整后目标生效，原目标与审批链已完整留存。'
+      ];
+      function renderTransfer() {
+        const steps = Array.from(document.querySelectorAll('#transferSteps .step'));
+        steps.forEach((step, index) => {
+          step.className = 'step' + (index < transferStep ? ' done' : index === transferStep && transferStep < 4 ? ' active' : index === 3 && transferStep === 4 ? ' done' : '');
+        });
+        const feedback = document.getElementById('transferFeedback');
+        feedback.textContent = transferMessages[transferStep];
+        feedback.className = 'demo-feedback' + (transferStep === 4 ? ' ok' : '');
+        document.getElementById('transferNext').disabled = transferStep === 4;
+      }
+      document.getElementById('transferNext').addEventListener('click', function () {
+        if (transferStep < 4) transferStep += 1;
+        renderTransfer();
+      });
+      document.getElementById('transferReset').addEventListener('click', function () { transferStep = 0; renderTransfer(); });
+    })();
+  </script>
+</body>
+</html>

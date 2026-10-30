@@ -1,0 +1,1 @@
+<template><div class="error-page standalone"><div class="error-code">404</div><h2>页面不存在</h2><p>访问地址可能已变更，平台未展示任何业务数据。</p><el-button type="primary" @click="$router.replace('/dashboard')">返回平台</el-button></div></template>

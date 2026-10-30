@@ -1,0 +1,1 @@
+<template><div class="error-page"><div class="error-code">403</div><h2>当前账号无权访问</h2><p>数据范围由项目归属和学院归属共同决定，请返回待办首页或切换授权账号。</p><el-button type="primary" @click="$router.replace('/dashboard')">返回待办首页</el-button></div></template>
