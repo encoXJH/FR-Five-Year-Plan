@@ -140,6 +140,9 @@ public class AdjustmentService {
 
     public AdjustmentDtos.PreviewResponse preview(AdjustmentDtos.CreateRequest request) {
         Prepared prepared = prepare(request);
+        if (!AdjustmentRules.TARGET_CHANGE.equals(prepared.type())) {
+            requireApplicantScope(prepared.fromTask(), prepared.indicator(), SecurityUtils.getLoginUser());
+        }
         List<FieldError> errors = prepared.errors().stream()
                 .map(e -> new FieldError(e.field(), e.message())).toList();
         return new AdjustmentDtos.PreviewResponse(errors.isEmpty(), errors,
@@ -687,7 +690,7 @@ public class AdjustmentService {
         List<AdjustmentRules.TargetEntry> after = moves.isEmpty() ? before
                 : AdjustmentRules.applyMoves(before, moves);
 
-        // 防御性守恒复核：移动后 ΣB 与 A+ 年度目标应仍一致（两侧同步移动）
+        // 防御性守恒复核：移动后求和口径 ΣB 仍不得低于指标年度目标（两侧同步移动）
         if (errors.isEmpty() && !moves.isEmpty()) {
             Map<Integer, BigDecimal> bSum = bSumByYear(indicator.getId());
             Map<Integer, BigDecimal> aplusTargets = indicatorTargets(indicator.getId());
@@ -831,7 +834,7 @@ public class AdjustmentService {
 
     /**
      * 目标调整守恒校验（70002；创建试算与生效前复核共用）：
-     * INCREMENT / BOOLEAN 各年和 = 五年总量；A+ 逐年 = ΣB 逐年；AUTO_SUM 的 A 逐年 = ΣA+ 逐年。
+     * INCREMENT / BOOLEAN 各年和 = 五年总量；求和口径 ΣB 不低于指标逐年目标，允许超额；AUTO_SUM 的 A 同步复核。
      * items 中 toYear 为 null 表示调整该指标的五年总量。
      */
     public List<FieldError> targetChangeErrors(Indicator rootIndicator, List<PreparedItemView> items) {

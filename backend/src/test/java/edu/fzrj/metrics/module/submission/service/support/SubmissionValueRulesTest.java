@@ -80,6 +80,8 @@ class SubmissionValueRulesTest {
         assertNull(SubmissionValueRules.attachmentError("INCREMENT", 1, 1, null));
         assertNotNull(SubmissionValueRules.attachmentError("INCREMENT", 2, 1, null));
         assertNotNull(SubmissionValueRules.attachmentError("DIRECT_PERCENT", 0, 0, null));
-        assertNull(SubmissionValueRules.attachmentError("DIRECT_PERCENT", 0, 0, "来源：省教育厅公报"));
+        assertNotNull(SubmissionValueRules.attachmentError("DIRECT_PERCENT", 0, 0, "来源：省教育厅公报"));
+        assertNotNull(SubmissionValueRules.attachmentError("DIRECT_PERCENT", 0, 1, null));
+        assertNull(SubmissionValueRules.attachmentError("DIRECT_PERCENT", 0, 1, "来源：省教育厅公报"));
     }
 }

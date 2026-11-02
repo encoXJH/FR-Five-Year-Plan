@@ -1,5 +1,5 @@
 import type { UserRef } from './api'
-import type { FileBizType, FileCategory, PreviewType, TranscodeStatus } from './enums'
+import type { FileBizType, FileCategory, PreviewRenderMode, PreviewType, TranscodeStatus } from './enums'
 
 /** 文件对象 FileInfo（API 约定 8.3） */
 export interface FileInfo {
@@ -20,6 +20,8 @@ export interface PreviewInfo {
   previewType: PreviewType
   url: string | null
   expiresAt: string | null
+  /** OFFICE 专用：KKFILEVIEW 外部服务内嵌 / CLIENT 浏览器内渲染 */
+  renderMode: PreviewRenderMode | null
 }
 
 /** GET /files/{fileId}/download-url 返回 */

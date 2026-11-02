@@ -37,6 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.Year;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -333,6 +334,9 @@ public class SettlementService {
         if (plan.getFinalSettledAt() != null) {
             return buildFinalReport(plan);
         }
+        if (Year.now().getValue() <= plan.getEndYear()) {
+            throw new BizException(ErrorCode.PLAN_STATUS_INVALID, "规划期尚未结束，不能进行五年核算");
+        }
         List<PlanYear> years = planYearMapper.selectList(new LambdaQueryWrapper<PlanYear>()
                 .eq(PlanYear::getPlanId, planId).eq(PlanYear::getDeleted, 0L));
         boolean allLocked = !years.isEmpty() && years.stream().allMatch(y -> "LOCKED".equals(y.getStatus()));
@@ -343,7 +347,8 @@ public class SettlementService {
         LocalDateTime now = LocalDateTime.now();
 
         SettlementDtos.FinalSettlementView report = computeFinalReport(plan, now,
-                userRefResolver.refOf(userId, userRefResolver.mapOf(List.of(userId))));
+                userRefResolver.refOf(userId, userRefResolver.mapOf(List.of(userId))),
+                StatsService.ScopeFilter.allData());
 
         // 任务终态化：执行中 / 已下发 → 已结束
         List<Task> openTasks = taskMapper.selectList(new LambdaQueryWrapper<Task>()
@@ -382,12 +387,13 @@ public class SettlementService {
         Map<Long, SysUser> users = plan.getFinalSettledBy() == null ? Map.of()
                 : userRefResolver.mapOf(List.of(plan.getFinalSettledBy()));
         return computeFinalReport(plan, plan.getFinalSettledAt(),
-                userRefResolver.refOf(plan.getFinalSettledBy(), users));
+                userRefResolver.refOf(plan.getFinalSettledBy(), users), statsService.currentScope());
     }
 
     /** 逐 A 指标按口径计算五年完成值（缓存可由审核数据全量重算，见数据库设计规则 4） */
     private SettlementDtos.FinalSettlementView computeFinalReport(Plan plan, LocalDateTime settledAt,
-                                                                  edu.fzrj.metrics.common.api.UserRef settledBy) {
+                                                                  edu.fzrj.metrics.common.api.UserRef settledBy,
+                                                                  StatsService.ScopeFilter scope) {
         List<Indicator> aList = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
                         .eq(Indicator::getPlanId, plan.getId())
                         .eq(Indicator::getLevel, "A")
@@ -395,6 +401,20 @@ public class SettlementService {
                         .eq(Indicator::getDeleted, 0L))
                 .stream().sorted(Comparator.comparing(Indicator::getSort).thenComparing(Indicator::getCode))
                 .toList();
+        if (!scope.all()) {
+            Set<Long> visibleIndicatorIds = new HashSet<>(scope.indicatorIds());
+            if (!aList.isEmpty()) {
+                taskMapper.selectList(new LambdaQueryWrapper<Task>()
+                                .eq(Task::getPlanId, plan.getId())
+                                .ne(Task::getStatus, "PENDING_DISTRIBUTION")
+                                .eq(Task::getDeleted, 0L))
+                        .stream().filter(scope::test).forEach(task -> {
+                            visibleIndicatorIds.add(task.getIndicatorId());
+                            visibleIndicatorIds.add(task.getTopIndicatorId());
+                        });
+            }
+            aList = aList.stream().filter(a -> visibleIndicatorIds.contains(a.getId())).toList();
+        }
         List<IndicatorYearTarget> allTargets = aList.isEmpty() ? List.of()
                 : yearTargetMapper.selectList(new LambdaQueryWrapper<IndicatorYearTarget>()
                         .in(IndicatorYearTarget::getIndicatorId, aList.stream().map(Indicator::getId).toList())

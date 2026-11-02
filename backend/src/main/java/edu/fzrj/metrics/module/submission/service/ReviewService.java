@@ -13,6 +13,7 @@ import edu.fzrj.metrics.module.notify.entity.Notification;
 import edu.fzrj.metrics.module.notify.mapper.NotificationMapper;
 import edu.fzrj.metrics.module.plan.entity.PlanYear;
 import edu.fzrj.metrics.module.plan.mapper.PlanYearMapper;
+import edu.fzrj.metrics.module.plan.service.PlanService;
 import edu.fzrj.metrics.module.submission.dto.SubmissionDtos;
 import edu.fzrj.metrics.module.submission.entity.Review;
 import edu.fzrj.metrics.module.submission.entity.Submission;
@@ -57,6 +58,7 @@ public class ReviewService {
     private final TaskService taskService;
     private final TaskMapper taskMapper;
     private final DataScopeService dataScopeService;
+    private final PlanService planService;
     private final TransactionTemplate requiresNewTemplate;
     private final AnnualTargetGuard annualTargetGuard;
 
@@ -65,7 +67,8 @@ public class ReviewService {
                          NotificationMapper notificationMapper, SubmissionService submissionService,
                          ActualRecalcService actualRecalcService, IndicatorService indicatorService,
                          TaskService taskService, TaskMapper taskMapper, DataScopeService dataScopeService,
-                         PlatformTransactionManager transactionManager, AnnualTargetGuard annualTargetGuard) {
+                         PlanService planService, PlatformTransactionManager transactionManager,
+                         AnnualTargetGuard annualTargetGuard) {
         this.submissionMapper = submissionMapper;
         this.reviewMapper = reviewMapper;
         this.indicatorMapper = indicatorMapper;
@@ -77,6 +80,7 @@ public class ReviewService {
         this.taskService = taskService;
         this.taskMapper = taskMapper;
         this.dataScopeService = dataScopeService;
+        this.planService = planService;
         this.requiresNewTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTemplate.setPropagationBehavior(TransactionTemplate.PROPAGATION_REQUIRES_NEW);
         this.annualTargetGuard = annualTargetGuard;
@@ -204,6 +208,7 @@ public class ReviewService {
         }
         boolean proxy = requireReviewer(submission);
         taskService.requireCurrentTask(submission.getTaskId());
+        planService.requireNotArchived(planService.requirePlan(submission.getPlanId()));
         requireYearNotLocked(submission.getPlanId(), submission.getYear());
         String caliber = submission.getStatCaliber();
         SubmissionDtos.MetricValue approved = request.getApprovedValue();

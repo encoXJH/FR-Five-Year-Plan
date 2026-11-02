@@ -50,6 +50,7 @@ public class DistributeService {
     private final IndicatorMapper indicatorMapper;
     private final TaskMapper taskMapper;
     private final TaskYearMapper taskYearMapper;
+    private final TaskYearActivationService taskYearActivationService;
     private final OrgUnitMapper orgUnitMapper;
     private final OrgUnitAdminService orgUnitAdminService;
     private final NotificationMapper notificationMapper;
@@ -58,7 +59,9 @@ public class DistributeService {
 
     public DistributeService(PlanService planService, IndicatorService indicatorService,
                              IndicatorMapper indicatorMapper, TaskMapper taskMapper,
-                             TaskYearMapper taskYearMapper, OrgUnitMapper orgUnitMapper,
+                             TaskYearMapper taskYearMapper,
+                             TaskYearActivationService taskYearActivationService,
+                             OrgUnitMapper orgUnitMapper,
                              OrgUnitAdminService orgUnitAdminService, NotificationMapper notificationMapper,
                              DataScopeService dataScopeService, PlanReadScopeService planReadScopeService) {
         this.planService = planService;
@@ -66,6 +69,7 @@ public class DistributeService {
         this.indicatorMapper = indicatorMapper;
         this.taskMapper = taskMapper;
         this.taskYearMapper = taskYearMapper;
+        this.taskYearActivationService = taskYearActivationService;
         this.orgUnitMapper = orgUnitMapper;
         this.orgUnitAdminService = orgUnitAdminService;
         this.notificationMapper = notificationMapper;
@@ -89,7 +93,9 @@ public class DistributeService {
                 .filter(i -> "DRAFT".equals(i.getStatus()) || "FINALIZED".equals(i.getStatus())
                         || "DISTRIBUTED".equals(i.getStatus()))
                 .toList();
+        Long userId = SecurityUtils.getUserId();
         if (distributable.isEmpty()) {
+            taskYearActivationService.syncPlan(planId, userId);
             return new TaskDtos.DistributeResponse(0, 0);
         }
         List<Long> distributableIds = distributable.stream().map(Indicator::getId).toList();
@@ -105,6 +111,7 @@ public class DistributeService {
                 .filter(i -> !"DISTRIBUTED".equals(i.getStatus()) || indicatorsWithPending.contains(i.getId()))
                 .toList();
         if (candidates.isEmpty()) {
+            taskYearActivationService.syncPlan(planId, userId);
             return new TaskDtos.DistributeResponse(0, 0);
         }
         indicatorService.validateForDistribution(plan, all);
@@ -152,7 +159,6 @@ public class DistributeService {
         }
         pending.forEach(task -> orgUnitAdminService.requireBAssignable(task.getUnitId()));
 
-        Long userId = SecurityUtils.getUserId();
         LocalDateTime now = LocalDateTime.now();
         Map<Long, OrgUnit> units = unitsOf(pending.stream().map(Task::getUnitId).toList());
         Map<Long, Indicator> candidateById = candidates.stream()
@@ -165,6 +171,7 @@ public class DistributeService {
             taskMapper.updateById(task);
             notifyOwner(plan, task, candidateById.get(task.getIndicatorId()), units.get(task.getUnitId()));
         }
+        activateTaskYears(plan, userId);
         for (Indicator indicator : candidates) {
             indicator.setStatus("DISTRIBUTED");
             indicator.setUpdatedBy(userId);
@@ -176,6 +183,14 @@ public class DistributeService {
     }
 
     // ---------------- 内部 ----------------
+
+    /**
+     * 下发后同步计划内所有已下发任务的年度状态：计划年度已激活的年份直接置为 IN_PROGRESS。
+     * 整计划同步可顺带修复此前“先激活年度、后下发任务”遗留的未激活记录。
+     */
+    private void activateTaskYears(Plan plan, Long userId) {
+        taskYearActivationService.syncPlan(plan.getId(), userId);
+    }
 
     private List<Indicator> restrictToScope(List<Indicator> indicators, List<Long> requestedIds,
                                             Map<Long, Indicator> byId) {

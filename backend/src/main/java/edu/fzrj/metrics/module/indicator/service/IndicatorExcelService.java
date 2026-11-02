@@ -244,7 +244,9 @@ public class IndicatorExcelService {
             }
             results.add(new IndicatorDtos.ImportRowResult(row.rowNum,
                     EnumAliases.parse(EnumAliases.LEVEL, row.level), row.code, row.parentCode, row.name,
-                    ImportValidator.parseDecimal(row.totalTarget), valid, errors));
+                    ImportValidator.normalizePercent(ImportValidator.parseDecimal(row.totalTarget),
+                            EnumAliases.parse(EnumAliases.STAT_CALIBER, row.statCaliber)),
+                    valid, errors));
         }
         String importId = importPreviewStore.save(draft);
         return new IndicatorDtos.ImportPreviewResponse(importId, rows.size(), validRows,
@@ -299,16 +301,19 @@ public class IndicatorExcelService {
         typed.setTargetDirection(ImportValidator.isBlank(row.targetDirection)
                 ? "HIGHER_BETTER" : EnumAliases.parse(EnumAliases.TARGET_DIRECTION, row.targetDirection));
         typed.setRollupMode(EnumAliases.parse(EnumAliases.ROLLUP_MODE, row.rollupMode));
-        typed.setBaselineValue(ImportValidator.parseDecimal(row.baseline));
-        typed.setTotalTarget("BOOLEAN".equals(typed.getStatCaliber())
-                ? BigDecimal.ONE : ImportValidator.parseDecimal(row.totalTarget));
+        String caliber = typed.getStatCaliber();
+        typed.setBaselineValue(ImportValidator.normalizePercent(
+                ImportValidator.parseDecimal(row.baseline), caliber));
+        typed.setTotalTarget("BOOLEAN".equals(caliber)
+                ? BigDecimal.ONE
+                : ImportValidator.normalizePercent(ImportValidator.parseDecimal(row.totalTarget), caliber));
         Map<Integer, BigDecimal> targets = new LinkedHashMap<>();
         for (int year = plan.getStartYear(); year <= plan.getEndYear(); year++) {
             String raw = row.yearTargets.get(year);
-            if ("BOOLEAN".equals(typed.getStatCaliber())) {
+            if ("BOOLEAN".equals(caliber)) {
                 targets.put(year, Boolean.TRUE.equals(EnumAliases.parseYesNo(raw)) ? BigDecimal.ONE : null);
             } else {
-                targets.put(year, ImportValidator.parseDecimal(raw));
+                targets.put(year, ImportValidator.normalizePercent(ImportValidator.parseDecimal(raw), caliber));
             }
         }
         typed.setYearTargets(targets);

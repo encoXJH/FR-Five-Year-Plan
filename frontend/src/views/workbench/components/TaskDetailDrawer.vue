@@ -70,6 +70,11 @@ async function openSubmission(item: SubmissionListItem): Promise<void> {
   }
 }
 
+/** 草稿未提交时 revisionNo 为 0，不能显示成「第 0 次提交」。 */
+function submissionRoundLabel(revisionNo: number | null | undefined): string {
+  return typeof revisionNo === 'number' && revisionNo > 0 ? `第 ${revisionNo} 次提交` : '尚未提交'
+}
+
 function openMaterial(file: FileInfo): void {
   previewFile.value = file
   previewVisible.value = true
@@ -189,7 +194,7 @@ watch(visible, (value) => {
                 :class="{ 'is-active': submissionDetail?.id === item.id }"
                 @click="openSubmission(item)"
               >
-                <span>{{ item.year }} 年 · 第 {{ item.revisionNo }} 次提交</span>
+                <span>{{ item.year }} 年 · {{ submissionRoundLabel(item.revisionNo) }}</span>
                 <StatusTag kind="SubmissionStatus" :value="item.status" />
                 <small>{{ formatDateTime(item.submittedAt ?? item.createdAt) }} · 材料 {{ item.fileCount ?? 0 }} 份</small>
               </button>

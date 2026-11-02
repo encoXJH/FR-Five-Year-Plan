@@ -24,6 +24,7 @@ import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
+import edu.fzrj.metrics.module.task.service.TaskYearActivationService;
 import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
@@ -81,6 +82,8 @@ class PlanServiceTest {
     private TaskMapper taskMapper;
     @Mock
     private TaskYearMapper taskYearMapper;
+    @Mock
+    private TaskYearActivationService taskYearActivationService;
     @Mock
     private ObjectMapper objectMapper;
     @Mock

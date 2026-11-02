@@ -14,6 +14,9 @@ public class MaterialRow {
     private String category;
     private String bizType;
     private LocalDateTime uploadedAt;
+    private Integer submissionYear;
+    private Long taskId;
+    private String taskCode;
     private Long indicatorId;
     private String indicatorCode;
     private String indicatorName;

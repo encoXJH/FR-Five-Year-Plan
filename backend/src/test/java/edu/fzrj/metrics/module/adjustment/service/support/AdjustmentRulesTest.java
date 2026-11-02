@@ -250,14 +250,21 @@ class AdjustmentRulesTest {
     }
 
     @Test
-    void 守恒_逐年差值逐条报告() {
+    void 守恒_仅逐年合计不足时报告错误() {
         Map<Integer, BigDecimal> child = Map.of(2026, bd("1"), 2027, bd("1"));
         Map<Integer, BigDecimal> parent = Map.of(2026, bd("2"), 2027, bd("1"));
         List<String> errors = AdjustmentRules.conservationErrors("INCREMENT", "A+ 目标", child, parent);
         assertEquals(1, errors.size());
         assertTrue(errors.get(0).contains("2026"));
-        assertTrue(errors.get(0).contains("1"));
-        assertTrue(errors.get(0).contains("2"));
+        assertTrue(errors.get(0).contains("低于"));
+    }
+
+    @Test
+    void 守恒_与下发一致允许超额分配() {
+        Map<Integer, BigDecimal> child = Map.of(2026, bd("2"));
+        Map<Integer, BigDecimal> parent = Map.of(2026, bd("1"));
+        assertTrue(AdjustmentRules.conservationErrors("INCREMENT", "A+ 目标", child, parent).isEmpty());
+        assertTrue(AdjustmentRules.conservationErrors("STOCK", "A+ 目标", child, parent).isEmpty());
     }
 
     @Test
@@ -273,7 +280,14 @@ class AdjustmentRulesTest {
     void 守恒_缺失年度按零参与() {
         Map<Integer, BigDecimal> child = new HashMap<>();
         Map<Integer, BigDecimal> parent = Map.of(2027, bd("1"));
-        assertEquals(1, AdjustmentRules.conservationErrors("BOOLEAN", "A+ 目标", child, parent).size());
+        assertEquals(1, AdjustmentRules.conservationErrors("INCREMENT", "A+ 目标", child, parent).size());
+    }
+
+    @Test
+    void 守恒_是否型不做数量求和校验() {
+        Map<Integer, BigDecimal> child = Map.of(2026, bd("1"), 2027, bd("1"));
+        Map<Integer, BigDecimal> parent = Map.of(2027, bd("1"));
+        assertTrue(AdjustmentRules.conservationErrors("BOOLEAN", "A+ 目标", child, parent).isEmpty());
     }
 
     // ---------------- 40002 语义（年和 = 总量） ----------------

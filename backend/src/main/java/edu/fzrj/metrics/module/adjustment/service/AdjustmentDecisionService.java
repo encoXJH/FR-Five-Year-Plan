@@ -28,6 +28,7 @@ import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.module.task.service.TaskService;
+import edu.fzrj.metrics.module.task.service.TaskYearActivationService;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
@@ -62,6 +63,7 @@ public class AdjustmentDecisionService {
     private final OrgUnitAdminService orgUnitAdminService;
     private final AdjustmentService adjustmentService;
     private final TaskService taskService;
+    private final TaskYearActivationService taskYearActivationService;
     private final IndicatorService indicatorService;
     private final PlanService planService;
 
@@ -70,7 +72,9 @@ public class AdjustmentDecisionService {
                                      TaskYearMapper taskYearMapper,
                                      IndicatorYearTargetMapper yearTargetMapper, PlanYearMapper planYearMapper,
                                      OrgUnitAdminService orgUnitAdminService, AdjustmentService adjustmentService,
-                                     TaskService taskService, IndicatorService indicatorService,
+                                     TaskService taskService,
+                                     TaskYearActivationService taskYearActivationService,
+                                     IndicatorService indicatorService,
                                      PlanService planService) {
         this.adjustmentMapper = adjustmentMapper;
         this.itemMapper = itemMapper;
@@ -82,6 +86,7 @@ public class AdjustmentDecisionService {
         this.orgUnitAdminService = orgUnitAdminService;
         this.adjustmentService = adjustmentService;
         this.taskService = taskService;
+        this.taskYearActivationService = taskYearActivationService;
         this.indicatorService = indicatorService;
         this.planService = planService;
     }
@@ -111,6 +116,8 @@ public class AdjustmentDecisionService {
         List<AdjustmentItem> items = adjustmentService.itemsOf(adjustmentId);
         adjustmentService.requireCurrentTasks(adjustment, items);
         requireYearsNotLocked(adjustment, items);
+        Plan plan = planService.requirePlan(adjustment.getPlanId());
+        planService.requireNotArchived(plan);
 
         LocalDateTime now = LocalDateTime.now();
         step.setDecision(decision);
@@ -119,7 +126,6 @@ public class AdjustmentDecisionService {
         step.setDecidedBy(userId);
         stepMapper.updateById(step);
 
-        Plan plan = planService.requirePlan(adjustment.getPlanId());
         boolean receiverConfirm = !Boolean.FALSE.equals(plan.getIsReceiverConfirmRequired());
         String nextStatus = AdjustmentRules.statusOnDecision(adjustment.getType(),
                 adjustment.getStatus(), decision, receiverConfirm);
@@ -205,6 +211,13 @@ public class AdjustmentDecisionService {
                 receiverTask = createReceiverTask(adjustment, fromTask, indicator, plan, receiverUnit, userId);
             } else {
                 receiverTask = taskService.requireCurrentTask(receiverTask.getId());
+                if ("TRANSFERRED_OUT".equals(receiverTask.getStatus())) {
+                    receiverTask.setStatus("IN_PROGRESS");
+                    receiverTask.setUpdatedBy(userId);
+                    if (taskMapper.updateById(receiverTask) == 0) {
+                        throw new BizException(ErrorCode.VERSION_CONFLICT, "接收任务已被他人修改，请重试");
+                    }
+                }
             }
         }
 
@@ -298,7 +311,7 @@ public class AdjustmentDecisionService {
         // 调整前后快照（before 申请时已写；after 按试算规则重算，与 preview 一致）
         adjustment.setSnapshotAfter(adjustmentService.writeSnapshot(computeMoveAfter(adjustment, items)));
 
-        // 防御性守恒复核（规则 6.8）：ΣB 逐年 = A+ 逐年，不满足则回滚
+        // 防御性守恒复核（规则 6.8）：与下发一致，求和口径 ΣB 不得低于指标目标
         List<String> conservation = AdjustmentRules.conservationErrors(caliber, "A+ 目标",
                 adjustmentService.bSumByYear(indicator.getId()),
                 adjustmentService.indicatorTargets(indicator.getId()));
@@ -394,6 +407,7 @@ public class AdjustmentDecisionService {
             taskYear.setUpdatedBy(userId);
             taskYearMapper.insert(taskYear);
         }
+        taskYearActivationService.syncTasks(plan.getId(), List.of(task.getId()), userId);
         return task;
     }
 

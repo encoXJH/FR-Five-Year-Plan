@@ -128,6 +128,15 @@ class StatsServiceTest {
         assertTrue(a.children().stream().noneMatch(node -> "A_PLUS".equals(node.level())));
     }
 
+    @Test
+    void 增长率统计树返回年度完成总量() {
+        StatsDtos.TreeNode a = mixedTree("GROWTH");
+
+        assertEquals(0, new BigDecimal("8").compareTo(a.actualTotal()));
+        assertEquals(0, new BigDecimal("3").compareTo(a.children().get(0).actualTotal()));
+        assertEquals(0, new BigDecimal("5").compareTo(a.children().get(1).actualTotal()));
+    }
+
     private StatsDtos.TreeNode mixedTree(String caliber) {
         Plan plan = new Plan();
         plan.setId(11L);
@@ -216,6 +225,9 @@ class StatsServiceTest {
                     java.math.RoundingMode.HALF_UP));
         } else {
             year.setActualValue(new BigDecimal(actual));
+            if ("GROWTH".equals(caliber)) {
+                year.setActualTotal(new BigDecimal(actual));
+            }
         }
         return year;
     }

@@ -35,4 +35,10 @@ const visible = computed({
 :deep(.el-drawer__body) {
   padding: 0;
 }
+
+@media (max-width: 768px) {
+  :global(.el-drawer.preview-drawer) {
+    width: 100% !important;
+  }
+}
 </style>

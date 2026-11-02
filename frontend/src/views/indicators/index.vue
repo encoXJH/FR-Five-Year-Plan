@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { ArrowDown, Delete } from '@element-plus/icons-vue'
 import StatusTag from '@/components/StatusTag.vue'
 import ResponsiveRecordView from '@/components/ResponsiveRecordView.vue'
 import FilePreviewDrawer from '@/components/FilePreviewDrawer.vue'
@@ -13,7 +13,7 @@ import RollupBadge from './components/RollupBadge.vue'
 import TaskDetailDrawer from '@/views/workbench/components/TaskDetailDrawer.vue'
 import TaskAllocationModal from '@/views/allocation/TaskAllocationModal.vue'
 import { getPlan, listPlans } from '@/api/plan'
-import { createDirection, listDirections } from '@/api/direction'
+import { createDirection, deleteDirection, listDirections } from '@/api/direction'
 import { deleteIndicator, listIndicators } from '@/api/indicator'
 import { listAllTasks } from '@/api/task'
 import { createExport, pollExport } from '@/api/export'
@@ -27,6 +27,11 @@ import { enumLabel } from '@/utils/enumLabels'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import {
   booleanPlanYear,
+  completionLevel,
+  completionLevelClass,
+  completionPercent,
+  exceededAmount,
+  formatActualValue,
   formatTargetValue,
   hasQuantitativeFields,
   indexStatsTree,
@@ -34,6 +39,8 @@ import {
   parseExpandedIndicatorIds,
   serializeExpandedIndicatorIds,
   yearTargetMap,
+  type CompletionLevel,
+  type StatsTreeIndex,
 } from '@/utils/indicator'
 import { formatCount, formatDateTime, formatNumber, formatPercent } from '@/utils/format'
 import { formatFileSize, triggerFileDownload } from '@/utils/file'
@@ -54,6 +61,7 @@ const loading = ref(false)
 const plan = ref<PlanDetail | null>(null)
 const tree = ref<IndicatorTreeNode[]>([])
 const statsTree = ref<StatsTreeNode[]>([])
+const yearStatsIndexes = ref<Map<number, StatsTreeIndex>>(new Map())
 const directionList = ref<Direction[]>([])
 const userOptions = ref<UserOption[]>([])
 const selectedDirectionId = ref('')
@@ -63,6 +71,8 @@ let statsRequestId = 0
 let directionRequestId = 0
 let expandAllRequestId = 0
 const EXPAND_ALL_CONCURRENCY = 6
+/** 进入页面最多恢复的展开行数，避免一次预加载上百条 B 任务 */
+const MAX_RESTORED_EXPANDED = 20
 
 const defaultOnlyMine = (): boolean => userStore.roles.includes('SCHOOL_OWNER')
 const filters = reactive({
@@ -78,6 +88,10 @@ const canAllocate = computed(() => userStore.can('allocation:edit'))
 const isAdmin = computed(() => userStore.roles.includes('ADMIN'))
 const isArchived = computed(() => plan.value?.status === 'ARCHIVED')
 const readOnly = computed(() => isArchived.value)
+/** 编辑模式：开启后在主要建设方向和关键产出指标旁显示删除图标 */
+const editMode = ref(false)
+const canEnterEditMode = computed(() => !readOnly.value && (canEdit.value || isAdmin.value))
+const canDeleteDirection = computed(() => isAdmin.value && !readOnly.value)
 const years = computed<number[]>(() => {
   if (!plan.value) return []
   const list: number[] = []
@@ -85,15 +99,25 @@ const years = computed<number[]>(() => {
   return list
 })
 const currentYear = new Date().getFullYear()
+const focusYear = computed(() => (years.value.includes(currentYear) ? currentYear : (years.value[0] ?? currentYear)))
 async function loadStatsTree(): Promise<void> {
   const requestedPlanId = planId.value
   if (!requestedPlanId) return
   const requestId = ++statsRequestId
+  const planYears = years.value.length > 0 ? [...years.value] : [currentYear]
   try {
-    const result = await getStatsTree(requestedPlanId)
-    if (requestId === statsRequestId && requestedPlanId === planId.value) statsTree.value = result
+    const trees = await Promise.all(planYears.map((year) => getStatsTree(requestedPlanId, year)))
+    if (requestId !== statsRequestId || requestedPlanId !== planId.value) return
+    const indexes = new Map<number, StatsTreeIndex>()
+    planYears.forEach((year, index) => indexes.set(year, indexStatsTree(trees[index] ?? [])))
+    yearStatsIndexes.value = indexes
+    const focusIndex = Math.max(0, planYears.indexOf(focusYear.value))
+    statsTree.value = trees[focusIndex] ?? []
   } catch {
-    if (requestId === statsRequestId && requestedPlanId === planId.value) statsTree.value = []
+    if (requestId === statsRequestId && requestedPlanId === planId.value) {
+      statsTree.value = []
+      yearStatsIndexes.value = new Map()
+    }
   }
 }
 
@@ -133,13 +157,14 @@ async function loadAll(): Promise<void> {
   const requestId = ++planRequestId
   loading.value = true
   try {
-    const [detail] = await Promise.all([
-      getPlan(requestedPlanId),
+    const detail = await getPlan(requestedPlanId)
+    if (requestId !== planRequestId || requestedPlanId !== planId.value) return
+    plan.value = detail
+    await Promise.all([
       loadTree(),
       loadStatsTree(),
       loadDirections(),
     ])
-    if (requestId === planRequestId && requestedPlanId === planId.value) plan.value = detail
   } finally {
     if (requestId === planRequestId) loading.value = false
   }
@@ -279,7 +304,13 @@ function restoreExpandedState(): void {
   expandedIds.clear()
   if (!planId.value) return
   try {
-    for (const id of parseExpandedIndicatorIds(localStorage.getItem(expansionStorageKey()))) expandedIds.add(id)
+    const stored = parseExpandedIndicatorIds(localStorage.getItem(expansionStorageKey()))
+    // 恢复过多展开会逐条请求 B 任务，超过上限时不恢复，避免进入页面长时间加载
+    if (stored.length > MAX_RESTORED_EXPANDED) {
+      localStorage.removeItem(expansionStorageKey())
+      return
+    }
+    for (const id of stored) expandedIds.add(id)
   } catch {
     // 存储不可用时仍允许当前会话展开。
   }
@@ -394,10 +425,11 @@ async function toggleExpandAll(): Promise<void> {
 async function syncExpandedNodes(): Promise<void> {
   await nextTick()
   updateExpandAllState()
-  const requestedPlanId = planId.value
   const expandedRows = lazyTree.value.filter((row) => row.hasChildren && expandedIds.has(row.id))
-  await preloadIndicatorTasks(expandedRows)
-  if (requestedPlanId === planId.value) updateExpandAllState()
+  if (expandedRows.length > 0) {
+    // 展开状态恢复后异步补齐 B 任务，不阻塞页面首屏
+    setTimeout(() => { void preloadIndicatorTasks(expandedRows) }, 0)
+  }
 }
 
 async function performToggleExpansion(row: ATableRow): Promise<void> {
@@ -411,13 +443,6 @@ async function performToggleExpansion(row: ATableRow): Promise<void> {
   }
   if (!lazyTree.value.some((item) => item.id === row.id)) return
   handleExpandChange(row, expanded)
-}
-
-const INDICATOR_NAME_LIMIT = 15
-
-function shortIndicatorName(name: string): string {
-  const chars = Array.from(name)
-  return chars.length > INDICATOR_NAME_LIMIT ? `${chars.slice(0, INDICATOR_NAME_LIMIT).join('')}…` : name
 }
 
 function toggleExpansion(row: ATableRow): void {
@@ -473,6 +498,85 @@ function totalTargetDisplay(row: Indicator): string {
     return planYear === null ? '—' : `是（${planYear} 年）`
   }
   return formatTargetValue(row.totalTarget, row.statCaliber)
+}
+
+/** 指定年度的 A 统计节点（完成值、完成率来自后端统计树） */
+function aStatsOfYear(indicatorId: string, year: number): StatsTreeNode | undefined {
+  return yearStatsIndexes.value.get(year)?.indicators.get(indicatorId)
+}
+
+/** 年度完成进度条：按实际完成率计算，无材料/未审核通过时为 0% */
+function yearCompletionPercent(indicator: Indicator, year: number): number {
+  const stats = aStatsOfYear(indicator.id, year)
+  return completionPercent(stats?.completionRate, stats?.actualValue, targetOf(indicator, year))
+}
+
+/** GROWTH 的 actualValue 是增长率，年度完成展示与超额判断统一使用完成总量。 */
+function yearActualValue(indicator: Indicator, year: number): number | null | undefined {
+  const stats = aStatsOfYear(indicator.id, year)
+  return indicator.statCaliber === 'GROWTH' ? stats?.actualTotal : stats?.actualValue
+}
+
+/** 年度超额完成值：实际值大于目标时返回差值 */
+function yearOverValue(indicator: Indicator, year: number): number | null {
+  if (indicator.statCaliber === 'BOOLEAN') return null
+  return exceededAmount(yearActualValue(indicator, year), targetOf(indicator, year))
+}
+
+function yearActualDisplay(indicator: Indicator, year: number): string {
+  return formatActualValue(yearActualValue(indicator, year), indicator.statCaliber)
+}
+
+function yearOverDisplay(indicator: Indicator, year: number): string {
+  const over = yearOverValue(indicator, year)
+  return over === null ? '' : `超额 +${formatTargetValue(over, indicator.statCaliber)}`
+}
+
+function hasTargetValue(target: number | boolean | null | undefined): boolean {
+  return typeof target === 'boolean' ? target : typeof target === 'number' && target > 0
+}
+
+/** A 指标当前年度完成程度 */
+function aCurrentLevel(indicatorId: string): CompletionLevel | null {
+  const stats = aStats(indicatorId)
+  const percent = completionPercent(stats?.completionRate, stats?.actualValue, stats?.target)
+  return completionLevel(percent, hasTargetValue(stats?.target) || percent > 0)
+}
+
+/** A 指标五年累计进度（0–100） */
+function aTotalPercent(indicator: Indicator): number {
+  const stats = aStats(indicator.id)
+  return completionPercent(stats?.cumulativeRate, stats?.cumulativeActual, indicator.totalTarget)
+}
+
+/** A 指标五年累计完成程度 */
+function aCumulativeLevel(indicator: Indicator): CompletionLevel | null {
+  const percent = aTotalPercent(indicator)
+  return completionLevel(percent, hasTargetValue(indicator.totalTarget) || percent > 0)
+}
+
+/** 总进度文本：有目标时即使无完成数据也显示 0.0%，无可统计目标时显示 — */
+function aTotalText(indicator: Indicator): string {
+  const stats = aStats(indicator.id)
+  if (typeof stats?.cumulativeRate === 'number') return formatPercent(stats.cumulativeRate)
+  const percent = aTotalPercent(indicator)
+  return hasTargetValue(indicator.totalTarget) || percent > 0 ? `${percent.toFixed(1)}%` : '—'
+}
+
+const INDICATOR_NAME_MAX_LENGTH = 20
+
+/** 关键产出指标名称最多展示 20 个字符，超出部分省略；完整名称由 title 悬浮展示 */
+function indicatorNameDisplay(name: string): string {
+  const characters = Array.from(name)
+  return characters.length > INDICATOR_NAME_MAX_LENGTH
+    ? `${characters.slice(0, INDICATOR_NAME_MAX_LENGTH).join('')}...`
+    : name
+}
+
+/** 年度完成程度：0 红、0–100 黄、≥100 绿 */
+function yearCompletionLevel(indicator: Indicator, year: number): CompletionLevel | null {
+  const percent = yearCompletionPercent(indicator, year)
+  return completionLevel(percent, hasTargetValue(targetOf(indicator, year)) || percent > 0)
 }
 
 function aStats(indicatorId: string): StatsTreeNode | undefined {
@@ -630,6 +734,22 @@ function openTaskDrawer(task: TaskListItem): void {
   taskDrawerId.value = task.id
   taskDrawerVisible.value = true
 }
+function openTaskMaterials(task: TaskListItem, year: number): void {
+  const indicatorId = task.topIndicator?.id ?? task.indicator?.id
+  if (!indicatorId) return
+  void router.push({
+    name: 'Materials',
+    query: {
+      planId: planId.value,
+      indicatorId,
+      ...(task.unit?.id ? { unitId: task.unit.id } : {}),
+      taskId: task.id,
+      taskCode: task.code,
+      year: String(year),
+      from: 'indicators',
+    },
+  })
+}
 function canAllocateRow(row: IndicatorTreeNode): boolean {
   return canAllocate.value && row.level === 'A' && row.isQuantifiable
 }
@@ -655,6 +775,26 @@ async function onAllocationSaved(indicatorId: string): Promise<void> {
   await nextTick()
   if (indicatorMainRef.value) indicatorMainRef.value.scrollTop = scrollTop
 }
+async function handleDeleteDirection(direction: { id: string; name: string }): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除主要建设方向「${direction.name}」？该方向下存在指标时不能删除（40008）。`,
+      '确认删除',
+      { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  try {
+    await deleteDirection(direction.id)
+    ElMessage.success('主要建设方向已删除')
+    if (selectedDirectionId.value === direction.id) selectedDirectionId.value = ''
+    await Promise.all([loadDirections(), loadTree()])
+  } catch {
+    // 拦截器已提示。
+  }
+}
+
 async function handleDelete(row: Indicator): Promise<void> {
   try {
     await ElMessageBox.confirm(
@@ -729,8 +869,10 @@ watch(planId, (id) => {
   plan.value = null
   tree.value = []
   statsTree.value = []
+  yearStatsIndexes.value = new Map()
   directionList.value = []
   selectedDirectionId.value = ''
+  editMode.value = false
   for (const key of Object.keys(tasksByIndicator)) delete tasksByIndicator[key]
   taskRequests.clear()
   taskRequestGenerations.clear()
@@ -774,6 +916,9 @@ onBeforeUnmount(() => {
     </div>
     <div class="app-action-row header-actions">
       <el-button v-if="canEdit && !readOnly" type="primary" @click="openCreateA">新增指标</el-button>
+      <el-button v-if="canEnterEditMode" :type="editMode ? 'danger' : 'default'" plain @click="editMode = !editMode">
+        {{ editMode ? '完成编辑' : '编辑' }}
+      </el-button>
       <el-button @click="goProgress">进度可视化</el-button>
       <el-dropdown trigger="click" class="data-menu">
         <el-button :loading="exporting">
@@ -812,18 +957,28 @@ onBeforeUnmount(() => {
         >
           <span>全部方向</span><span>{{ aRows.length }}</span>
         </button>
-        <button
-          v-for="direction in directionNavItems"
-          :key="direction.id"
-          type="button"
-          class="direction-nav-item"
-          :class="{ 'is-active': selectedDirectionId === direction.id }"
-          :aria-pressed="selectedDirectionId === direction.id"
-          :data-direction-id="direction.id"
-          @click="selectDirection(direction.id)"
-        >
-          <span>{{ direction.name }}</span><span>{{ direction.count }}</span>
-        </button>
+        <div v-for="direction in directionNavItems" :key="direction.id" class="direction-nav-row">
+          <button
+            type="button"
+            class="direction-nav-item"
+            :class="{ 'is-active': selectedDirectionId === direction.id }"
+            :aria-pressed="selectedDirectionId === direction.id"
+            :data-direction-id="direction.id"
+            @click="selectDirection(direction.id)"
+          >
+            <span>{{ direction.name }}</span><span>{{ direction.count }}</span>
+          </button>
+          <el-button
+            v-if="editMode && canDeleteDirection && direction.id !== '__UNASSIGNED__'"
+            class="direction-nav-delete"
+            link
+            type="danger"
+            :icon="Delete"
+            :aria-label="`删除主要建设方向 ${direction.name}`"
+            title="删除主要建设方向"
+            @click.stop="handleDeleteDirection(direction)"
+          />
+        </div>
       </aside>
 
       <div ref="indicatorMainRef" class="indicator-main">
@@ -903,15 +1058,35 @@ onBeforeUnmount(() => {
                     <div class="a-quant-summary">
                       <div><span>统计口径</span><StatusTag v-if="row.indicator.statCaliber" kind="StatCaliber" :value="row.indicator.statCaliber" /><template v-else>—</template></div>
                       <div><span>五年目标</span><strong>{{ totalTargetDisplay(row.indicator) }}</strong><RollupBadge v-if="row.indicator.rollupMode" :mode="row.indicator.rollupMode" /></div>
-                      <div><span>当前完成</span><strong>{{ aStats(row.id)?.actualValue ?? '—' }}</strong></div>
-                      <div><span>当年完成率</span><strong>{{ formatPercent(aStats(row.id)?.completionRate) }}</strong></div>
-                      <div><span>五年累计</span><strong>{{ formatPercent(aStats(row.id)?.cumulativeRate) }}</strong></div>
+                      <div><span>当前完成</span><strong :class="completionLevelClass(aCurrentLevel(row.id))">{{ aStats(row.id)?.actualValue ?? '—' }}</strong></div>
+                      <div><span>当年完成率</span><strong :class="completionLevelClass(aCurrentLevel(row.id))">{{ formatPercent(aStats(row.id)?.completionRate) }}</strong></div>
+                      <div><span>五年累计</span><strong :class="completionLevelClass(aCumulativeLevel(row.indicator))">{{ formatPercent(aStats(row.id)?.cumulativeRate) }}</strong></div>
                       <div><span>负责人</span><strong>{{ row.indicator.owner?.name ?? '—' }}</strong></div>
                     </div>
                     <div class="a-summary-years">
-                      <div v-for="year in years" :key="year">
-                        <span :class="{ 'current-year': year === currentYear }">{{ year }}</span>
-                        <strong>{{ formatTargetValue(targetOf(row.indicator, year), row.indicator.statCaliber) }}</strong>
+                      <div v-for="year in years" :key="year" class="year-target-cell">
+                        <div class="year-target-head">
+                          <span :class="{ 'current-year': year === currentYear }">{{ year }}</span>
+                          <span class="year-target-label">目标 <strong>{{ formatTargetValue(targetOf(row.indicator, year), row.indicator.statCaliber) }}</strong></span>
+                        </div>
+                        <div class="year-actual-line">
+                          <span>完成 <strong :class="completionLevelClass(yearCompletionLevel(row.indicator, year))">{{ yearActualDisplay(row.indicator, year) }}</strong></span>
+                          <span v-if="yearOverDisplay(row.indicator, year)" class="year-over">{{ yearOverDisplay(row.indicator, year) }}</span>
+                        </div>
+                        <div
+                          class="year-target-track"
+                          role="progressbar"
+                          :aria-label="`${year}年完成率`"
+                          :aria-valuenow="yearCompletionPercent(row.indicator, year)"
+                          aria-valuemin="0"
+                          aria-valuemax="100"
+                        >
+                          <div
+                            class="year-target-fill"
+                            :class="completionLevelClass(yearCompletionLevel(row.indicator, year))"
+                            :style="{ width: `${yearCompletionPercent(row.indicator, year)}%` }"
+                          ></div>
+                        </div>
                       </div>
                     </div>
                     <IndicatorTaskPanel
@@ -924,6 +1099,7 @@ onBeforeUnmount(() => {
                       :can-allocate="canAllocateRow(row.indicator) && !readOnly"
                       @retry="retryTasks(row.id)"
                       @detail="openTaskDrawer"
+                      @materials="openTaskMaterials"
                     />
                   </div>
                 </template>
@@ -945,35 +1121,74 @@ onBeforeUnmount(() => {
               </el-table-column>
               <el-table-column label="关键产出指标" min-width="260" class-name="complete-text-cell">
                 <template #default="{ row }">
-                  <el-tooltip :content="row.indicator.name" placement="top" :show-after="200">
-                    <button type="button" class="a-name-button" @click="toggleExpansion(row)">{{ shortIndicatorName(row.indicator.name) }}</button>
-                  </el-tooltip>
+                  <div class="a-name-row">
+                    <el-tooltip :content="row.indicator.name" placement="top" :show-after="200">
+                      <button
+                        type="button"
+                        class="a-name-button"
+                        :title="row.indicator.name"
+                        @click="toggleExpansion(row)"
+                      >
+                        {{ indicatorNameDisplay(row.indicator.name) }}
+                      </button>
+                    </el-tooltip>
+                    <el-button
+                      v-if="editMode && canEditRow(row.indicator)"
+                      class="a-name-delete"
+                      link
+                      type="danger"
+                      :icon="Delete"
+                      :aria-label="`删除指标 ${row.indicator.code} ${row.indicator.name}`"
+                      title="删除指标"
+                      @click.stop="handleDelete(row.indicator)"
+                    />
+                  </div>
                   <div v-if="!row.indicator.isQuantifiable" class="undecomposable-tip">不可量化 · 仅维护基础信息</div>
                   <div v-if="taskErrorIds.has(row.id) && !taskLoadingIds.has(row.id)" class="task-error-state" role="alert">学院任务加载失败，请点击编号重试</div>
                 </template>
               </el-table-column>
-              <el-table-column label="五年进度 / 佐证材料" min-width="330">
+              <el-table-column label="总进度 / 佐证材料" min-width="300" align="center">
                 <template #default="{ row }">
-                  <div class="a-progress-entry">
+                  <div class="a-total-cell">
                     <div
                       v-if="row.indicator.isQuantifiable"
-                      class="a-progress-button"
+                      class="a-total-progress"
                       role="button"
                       tabindex="0"
+                      :title="`五年累计完成率 ${aTotalText(row.indicator)}；点击查看五年详细进度`"
                       :aria-label="`查看 ${row.indicator.name} 的五年详细进度`"
                       @click="openProgressDialog(row.indicator)"
                       @keydown.enter="openProgressDialog(row.indicator)"
                       @keydown.space.prevent="openProgressDialog(row.indicator)"
                     >
-                      <el-progress
-                        :percentage="progressPercentage(aStats(row.id)?.cumulativeRate)"
-                        :status="(aStats(row.id)?.cumulativeRate ?? 0) >= 1 ? 'success' : undefined"
-                        :stroke-width="14"
-                        :format="() => formatPercent(aStats(row.id)?.cumulativeRate)"
-                      />
+                      <div
+                        class="year-target-track a-total-progress__track"
+                        role="progressbar"
+                        :aria-label="`${row.indicator.code}五年累计完成率`"
+                        :aria-valuenow="aTotalPercent(row.indicator)"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                      >
+                        <div
+                          class="year-target-fill"
+                          :class="completionLevelClass(aCumulativeLevel(row.indicator))"
+                          :style="{ width: `${aTotalPercent(row.indicator)}%` }"
+                        ></div>
+                      </div>
+                      <span class="a-total-progress__text" :class="completionLevelClass(aCumulativeLevel(row.indicator))">
+                        {{ aTotalText(row.indicator) }}
+                      </span>
                     </div>
                     <span v-else class="a-progress-empty">—</span>
-                    <el-button link type="primary" class="material-link" @click="openMaterialDialog(row.indicator)">查看佐证材料</el-button>
+                    <el-button
+                      v-if="row.indicator.isQuantifiable"
+                      link
+                      type="primary"
+                      class="material-link"
+                      @click.stop="openMaterialDialog(row.indicator)"
+                    >
+                      查看佐证材料
+                    </el-button>
                   </div>
                 </template>
               </el-table-column>
@@ -1000,9 +1215,51 @@ onBeforeUnmount(() => {
                   </button>
                   <StatusTag kind="IndicatorStatus" :value="node.indicator.status" />
                 </div>
-                <el-tooltip :content="node.indicator.name" placement="top" :show-after="200">
-                  <button type="button" class="a-name-button responsive-card__title" @click="toggleExpansion(node)">{{ shortIndicatorName(node.indicator.name) }}</button>
-                </el-tooltip>
+                <div class="a-name-row">
+                  <el-tooltip :content="node.indicator.name" placement="top" :show-after="200">
+                    <button
+                      type="button"
+                      class="a-name-button responsive-card__title"
+                      :title="node.indicator.name"
+                      @click="toggleExpansion(node)"
+                    >
+                      {{ indicatorNameDisplay(node.indicator.name) }}
+                    </button>
+                  </el-tooltip>
+                  <el-button
+                    v-if="editMode && canEditRow(node.indicator)"
+                    class="a-name-delete"
+                    link
+                    type="danger"
+                    :icon="Delete"
+                    :aria-label="`删除指标 ${node.indicator.code} ${node.indicator.name}`"
+                    title="删除指标"
+                    @click.stop="handleDelete(node.indicator)"
+                  />
+                </div>
+                <div
+                  class="a-total-progress a-total-progress--card"
+                  :title="`五年累计完成率 ${aTotalText(node.indicator)}`"
+                >
+                  <span class="a-total-progress__label">总进度</span>
+                  <div
+                    class="year-target-track a-total-progress__track"
+                    role="progressbar"
+                    :aria-label="`${node.indicator.code}五年累计完成率`"
+                    :aria-valuenow="aTotalPercent(node.indicator)"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                  >
+                    <div
+                      class="year-target-fill"
+                      :class="completionLevelClass(aCumulativeLevel(node.indicator))"
+                      :style="{ width: `${aTotalPercent(node.indicator)}%` }"
+                    ></div>
+                  </div>
+                  <span class="a-total-progress__text" :class="completionLevelClass(aCumulativeLevel(node.indicator))">
+                    {{ aTotalText(node.indicator) }}
+                  </span>
+                </div>
                 <div v-if="!node.indicator.isQuantifiable" class="undecomposable-tip">不可量化 · 仅维护基础信息</div>
                 <div v-if="taskErrorIds.has(node.id) && !taskLoadingIds.has(node.id)" class="task-error-state" role="alert">学院任务加载失败，请点击编号重试</div>
                 <el-button
@@ -1040,13 +1297,36 @@ onBeforeUnmount(() => {
                   <div class="a-quant-summary">
                     <div><span>统计口径</span><StatusTag v-if="node.indicator.statCaliber" kind="StatCaliber" :value="node.indicator.statCaliber" /><template v-else>—</template></div>
                     <div><span>五年目标</span><strong>{{ totalTargetDisplay(node.indicator) }}</strong></div>
-                    <div><span>当前完成</span><strong>{{ aStats(node.id)?.actualValue ?? '—' }}</strong></div>
-                    <div><span>当年完成率</span><strong>{{ formatPercent(aStats(node.id)?.completionRate) }}</strong></div>
-                    <div><span>五年累计</span><strong>{{ formatPercent(aStats(node.id)?.cumulativeRate) }}</strong></div>
+                    <div><span>当前完成</span><strong :class="completionLevelClass(aCurrentLevel(node.id))">{{ aStats(node.id)?.actualValue ?? '—' }}</strong></div>
+                    <div><span>当年完成率</span><strong :class="completionLevelClass(aCurrentLevel(node.id))">{{ formatPercent(aStats(node.id)?.completionRate) }}</strong></div>
+                    <div><span>五年累计</span><strong :class="completionLevelClass(aCumulativeLevel(node.indicator))">{{ formatPercent(aStats(node.id)?.cumulativeRate) }}</strong></div>
                     <div><span>负责人</span><strong>{{ node.indicator.owner?.name ?? '—' }}</strong></div>
                   </div>
                   <div class="a-summary-years">
-                    <div v-for="year in years" :key="year"><span>{{ year }}</span><strong>{{ formatTargetValue(targetOf(node.indicator, year), node.indicator.statCaliber) }}</strong></div>
+                    <div v-for="year in years" :key="year" class="year-target-cell">
+                      <div class="year-target-head">
+                        <span :class="{ 'current-year': year === currentYear }">{{ year }}</span>
+                        <span class="year-target-label">目标 <strong>{{ formatTargetValue(targetOf(node.indicator, year), node.indicator.statCaliber) }}</strong></span>
+                      </div>
+                      <div class="year-actual-line">
+                        <span>完成 <strong :class="completionLevelClass(yearCompletionLevel(node.indicator, year))">{{ yearActualDisplay(node.indicator, year) }}</strong></span>
+                        <span v-if="yearOverDisplay(node.indicator, year)" class="year-over">{{ yearOverDisplay(node.indicator, year) }}</span>
+                      </div>
+                      <div
+                        class="year-target-track"
+                        role="progressbar"
+                        :aria-label="`${year}年完成率`"
+                        :aria-valuenow="yearCompletionPercent(node.indicator, year)"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                      >
+                        <div
+                          class="year-target-fill"
+                          :class="completionLevelClass(yearCompletionLevel(node.indicator, year))"
+                          :style="{ width: `${yearCompletionPercent(node.indicator, year)}%` }"
+                        ></div>
+                      </div>
+                    </div>
                   </div>
                   <IndicatorTaskPanel
                     :indicator="node.indicator"
@@ -1058,6 +1338,7 @@ onBeforeUnmount(() => {
                     :can-allocate="canAllocateRow(node.indicator) && !readOnly"
                     @retry="retryTasks(node.id)"
                     @detail="openTaskDrawer"
+                    @materials="openTaskMaterials"
                   />
                 </div>
               </article>
@@ -1293,6 +1574,9 @@ onBeforeUnmount(() => {
 .direction-nav-item.is-active > span:last-child { background: var(--el-color-primary); color: #fff; }
 .direction-nav-item:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: -2px; }
 .direction-nav-all { margin-bottom: 6px; }
+.direction-nav-row { display: flex; align-items: center; gap: 2px; }
+.direction-nav-row .direction-nav-item { flex: 1 1 auto; min-width: 0; }
+.direction-nav-delete { flex: 0 0 auto; margin-right: 4px; }
 
 .indicator-main { min-width: 0; min-height: 0; overflow-y: auto; padding: 0 2px 12px 0; }
 .simple-filter {
@@ -1336,7 +1620,7 @@ onBeforeUnmount(() => {
 .simple-indicator-table :deep(.el-table__expanded-cell) { padding: 0 0 16px 36px; background: transparent; }
 .simple-indicator-table :deep(.cell) { white-space: normal; overflow-wrap: anywhere; line-height: 21px; }
 .mono { font-family: var(--app-font-mono); font-variant-numeric: tabular-nums; }
-.complete-text-cell :deep(.cell) { word-break: break-word; }
+.complete-text-cell :deep(.cell) { word-break: normal; }
 .row-code-expand, .a-name-button, .indicator-card-code-button {
   padding: 0;
   border: 0;
@@ -1357,12 +1641,21 @@ onBeforeUnmount(() => {
 .row-code-expand:hover { background: var(--el-color-primary-light-8); }
 .row-code-expand:hover, .a-name-button:hover, .indicator-card-code-button:hover { color: var(--el-color-primary); }
 .row-code-expand:focus-visible, .a-name-button:focus-visible, .indicator-card-code-button:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 3px; }
-.a-name-button { display: inline; color: var(--indicator-ink); font-weight: 550; line-height: 22px; }
-.a-progress-entry { display: grid; grid-template-columns: minmax(160px, 1fr) auto; align-items: center; gap: 12px; }
-.a-progress-button { padding: 5px 7px; border-radius: 5px; cursor: pointer; transition: background-color 0.15s; }
-.a-progress-button:hover { background: var(--el-color-primary-light-9); }
-.a-progress-button:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
-.a-progress-button :deep(.el-progress__text) { min-width: 48px; color: var(--el-color-primary); font-size: 12px !important; font-variant-numeric: tabular-nums; }
+.a-name-button { display: block; max-width: 100%; overflow: hidden; color: var(--indicator-ink); font-weight: 550; line-height: 22px; text-overflow: ellipsis; white-space: nowrap; }
+.a-name-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.a-name-row .a-name-button { flex: 1 1 auto; min-width: 0; }
+.a-name-delete { flex: 0 0 auto; }
+.a-total-cell { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.a-total-progress { display: flex; align-items: center; justify-content: center; gap: 8px; width: fit-content; max-width: 100%; min-width: 0; margin: 0 auto; cursor: pointer; }
+.a-total-progress:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
+.a-total-progress--card { justify-content: flex-start; width: 100%; margin-top: 8px; cursor: default; }
+.a-total-progress.a-total-progress--card .a-total-progress__track { flex: 1 1 auto; width: auto; max-width: none; height: 8px; }
+.a-total-progress__label { flex: none; color: var(--indicator-muted); font-size: 12px; }
+.a-total-progress .a-total-progress__track { flex: 0 0 120px; width: 120px; min-width: 0; max-width: 120px; height: 10px; border-radius: 5px; }
+.a-total-progress__text { flex: none; min-width: 48px; color: var(--indicator-muted); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+.a-total-progress__text.completion-value--none { color: var(--el-color-danger); }
+.a-total-progress__text.completion-value--partial { color: var(--el-color-warning); }
+.a-total-progress__text.completion-value--complete { color: var(--el-color-success); }
 .a-progress-empty { color: var(--indicator-muted); }
 .material-link { white-space: nowrap; }
 .dialog-heading h3 { margin: 0; color: var(--indicator-ink); font-size: 18px; line-height: 26px; }
@@ -1425,9 +1718,30 @@ onBeforeUnmount(() => {
   gap: 8px;
   margin: 12px 0 4px;
 }
-.a-summary-years > div { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 9px 11px; border: 1px solid var(--indicator-line); border-radius: 5px; background: var(--indicator-paper); }
+.a-summary-years > div { display: flex; flex-direction: column; align-items: stretch; gap: 7px; padding: 9px 11px; border: 1px solid var(--indicator-line); border-radius: 5px; background: var(--indicator-paper); }
+.year-target-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .a-summary-years span { color: var(--indicator-muted); font-size: 11px; }
 .a-summary-years strong { font-size: 13px; font-variant-numeric: tabular-nums; }
+.year-target-label { white-space: nowrap; }
+.year-target-label strong { color: var(--indicator-ink); font-size: 12px; }
+.year-actual-line { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; }
+.year-actual-line > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.year-actual-line strong { color: var(--indicator-ink); font-size: 12px; }
+.year-over { color: var(--el-color-success); font-weight: 600; }
+.year-target-track { height: 4px; border-radius: 2px; overflow: hidden; background: var(--el-fill-color-light); }
+.year-target-fill { height: 100%; border-radius: inherit; background: var(--el-color-primary); transition: width 0.2s ease; }
+.year-target-fill.completion-value--none { background: var(--el-color-danger); }
+.year-target-fill.completion-value--partial { background: var(--el-color-warning); }
+.year-target-fill.completion-value--complete { background: var(--el-color-success); }
+.a-quant-summary strong.completion-value--none,
+.a-summary-years strong.completion-value--none,
+.year-actual-line strong.completion-value--none { color: var(--el-color-danger); }
+.a-quant-summary strong.completion-value--partial,
+.a-summary-years strong.completion-value--partial,
+.year-actual-line strong.completion-value--partial { color: var(--el-color-warning); }
+.a-quant-summary strong.completion-value--complete,
+.a-summary-years strong.completion-value--complete,
+.year-actual-line strong.completion-value--complete { color: var(--el-color-success); }
 .current-year { color: var(--el-color-primary) !important; font-weight: 600; }
 .completion-cell { display: flex; align-items: center; gap: 8px; }
 
@@ -1466,6 +1780,8 @@ onBeforeUnmount(() => {
   .direction-sidebar { display: flex; gap: 8px; margin-bottom: 14px; padding: 10px; overflow-x: auto; border: 1px solid var(--indicator-line); border-top: 3px solid var(--el-color-primary); border-radius: 7px; }
   .direction-sidebar__header { flex: 0 0 auto; align-items: flex-start; flex-direction: column; gap: 2px; margin: 0; padding: 4px 8px; border-bottom: 0; }
   .direction-nav-item { flex: 0 0 auto; width: auto; min-height: 40px; white-space: nowrap; }
+  .direction-nav-row { flex: 0 0 auto; }
+  .direction-nav-row .direction-nav-item { width: auto; }
   .direction-nav-all { margin-bottom: 0; }
   .indicator-main { overflow: visible; padding: 0; background: var(--indicator-paper); }
   .simple-filter__keyword { flex: 1 1 100%; }

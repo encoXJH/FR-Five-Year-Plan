@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { DIRECT_UPLOAD_MAX_SIZE, fileCategoryOf, formatFileSize, maxSizeOf, triggerFileDownload } from '../file'
+import {
+  DIRECT_UPLOAD_MAX_SIZE,
+  fileCategoryOf,
+  formatFileSize,
+  maxSizeOf,
+  officePreviewKind,
+  triggerFileDownload,
+} from '../file'
 
 describe('fileCategoryOf 扩展名识别（API 8.5）', () => {
   it('常见格式分类正确且大小写不敏感', () => {
@@ -43,6 +50,22 @@ describe('formatFileSize', () => {
     expect(formatFileSize(null)).toBe('—')
     expect(formatFileSize(undefined)).toBe('—')
     expect(formatFileSize(-1)).toBe('—')
+  })
+})
+
+describe('officePreviewKind', () => {
+  it('识别可浏览器渲染的 Office 格式', () => {
+    expect(officePreviewKind('建设方案.DOCX')).toBe('word')
+    expect(officePreviewKind('台账.xls')).toBe('sheet')
+    expect(officePreviewKind('台账.xlsx')).toBe('sheet')
+    expect(officePreviewKind('汇报.pptx')).toBe('slide')
+    expect(officePreviewKind('说明.txt')).toBe('text')
+  })
+
+  it('旧版 doc / ppt 与未知格式返回 unsupported', () => {
+    expect(officePreviewKind('旧方案.doc')).toBe('unsupported')
+    expect(officePreviewKind('旧汇报.ppt')).toBe('unsupported')
+    expect(officePreviewKind('无扩展名')).toBe('unsupported')
   })
 })
 

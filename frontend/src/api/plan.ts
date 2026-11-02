@@ -18,12 +18,16 @@ type PlanListItem = Omit<PlanCard, 'overallCompletionRate' | 'yearCompletionRate
 export async function listPlans(keyword?: string): Promise<PlanCard[]> {
   const data = await http.get<PlanListItem[] | PageResult<PlanListItem>>('/plans', { keyword })
   const items = Array.isArray(data) ? data : data.items
-  return items.map((item) => ({
-    ...item,
-    overallCompletionRate: item.completionRate,
-    yearCompletionRate: item.completionRate,
-    updatedAt: item.updatedAt ?? item.createdAt,
-  }))
+  return items.map((item) => {
+    // 已有任务但尚未产生达标数据时按 0% 展示，避免计划卡片只显示“—”
+    const completionRate = item.completionRate ?? (item.taskCountB > 0 ? 0 : null)
+    return {
+      ...item,
+      overallCompletionRate: completionRate,
+      yearCompletionRate: completionRate,
+      updatedAt: item.updatedAt ?? item.createdAt,
+    }
+  })
 }
 
 export function createPlan(data: CreatePlanRequest): Promise<PlanDetail> {

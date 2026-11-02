@@ -249,6 +249,19 @@ class ImportValidatorTest {
     }
 
     @Test
+    void 比率类整数百分数换算为小数() {
+        assertEquals(0, new java.math.BigDecimal("0.70")
+                .compareTo(ImportValidator.normalizePercent(new java.math.BigDecimal("70"), "DIRECT_PERCENT")));
+        assertEquals(0, new java.math.BigDecimal("0.13")
+                .compareTo(ImportValidator.normalizePercent(new java.math.BigDecimal("13"), "RATIO")));
+        assertEquals(0, new java.math.BigDecimal("0.7")
+                .compareTo(ImportValidator.normalizePercent(new java.math.BigDecimal("0.7"), "DIRECT_PERCENT")));
+        assertEquals(0, new java.math.BigDecimal("70")
+                .compareTo(ImportValidator.normalizePercent(new java.math.BigDecimal("70"), "INCREMENT")));
+        assertNull(ImportValidator.normalizePercent(null, "DIRECT_PERCENT"));
+    }
+
+    @Test
     void 枚举别名_编码与中文均可解析() {
         assertEquals("INCREMENT", EnumAliases.parse(EnumAliases.STAT_CALIBER, "增量累计型"));
         assertEquals("INCREMENT", EnumAliases.parse(EnumAliases.STAT_CALIBER, "INCREMENT"));

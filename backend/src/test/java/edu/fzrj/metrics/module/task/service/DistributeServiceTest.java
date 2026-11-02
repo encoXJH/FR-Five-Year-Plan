@@ -64,6 +64,8 @@ class DistributeServiceTest {
     @Mock
     private TaskYearMapper taskYearMapper;
     @Mock
+    private TaskYearActivationService taskYearActivationService;
+    @Mock
     private OrgUnitMapper orgUnitMapper;
     @Mock
     private OrgUnitAdminService orgUnitAdminService;
@@ -90,6 +92,7 @@ class DistributeServiceTest {
         TableInfoHelper.initTableInfo(assistant, Task.class);
         TableInfoHelper.initTableInfo(assistant, TaskYear.class);
         TableInfoHelper.initTableInfo(assistant, OrgUnit.class);
+        TableInfoHelper.initTableInfo(assistant, edu.fzrj.metrics.module.plan.entity.PlanYear.class);
     }
 
     @BeforeEach
@@ -170,6 +173,26 @@ class DistributeServiceTest {
     }
 
     @Test
+    void 下发后同步激活计划内已下发任务的年度状态() {
+        candidate.setStatus("DRAFT");
+        List<Indicator> all = List.of(parent, candidate);
+        TaskYear year = new TaskYear();
+        year.setTaskId(21L);
+        year.setYear(2026);
+        year.setTarget(BigDecimal.TEN);
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorMapper.selectList(any())).thenReturn(all);
+        when(indicatorService.loadTargets(anyList())).thenReturn(Map.of(2L, Map.of(2026, BigDecimal.TEN)));
+        when(taskMapper.selectList(any())).thenReturn(List.of(task));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(year));
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit));
+
+        distributeService.distribute(11L, request());
+
+        verify(taskYearActivationService).syncPlan(11L, 99L);
+    }
+
+    @Test
     void 重复下发没有候选时保持幂等且不触发全量校验() {
         candidate.setStatus("DISTRIBUTED");
         when(planService.requirePlan(11L)).thenReturn(plan);
@@ -182,6 +205,7 @@ class DistributeServiceTest {
         verify(indicatorService, never()).validateForDistribution(any(), anyList());
         verify(taskMapper, never()).updateById(any(Task.class));
         verify(notificationMapper, never()).insert(any(Notification.class));
+        verify(taskYearActivationService).syncPlan(11L, 99L);
     }
 
     @Test

@@ -123,11 +123,13 @@ public class FileController {
             @RequestParam(required = false) Long planId,
             @RequestParam(required = false) Long indicatorId,
             @RequestParam(required = false) Long unitId,
+            @RequestParam(required = false) Long taskId,
+            @RequestParam(required = false) Integer year,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int pageSize) {
-        return materialService.list(planId, indicatorId, unitId, category, keyword, page, pageSize);
+        return materialService.list(planId, indicatorId, unitId, taskId, year, category, keyword, page, pageSize);
     }
 
     @Operation(summary = "材料库：上传材料绑定关键产出指标")
@@ -143,7 +145,7 @@ public class FileController {
         return fileService.detail(fileId);
     }
 
-    @Operation(summary = "预览地址（IMAGE / PDF / VIDEO 返回签名地址；OFFICE 走 kkFileView，未配置时 url 为 null）")
+    @Operation(summary = "预览地址（IMAGE / PDF / VIDEO 返回签名地址；OFFICE 配置 kkFileView 时返回其地址，否则返回原始签名地址由前端渲染）")
     @GetMapping("/{fileId}/preview")
     @AuditLog(action = "FILE_PREVIEW", resourceType = "file", resourceId = "#fileId")
     public PreviewResult preview(@PathVariable Long fileId) {
@@ -156,20 +158,20 @@ public class FileController {
             default -> "UNSUPPORTED";
         };
         if ("UNSUPPORTED".equals(previewType)) {
-            return new PreviewResult(previewType, null, null);
+            return new PreviewResult(previewType, null, null, null);
         }
         SignedUrlService.SignedUrl signed = signedUrlService.sign(fileInfo);
         if ("OFFICE".equals(previewType)) {
             if (!StringUtils.hasText(kkFileViewUrl)) {
-                return new PreviewResult(previewType, null, null);
+                return new PreviewResult(previewType, signed.url(), signed.expiresAt(), "CLIENT");
             }
             String inner = URLEncoder.encode(
                     Base64.getEncoder().encodeToString(signed.url().getBytes(StandardCharsets.UTF_8)),
                     StandardCharsets.UTF_8);
             return new PreviewResult(previewType,
-                    kkFileViewUrl + "/onlinePreview?url=" + inner, signed.expiresAt());
+                    kkFileViewUrl + "/onlinePreview?url=" + inner, signed.expiresAt(), "KKFILEVIEW");
         }
-        return new PreviewResult(previewType, signed.url(), signed.expiresAt());
+        return new PreviewResult(previewType, signed.url(), signed.expiresAt(), null);
     }
 
     @Operation(summary = "下载地址")
@@ -210,7 +212,7 @@ public class FileController {
                 .body(new InputStreamResource(in));
     }
 
-    public record PreviewResult(String previewType, String url, LocalDateTime expiresAt) {
+    public record PreviewResult(String previewType, String url, LocalDateTime expiresAt, String renderMode) {
     }
 
     public record DownloadUrlResult(String url, LocalDateTime expiresAt) {

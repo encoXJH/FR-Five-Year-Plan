@@ -235,8 +235,8 @@ public final class AdjustmentRules {
     }
 
     /**
-     * 70002 守恒校验（PRD 4.5）：逐年比对「下级合计」与「上级目标」。
-     * 只对求和口径（INCREMENT / STOCK / BOOLEAN）校验；比率类直接通过。
+     * 70002 守恒校验（PRD 4.5）：与下发一致，求和口径仅拦截「下级合计」低于「上级目标」。
+     * INCREMENT / STOCK 允许超额；BOOLEAN 与比率类不做数量求和校验。
      *
      * @return 逐条中文错误说明；守恒返回空列表
      */
@@ -244,7 +244,7 @@ public final class AdjustmentRules {
                                                   Map<Integer, BigDecimal> childSumByYear,
                                                   Map<Integer, BigDecimal> parentTargetByYear) {
         List<String> errors = new ArrayList<>();
-        if (!"INCREMENT".equals(caliber) && !"STOCK".equals(caliber) && !"BOOLEAN".equals(caliber)) {
+        if (!"INCREMENT".equals(caliber) && !"STOCK".equals(caliber)) {
             return errors;
         }
         Set<Integer> years = new java.util.TreeSet<>();
@@ -253,9 +253,9 @@ public final class AdjustmentRules {
         for (Integer year : years) {
             BigDecimal child = nvl(childSumByYear.get(year));
             BigDecimal parent = nvl(parentTargetByYear.get(year));
-            if (child.compareTo(parent) != 0) {
+            if (child.compareTo(parent) < 0) {
                 errors.add(year + " 年：下级合计 " + child.stripTrailingZeros().toPlainString()
-                        + " ≠ " + parentLabel + " " + parent.stripTrailingZeros().toPlainString());
+                        + " 低于 " + parentLabel + " " + parent.stripTrailingZeros().toPlainString());
             }
         }
         return errors;

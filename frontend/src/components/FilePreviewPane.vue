@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import OfficeDocumentPreview from './OfficeDocumentPreview.vue'
 import { downloadFile, getFilePreview } from '@/api/file'
 import { useUserStore } from '@/stores/user'
 import { ApiError } from '@/utils/request'
@@ -221,7 +222,12 @@ watch(
             </div>
           </template>
           <iframe v-else-if="preview.previewType === 'PDF' && preview.url" :src="preview.url" class="preview-frame" title="PDF 预览" />
-          <!-- OFFICE 经 kkFileView 转换后有 url 时内嵌；url 为 null（未配置预览服务）时提示下载 -->
+          <!-- OFFICE：配置 kkFileView 时内嵌其转换页；未配置时由浏览器解析原始文件 -->
+          <OfficeDocumentPreview
+            v-else-if="preview.previewType === 'OFFICE' && preview.url && preview.renderMode === 'CLIENT'"
+            :src="preview.url"
+            :file-name="file?.fileName ?? ''"
+          />
           <iframe v-else-if="preview.previewType === 'OFFICE' && preview.url" :src="preview.url" class="preview-frame" title="Office 预览" />
           <video v-else-if="preview.previewType === 'VIDEO' && preview.url" :src="preview.url" class="preview-video" controls />
           <el-empty v-else :image-size="120" description="该格式不支持在线预览，请下载查看">

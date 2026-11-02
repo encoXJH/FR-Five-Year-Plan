@@ -103,6 +103,57 @@ export function isSummableCaliber(caliber: StatCaliber): boolean {
   return caliber === 'INCREMENT' || caliber === 'STOCK' || caliber === 'GROWTH'
 }
 
+export interface AutoDistributeResult {
+  /** 已重新分配的年度 */
+  filledYears: number[]
+  /** 目标为空或只读行已满足而跳过的年度 */
+  skippedYears: number[]
+}
+
+/**
+ * 自动分配：把指标各年度目标扣除只读行后，平均写入可编辑行；余数逐行摊入，保证合计精确。
+ * 只读行（历史 / 已下发）保持原值，继续参与合计；不修改任何行的负责人。
+ * @param scale 分配刻度：增量型传 1（整数），存量 / 增长率传 100（两位小数）
+ */
+export function distributeYearTargetsEvenly(
+  rows: MatrixRow[],
+  years: number[],
+  indicatorTargets: MatrixTargets,
+  scale = 100,
+): AutoDistributeResult {
+  const filledYears: number[] = []
+  const skippedYears: number[] = []
+  const editableRows = rows.filter(isPendingAllocationRow)
+  for (const year of years) {
+    const target = indicatorTargets[year]
+    if (typeof target !== 'number' || editableRows.length === 0) {
+      skippedYears.push(year)
+      continue
+    }
+    const fixedTotal = rows
+      .filter((row) => !isPendingAllocationRow(row))
+      .reduce((sum, row) => {
+        const value = row.targets[year]
+        return sum + (typeof value === 'number' ? value : 0)
+      }, 0)
+    const remaining = target - fixedTotal
+    if (remaining <= 0) {
+      skippedYears.push(year)
+      continue
+    }
+    const units = Math.round(remaining * scale)
+    const base = Math.trunc(units / editableRows.length)
+    const remainder = units - base * editableRows.length
+    // 余数从第一行开始逐行 +1，避免较小目标全部落到最后一行
+    editableRows.forEach((row, index) => {
+      const extra = index < remainder ? 1 : 0
+      row.targets[year] = (base + extra) / scale
+    })
+    filledYears.push(year)
+  }
+  return { filledYears, skippedYears }
+}
+
 /** 某行是否有任何目标（数值非 0 / 是否型有计划年） */
 export function rowHasTarget(targets: MatrixTargets): boolean {
   return Object.values(targets).some((v) => v === true || (typeof v === 'number' && v !== 0))

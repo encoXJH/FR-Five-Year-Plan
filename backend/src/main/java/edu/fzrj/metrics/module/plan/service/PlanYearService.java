@@ -1,23 +1,18 @@
 package edu.fzrj.metrics.module.plan.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.plan.dto.PlanDtos;
 import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.plan.entity.PlanYear;
 import edu.fzrj.metrics.module.plan.mapper.PlanYearMapper;
-import edu.fzrj.metrics.module.task.entity.Task;
-import edu.fzrj.metrics.module.task.entity.TaskYear;
-import edu.fzrj.metrics.module.task.mapper.TaskMapper;
-import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
+import edu.fzrj.metrics.module.task.service.TaskYearActivationService;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 /**
  * 计划年度管理（API 约定 15.4）：年度激活后，该年已下发任务的 task_year 才能填报。
@@ -27,20 +22,18 @@ public class PlanYearService {
 
     private final PlanService planService;
     private final PlanYearMapper planYearMapper;
-    private final TaskMapper taskMapper;
-    private final TaskYearMapper taskYearMapper;
+    private final TaskYearActivationService taskYearActivationService;
 
     public PlanYearService(PlanService planService, PlanYearMapper planYearMapper,
-                           TaskMapper taskMapper, TaskYearMapper taskYearMapper) {
+                           TaskYearActivationService taskYearActivationService) {
         this.planService = planService;
         this.planYearMapper = planYearMapper;
-        this.taskMapper = taskMapper;
-        this.taskYearMapper = taskYearMapper;
+        this.taskYearActivationService = taskYearActivationService;
     }
 
     /**
-     * 激活年度：plan_year 置为 ACTIVE；该年所有已下发（DISTRIBUTED / IN_PROGRESS）任务的
-     * task_year 由 NOT_ACTIVATED 置为 IN_PROGRESS。重复激活幂等（直接返回现状）。
+     * 激活年度：plan_year 置为 ACTIVE；同步该计划已下发任务在激活年度的 task_year 状态。
+     * 重复激活也执行一次同步，用于修复历史遗漏。
      */
     @Transactional
     public PlanDtos.Detail activateYear(Long planId, Integer year, Integer version) {
@@ -64,6 +57,7 @@ public class PlanYearService {
             throw new BizException(ErrorCode.YEAR_SETTLED);
         }
         if ("ACTIVE".equals(planYear.getStatus())) {
+            taskYearActivationService.syncPlan(planId, SecurityUtils.getUserId());
             return planService.detail(planId);
         }
         Long userId = SecurityUtils.getUserId();
@@ -73,22 +67,7 @@ public class PlanYearService {
         planYear.setUpdatedBy(userId);
         planYearMapper.updateById(planYear);
 
-        List<Long> distributedTaskIds = taskMapper.selectList(new LambdaQueryWrapper<Task>()
-                        .eq(Task::getPlanId, planId)
-                        .in(Task::getStatus, List.of("DISTRIBUTED", "IN_PROGRESS"))
-                        .eq(Task::getIsHistorical, false)
-                        .eq(Task::getDeleted, 0L)
-                        .select(Task::getId))
-                .stream().map(Task::getId).toList();
-        if (!distributedTaskIds.isEmpty()) {
-            taskYearMapper.update(null, new LambdaUpdateWrapper<TaskYear>()
-                    .in(TaskYear::getTaskId, distributedTaskIds)
-                    .eq(TaskYear::getYear, year)
-                    .eq(TaskYear::getYearStatus, "NOT_ACTIVATED")
-                    .eq(TaskYear::getDeleted, 0L)
-                    .set(TaskYear::getYearStatus, "IN_PROGRESS")
-                    .set(TaskYear::getUpdatedBy, userId));
-        }
+        taskYearActivationService.syncPlan(planId, userId);
         return planService.detail(planId);
     }
 }

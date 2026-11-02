@@ -187,6 +187,40 @@ class AdjustmentServiceTest {
     }
 
     @Test
+    void 试算按申请人数据范围拒绝他人任务() {
+        LoginUser user = new LoginUser(900L, "owner", "校级负责人", null,
+                List.of("SCHOOL_OWNER"), List.of());
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(user, null, List.of()));
+        Task source = task(10L, false);
+        source.setPlanId(1L);
+        source.setIndicatorId(2L);
+        source.setUnitId(30L);
+        source.setStatus("DISTRIBUTED");
+        Plan plan = new Plan();
+        plan.setId(1L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2030);
+        Indicator indicator = new Indicator();
+        indicator.setId(2L);
+        indicator.setStatCaliber("INCREMENT");
+        when(taskService.requireCurrentTask(10L)).thenReturn(source);
+        when(planService.requirePlan(1L)).thenReturn(plan);
+        when(indicatorService.requireIndicator(2L)).thenReturn(indicator);
+        when(taskYearMapper.selectList(any())).thenReturn(List.of());
+        when(dataScopeService.isOwnerScope(user)).thenReturn(true);
+        when(indicatorService.effectiveOwnerOf(indicator)).thenReturn(901L);
+        AdjustmentDtos.CreateRequest request = new AdjustmentDtos.CreateRequest();
+        request.setType("POSTPONE");
+        request.setTaskId(10L);
+        request.setItems(List.of());
+
+        BizException error = assertThrows(BizException.class, () -> adjustmentService.preview(request));
+
+        assertEquals(20005, error.getErrorCode().getCode());
+    }
+
+    @Test
     void 转移试算委托执行单元服务校验承接资格() {
         Task source = task(10L, false);
         source.setPlanId(1L);

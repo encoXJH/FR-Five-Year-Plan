@@ -61,15 +61,17 @@ public final class SubmissionValueRules {
     }
 
     /**
-     * 60002：佐证材料数量不少于指标要求；直填百分比型必须附数据来源说明。
+     * 60002：佐证材料数量不少于指标要求；直填百分比型至少一份材料并附数据来源说明。
      *
      * @return 不合法时的中文说明；合法返回 null
      */
     public static String attachmentError(String caliber, int minFileCount, int fileCount, String sourceNote) {
-        if (fileCount < minFileCount) {
-            return "缺少必须上传的佐证材料：至少 " + minFileCount + " 个，当前 " + fileCount + " 个";
+        boolean directPercent = "DIRECT_PERCENT".equals(caliber);
+        int requiredFileCount = directPercent ? Math.max(1, minFileCount) : minFileCount;
+        if (fileCount < requiredFileCount) {
+            return "缺少必须上传的佐证材料：至少 " + requiredFileCount + " 个，当前 " + fileCount + " 个";
         }
-        if ("DIRECT_PERCENT".equals(caliber) && !StringUtils.hasText(sourceNote)) {
+        if (directPercent && !StringUtils.hasText(sourceNote)) {
             return "直填百分比型必须填写数据来源说明";
         }
         return null;

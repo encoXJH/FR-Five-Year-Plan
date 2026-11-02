@@ -584,8 +584,8 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | 接口 | 说明 |
 | --- | --- |
 | `GET /files/materials/indicators?planId=` | 当前用户可关联的关键产出指标（管理员、校领导全部；校级负责人为本人的 A；学院负责人为本单元承接任务所属 A）。返回 `{ id, code, name, directionName }`，`directionName` 为所属主要建设方向名称（无方向时为 `null`），用于下拉分组展示 |
-| `GET /files/materials?planId=&indicatorId=&unitId=&category=&keyword=&page=&pageSize=` | 跨学院材料分页检索，返回材料名、所属 A 指标、所属学院、类型、大小、上传人、上传时间 |
-| `POST /files/materials/bind` | 请求体 `{ indicatorId, fileIds[] }`，把已上传的 `TEMP` 材料绑定到指标并置为 `BOUND` |
+| `GET /files/materials?planId=&indicatorId=&unitId=&taskId=&year=&category=&keyword=&page=&pageSize=` | 跨学院材料分页检索，返回材料名、所属 A 指标、所属学院、类型、大小、上传人、上传时间。`taskId` / `year` 为可选精确定位参数：传入时只返回对应 B 任务、对应年度的材料。SUBMISSION 材料仅在填报审核通过（`APPROVED`）后进入材料库 |
+| `POST /files/materials/bind` | 请求体 `{ indicatorId, fileIds[] }`，把已上传的 `TEMP` 材料绑定到指标并置为 `BOUND`；仅 ADMIN / SCHOOL_OWNER 可操作，学院负责人须通过任务填报上传佐证材料 |
 
 - 数据范围：管理员、校领导可查看全校材料；校级负责人仅本人负责 A 的材料；学院负责人仅本单元材料；越权返回 `20005`。
 - 非本人上传的材料不允许绑定（管理员除外），指标必须存在且在当前用户可关联范围内。
@@ -596,11 +596,12 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 
 | 接口 | 返回 |
 | --- | --- |
-| `GET /files/{fileId}/preview` | `{ previewType, url, expiresAt }`。`previewType` 为 `IMAGE` / `PDF` / `OFFICE` / `VIDEO` / `UNSUPPORTED` |
+| `GET /files/{fileId}/preview` | `{ previewType, url, expiresAt, renderMode }`。`previewType` 为 `IMAGE` / `PDF` / `OFFICE` / `VIDEO` / `UNSUPPORTED`；`renderMode` 仅 `OFFICE` 有值：`KKFILEVIEW` 外部预览服务内嵌 / `CLIENT` 浏览器内渲染，其余为 `null` |
 | `GET /files/{fileId}/download-url` | `{ url, expiresAt }` |
 
 - `url` 是**签名地址**，有效期 10 分钟，只能在有效期内使用；LOCAL 返回后端 HMAC raw 地址，MINIO 返回 S3 预签名 GET。切换存储实现后按 `file_info.storage_type` 读取，历史 LOCAL 文件不受影响。
 - 下载接口生成的 LOCAL 地址带 `dl=1`，raw 响应使用 `Content-Disposition: attachment`；预览地址不带该参数并保持 `inline`。MINIO 下载预签名通过 `response-content-disposition=attachment` 返回附件。
+- `OFFICE` 未配置 kkFileView 时返回原始签名地址与 `renderMode=CLIENT`，由前端解析 `docx` / `xls` / `xlsx` / `pptx` / `txt`；旧版 `doc` / `ppt` 浏览器无法解析，前端提示下载。配置 kkFileView 时返回其 `onlinePreview` 地址与 `renderMode=KKFILEVIEW`，由 iframe 内嵌。
 - 获取预览或下载地址时，服务端都要按业务数据的权限做校验；下载操作写入审计日志。
 - 视频文件转码完成前，`transcodeStatus` 为 `PROCESSING`，此时预览接口返回原始文件地址或提示稍后再试。
 
@@ -809,10 +810,10 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | --- | --- | --- | --- |
 | GET | `/indicators/{indicatorId}/allocation` | 仅获取 A+ 的分解矩阵：合格执行单元 × 年度、历史冻结目标及合计校验结果；其他层级返回 40006 | `allocation:edit` |
 | PUT | `/indicators/{indicatorId}/allocation` | 保存非历史 B 草稿，允许合计不足或超额；已下发指标可追加合格学院，新增行须启用且 `isBAssignable=true`；历史及已生效任务必须原样保留，不得改负责人、改目标或删除 | `allocation:edit` |
-| POST ⚡ | `/plans/{planId}/distribute` | DRAFT 与历史 FINALIZED 均可直接下发；`indicatorIds` 为空时处理全部可下发 A+。下发前依次复核完整性（10001）、年度目标五年守恒（40002）、A/A+ 拆分守恒（40003）、B 分解平衡（50001）及学院负责人（50002），并再次校验单元资格；已下发指标存在追加的待下发 B 时仅处理新任务，无待办对象幂等跳过 | `task:distribute` |
+| POST ⚡ | `/plans/{planId}/distribute` | DRAFT 与历史 FINALIZED 均可直接下发；`indicatorIds` 为空时处理全部可下发 A+。下发前依次复核完整性（10001）、年度目标五年守恒（40002）、A/A+ 拆分守恒（40003）、B 分解平衡（50001）及学院负责人（50002），并再次校验单元资格；已下发指标存在追加的待下发 B 时仅处理新任务，无待办对象幂等跳过。下发成功后，计划年度已激活的年份其 `task_year.year_status` 同步置为 `IN_PROGRESS`，学院可直接填报 | `task:distribute` |
 | POST ⚡ | `/plans/{planId}/years/{year}/activate` | 管理员手动激活年度；计划启动后各年度默认未激活，激活后该年已下发任务的年度状态转为进行中，重复激活幂等。填报仅允许当前自然年份且年度未锁定；历史任务跳过且不生成待办或提醒 | `settlement:manage` |
-| GET | `/tasks` | B 任务列表（可按 `unitId`、`indicatorId`、`year`、`status`、`yearStatus`、`isHistorical` 过滤），每项返回 `isHistorical` | 按数据范围 |
-| GET | `/tasks/{taskId}` | B 任务详情（各年度目标、完成值、状态、`isHistorical`）；历史任务及既有记录只读可见 | 按数据范围 |
+| GET | `/tasks` | B 任务列表（可按 `unitId`、`indicatorId`、`year`、`status`、`yearStatus`、`isHistorical` 过滤），每项返回 `isHistorical`；学院端可见本单元全部任务，`PENDING_DISTRIBUTION` 任务仅只读展示，不能填报 | 按数据范围 |
+| GET | `/tasks/{taskId}` | B 任务详情（各年度目标、完成值、状态、`isHistorical`）；历史任务及既有记录只读可见；待下发任务可查看但不可填报 | 按数据范围 |
 | POST ⚡ | `/tasks/{taskId}/accept` | 历史兼容接口；现行学院角色不再分配此权限，下发后无需接收即可按年度状态填报 | `task:accept` |
 
 > 分解预览、草稿保存、下发和转移接收必须共用同一套 `isEnabled && isBAssignable` 校验，初始仅 C01–C08 合格，但接口不得按编码硬编码。历史 B 不出现在可编辑矩阵行中，其目标作为只读冻结基数参与守恒；历史任务详情、目标、已审核完成值、快照和审计不删除、不重编号。
@@ -910,7 +911,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 >
 > 说明（五年累计进度补录 2026-10-25）：年度目标是过程刻度，五年总量目标才是 100%（如「五年 5 本教材」不必每年 1 本）。运行期新增五年累计口径字段，取值规则与五年核算一致（INCREMENT 各年完成值之和；STOCK/GROWTH 最新有数据年总量；RATIO/DIRECT_PERCENT 最新有数据年比率；BOOLEAN 任一年完成为 1），完成率 = 累计完成 ÷ 五年总量目标：
 > - `GET /plans/{planId}/stats/overview` 新增 `cumulativeCompletionRate`（可见可量化 A 指标累计完成率的算术平均，按数据范围过滤，不可量化 A 不进入分母）；
-> - `GET /plans/{planId}/stats/tree` 节点（A / A+ / B）新增 `cumulativeActual` / `cumulativeRate`；
+> - `GET /plans/{planId}/stats/tree` 节点（A / A+ / B）新增 `cumulativeActual` / `cumulativeRate`；节点同时返回 `actualTotal`（STOCK / GROWTH 年度完成总量，GROWTH 的 `actualValue` 为增长率，展示完成量时使用 `actualTotal`）；
 > - `GET /plans/{planId}/stats/by-unit` 与 `by-indicator` 新增 `cumulativeRate`（范围内可量化 B 任务累计完成率按既定口径汇总）；
 > - `GET /indicators/{indicatorId}/trend` 新增 `cumulativeActual` / `cumulativeRate`（MANUAL 汇总的 A 优先取人工认定值）；
 > - `GET /tasks` 列表项与 `GET /tasks/{taskId}` 详情新增 `cumulativeActual` / `cumulativeRate`。

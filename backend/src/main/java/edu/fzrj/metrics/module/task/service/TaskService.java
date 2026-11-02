@@ -118,9 +118,9 @@ public class TaskService {
         }
 
         LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<Task>().eq(Task::getDeleted, 0L);
+        Long unitId = isUnit ? user.getUnitId() : null;
+        List<Long> ownedIndicatorIds = isOwner ? ownedIndicatorIds(user.getUserId()) : List.of();
         if (!isAll) {
-            Long unitId = isUnit ? user.getUnitId() : null;
-            List<Long> ownedIndicatorIds = isOwner ? ownedIndicatorIds(user.getUserId()) : List.of();
             if (unitId == null && ownedIndicatorIds.isEmpty()) {
                 return new PageResult<>(List.of(), 0L, query.getPage(), query.getPageSize());
             }
@@ -139,6 +139,7 @@ public class TaskService {
                 }
             });
         }
+        // 学院端可见本单元全部任务；未下发任务只读，填报入口由任务状态与年度状态共同限制
         wrapper.eq(query.getUnitId() != null, Task::getUnitId, query.getUnitId());
         if (query.getIndicatorId() != null) {
             wrapper.and(w -> w.eq(Task::getIndicatorId, query.getIndicatorId())

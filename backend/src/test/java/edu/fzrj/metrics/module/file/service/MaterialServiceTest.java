@@ -101,20 +101,31 @@ class MaterialServiceTest {
     }
 
     @Test
-    void 学院用户不能绑定本学院未承接的指标() {
-        login(new LoginUser(2L, "c01", "学院负责人", 100L, List.of("UNIT_OWNER"), List.of("material:upload")));
+    void 校级负责人不能绑定非本人负责的指标() {
+        login(new LoginUser(2L, "owner2", "校级负责人", null, List.of("SCHOOL_OWNER"), List.of("material:upload")));
         Indicator indicator = new Indicator();
         indicator.setId(10L);
         indicator.setPlanId(4L);
         indicator.setLevel("A");
         indicator.setDeleted(0L);
         when(indicatorMapper.selectOne(any())).thenReturn(indicator);
-        when(taskMapper.selectList(any())).thenReturn(List.of());
 
         BizException error = assertThrows(BizException.class,
                 () -> materialService.bind(new MaterialDtos.BindRequest(10L, List.of(20L))));
 
         assertEquals(20005, error.getErrorCode().getCode());
+        verify(fileRefMapper, never()).insert(any(FileRef.class));
+    }
+
+    @Test
+    void 学院负责人不能直接在材料库绑定指标() {
+        login(new LoginUser(2L, "c01", "学院负责人", 100L, List.of("UNIT_OWNER"), List.of("material:upload")));
+
+        BizException error = assertThrows(BizException.class,
+                () -> materialService.bind(new MaterialDtos.BindRequest(10L, List.of(20L))));
+
+        assertEquals(20004, error.getErrorCode().getCode());
+        verify(indicatorMapper, never()).selectOne(any());
         verify(fileRefMapper, never()).insert(any(FileRef.class));
     }
 
@@ -136,13 +147,15 @@ class MaterialServiceTest {
         when(materialQueryMapper.countMaterials(any())).thenReturn(1L);
         when(materialQueryMapper.selectMaterials(any())).thenReturn(List.of(row));
 
-        var result = materialService.list(4L, null, null, null, " 佐证 ", 2, 20);
+        var result = materialService.list(4L, null, null, 30L, 2026, null, " 佐证 ", 2, 20);
 
         ArgumentCaptor<MaterialQuery> captor = ArgumentCaptor.forClass(MaterialQuery.class);
         verify(materialQueryMapper).selectMaterials(captor.capture());
         MaterialQuery query = captor.getValue();
         assertEquals(100L, query.unitScope());
         assertEquals("佐证", query.keyword());
+        assertEquals(30L, query.taskId());
+        assertEquals(2026, query.year());
         assertEquals(20, query.limit());
         assertEquals(20L, query.offset());
         assertEquals(1L, result.getTotal());

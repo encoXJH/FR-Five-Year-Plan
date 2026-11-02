@@ -35,6 +35,8 @@ public final class MaterialDtos {
             String category,
             String bizType,
             LocalDateTime uploadedAt,
+            Integer year,
+            String taskCode,
             IndicatorRef indicator,
             UnitRef unit,
             UserRef uploadedBy

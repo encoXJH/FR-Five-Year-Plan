@@ -6,6 +6,7 @@
         FROM file_ref fr
         JOIN file_info f ON f.id = fr.file_id AND f.deleted = 0
         LEFT JOIN submission s ON fr.biz_type = 'SUBMISSION' AND s.id = fr.biz_id
+        LEFT JOIN task t ON t.id = s.task_id AND t.deleted = 0
         LEFT JOIN adjustment a ON fr.biz_type = 'ADJUSTMENT' AND a.id = fr.biz_id
         LEFT JOIN milestone m ON fr.biz_type = 'MILESTONE' AND m.id = fr.biz_id
         JOIN indicator i ON i.id = CASE fr.biz_type
@@ -19,6 +20,7 @@
         LEFT JOIN sys_user su ON su.id = f.uploaded_by
         LEFT JOIN org_unit ou ON ou.id = COALESCE(s.unit_id, su.unit_id) AND ou.deleted = 0
         WHERE fr.biz_type IN ('INDICATOR', 'SUBMISSION', 'ADJUSTMENT', 'MILESTONE')
+        AND (fr.biz_type != 'SUBMISSION' OR s.status = 'APPROVED')
         <if test="query.planId != null">
             AND ti.plan_id = #{query.planId}
         </if>
@@ -27,6 +29,15 @@
         </if>
         <if test="query.unitId != null">
             AND COALESCE(s.unit_id, su.unit_id) = #{query.unitId}
+        </if>
+        <if test="query.taskId != null or query.year != null">
+            AND fr.biz_type = 'SUBMISSION'
+        </if>
+        <if test="query.taskId != null">
+            AND s.task_id = #{query.taskId}
+        </if>
+        <if test="query.year != null">
+            AND s.year = #{query.year}
         </if>
         <if test="query.category != null and query.category != ''">
             AND f.category = #{query.category}
@@ -63,6 +74,9 @@
             f.category,
             fr.biz_type,
             f.uploaded_at,
+            s.year AS submission_year,
+            s.task_id AS task_id,
+            t.code AS task_code,
             ti.id AS indicator_id,
             ti.code AS indicator_code,
             ti.name AS indicator_name,

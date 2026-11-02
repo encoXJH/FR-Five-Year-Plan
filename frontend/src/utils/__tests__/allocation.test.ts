@@ -4,6 +4,7 @@ import {
   buildSaveAllocationRequest,
   canAssignNewB,
   computeYearSummary,
+  distributeYearTargetsEvenly,
   emptyMatrixTargets,
   isSummableCaliber,
   isSummaryBalanced,
@@ -63,6 +64,63 @@ describe('isSummableCaliber', () => {
     expect(isSummableCaliber('RATIO')).toBe(false)
     expect(isSummableCaliber('DIRECT_PERCENT')).toBe(false)
     expect(isSummableCaliber('BOOLEAN')).toBe(false)
+  })
+})
+
+describe('distributeYearTargetsEvenly', () => {
+  it('按年度目标平均分配给可编辑行，余数从首行逐行摊入', () => {
+    const rows = [
+      makeRow({ unitId: '1' }),
+      makeRow({ unitId: '2' }),
+      makeRow({ unitId: '3' }),
+    ]
+    const result = distributeYearTargetsEvenly(rows, [2026], { 2026: 10 }, 1)
+    expect(rows.map((row) => row.targets[2026])).toEqual([4, 3, 3])
+    expect(result).toEqual({ filledYears: [2026], skippedYears: [] })
+  })
+
+  it('目标小于行数时余数只落到前几行', () => {
+    const rows = Array.from({ length: 8 }, (_, index) => makeRow({ unitId: String(index + 1) }))
+    distributeYearTargetsEvenly(rows, [2030], { 2030: 3 }, 1)
+    expect(rows.map((row) => row.targets[2030])).toEqual([1, 1, 1, 0, 0, 0, 0, 0])
+  })
+
+  it('先扣除只读行目标，历史与已下发行保持原值', () => {
+    const rows = [
+      makeRow({ unitId: '1', taskStatus: 'DISTRIBUTED', targets: { 2026: 4 } }),
+      makeRow({ unitId: '2' }),
+      makeRow({ unitId: '3' }),
+    ]
+    distributeYearTargetsEvenly(rows, [2026], { 2026: 10 }, 1)
+    expect(rows.map((row) => row.targets[2026])).toEqual([4, 3, 3])
+  })
+
+  it('年度目标为空或只读行已满足时跳过且不清空原值', () => {
+    const rows = [
+      makeRow({ unitId: '1', taskStatus: 'DISTRIBUTED', targets: { 2026: 5 } }),
+      makeRow({ unitId: '2', targets: { 2026: 1 } }),
+    ]
+    const result = distributeYearTargetsEvenly(rows, [2026, 2027], { 2026: 5, 2027: null }, 1)
+    expect(result).toEqual({ filledYears: [], skippedYears: [2026, 2027] })
+    expect(rows[1].targets[2026]).toBe(1)
+  })
+
+  it('两位小数刻度分配不产生浮点残差', () => {
+    const rows = [
+      makeRow({ unitId: '1' }),
+      makeRow({ unitId: '2' }),
+      makeRow({ unitId: '3' }),
+    ]
+    const result = distributeYearTargetsEvenly(rows, [2026], { 2026: 10.55 }, 100)
+    expect(rows.map((row) => row.targets[2026])).toEqual([3.52, 3.52, 3.51])
+    expect(result.filledYears).toEqual([2026])
+  })
+
+  it('没有可编辑行时不修改任何数据', () => {
+    const rows = [makeRow({ unitId: '1', taskStatus: 'DISTRIBUTED', targets: { 2026: 5 } })]
+    const result = distributeYearTargetsEvenly(rows, [2026], { 2026: 10 }, 1)
+    expect(rows[0].targets[2026]).toBe(5)
+    expect(result).toEqual({ filledYears: [], skippedYears: [2026] })
   })
 })
 

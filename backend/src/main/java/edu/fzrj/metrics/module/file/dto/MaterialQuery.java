@@ -5,6 +5,8 @@ public record MaterialQuery(
         Long planId,
         Long indicatorId,
         Long unitId,
+        Long taskId,
+        Integer year,
         String category,
         String keyword,
         Long ownerScope,

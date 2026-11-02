@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   booleanPlanYear,
   CALIBER_BY_MEASURE,
+  completionLevel,
+  completionLevelClass,
+  completionPercent,
+  exceededAmount,
+  formatActualValue,
   formatTargetValue,
   groupIndicatorsByDirection,
   hasQuantitativeFields,
@@ -66,6 +71,45 @@ describe('formatTargetValue', () => {
   it('空值显示 —', () => {
     expect(formatTargetValue(null, 'INCREMENT')).toBe(EMPTY_DISPLAY)
     expect(formatTargetValue(undefined, 'GROWTH')).toBe(EMPTY_DISPLAY)
+  })
+})
+
+describe('完成进度与超额', () => {
+  it('completionPercent 优先使用完成率并封顶 100', () => {
+    expect(completionPercent(0.5, 5, 10)).toBe(50)
+    expect(completionPercent(1.256, 12.56, 10)).toBe(100)
+    expect(completionPercent(0, 0, 10)).toBe(0)
+    expect(completionPercent(null, 3, 0)).toBe(100)
+    expect(completionPercent(null, null, 10)).toBe(0)
+    expect(completionPercent(undefined, 2, 10)).toBe(0)
+  })
+
+  it('exceededAmount 仅在实际值大于数值目标时返回差值', () => {
+    expect(exceededAmount(12, 10)).toBe(2)
+    expect(exceededAmount(10, 10)).toBeNull()
+    expect(exceededAmount(9, 10)).toBeNull()
+    expect(exceededAmount(null, 10)).toBeNull()
+    expect(exceededAmount(5, true)).toBeNull()
+  })
+
+  it('formatActualValue 按口径显示实际完成值', () => {
+    expect(formatActualValue(3, 'INCREMENT')).toBe('3')
+    expect(formatActualValue(0.45, 'RATIO')).toBe('45.0%')
+    expect(formatActualValue(1, 'BOOLEAN')).toBe('已完成')
+    expect(formatActualValue(0, 'BOOLEAN')).toBe('未完成')
+    expect(formatActualValue(null, 'INCREMENT')).toBe(EMPTY_DISPLAY)
+  })
+
+  it('completionLevel 按 0 / 部分 / 完成三档分级，无目标不着色', () => {
+    expect(completionLevel(0, true)).toBe('none')
+    expect(completionLevel(null, true)).toBe('none')
+    expect(completionLevel(1, true)).toBe('partial')
+    expect(completionLevel(99.9, true)).toBe('partial')
+    expect(completionLevel(100, true)).toBe('complete')
+    expect(completionLevel(120, true)).toBe('complete')
+    expect(completionLevel(50, false)).toBeNull()
+    expect(completionLevelClass('partial')).toBe('completion-value--partial')
+    expect(completionLevelClass(null)).toBe('')
   })
 })
 

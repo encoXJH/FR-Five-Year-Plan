@@ -166,6 +166,20 @@ public final class ImportValidator {
         return null;
     }
 
+    /**
+     * 占比 / 直填百分比兼容整数百分数录入：大于 1 时按百分数换算为小数（70 → 0.70），
+     * 已按小数录入的值保持不变；增长率不换算（可能大于 100%）。
+     */
+    public static BigDecimal normalizePercent(BigDecimal value, String statCaliber) {
+        if (value == null || value.compareTo(BigDecimal.ONE) <= 0) {
+            return value;
+        }
+        if (!"RATIO".equals(statCaliber) && !"DIRECT_PERCENT".equals(statCaliber)) {
+            return value;
+        }
+        return value.movePointLeft(2);
+    }
+
     /** 解析十进制数；空白返回 null，非数字返回 null（调用方按需区分） */
     public static BigDecimal parseDecimal(String raw) {
         if (isBlank(raw)) {

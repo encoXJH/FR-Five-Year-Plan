@@ -241,6 +241,21 @@ class SubmissionServiceTest {
         submissionService.requireFillableYear(4L, 2026);
     }
 
+    @Test
+    void 已归档计划在年度校验前拒绝填报提交() {
+        Plan plan = new Plan();
+        plan.setStatus("ARCHIVED");
+        when(planService.requirePlan(4L)).thenReturn(plan);
+        doThrow(new BizException(ErrorCode.PLAN_ARCHIVED)).when(planService).requireNotArchived(plan);
+
+        BizException error = assertThrows(BizException.class,
+                () -> submissionService.requireFillableYear(4L, 2026));
+
+        assertEquals(30002, error.getErrorCode().getCode());
+        verify(planYearMapper, never()).selectOne(any());
+        verify(submissionMapper, never()).updateById(any(Submission.class));
+    }
+
     private void loginAdmin() {
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
                 new LoginUser(99L, "admin", "管理员", null,

@@ -76,6 +76,7 @@ public class MaterialService {
     }
 
     public PageResult<MaterialDtos.MaterialItem> list(Long planId, Long indicatorId, Long unitId,
+                                                       Long taskId, Integer year,
                                                        String category, String keyword,
                                                        int page, int pageSize) {
         LoginUser user = SecurityUtils.getLoginUser();
@@ -94,7 +95,7 @@ public class MaterialService {
         }
         String normalizedKeyword = StringUtils.hasText(keyword) ? keyword.trim().toLowerCase() : null;
         MaterialQuery query = new MaterialQuery(
-                planId, indicatorId, unitId, category, normalizedKeyword, ownerScope, unitScope,
+                planId, indicatorId, unitId, taskId, year, category, normalizedKeyword, ownerScope, unitScope,
                 safePageSize, (long) (safePage - 1) * safePageSize);
         long total = materialQueryMapper.countMaterials(query);
         List<MaterialDtos.MaterialItem> items = total == 0 ? List.of() : materialQueryMapper.selectMaterials(query)
@@ -107,6 +108,9 @@ public class MaterialService {
         LoginUser user = SecurityUtils.getLoginUser();
         if (!user.getPermissions().contains("material:upload")) {
             throw new BizException(ErrorCode.FORBIDDEN);
+        }
+        if (!user.getRoles().contains("ADMIN") && !user.getRoles().contains("SCHOOL_OWNER")) {
+            throw new BizException(ErrorCode.FORBIDDEN, "学院负责人请通过任务填报上传佐证材料");
         }
         Indicator indicator = indicatorMapper.selectOne(new LambdaQueryWrapper<Indicator>()
                 .eq(Indicator::getId, request.indicatorId())
@@ -150,6 +154,7 @@ public class MaterialService {
     private MaterialDtos.MaterialItem toItem(MaterialRow row) {
         return new MaterialDtos.MaterialItem(row.getFileId(), row.getFileName(), row.getSize(),
                 row.getMimeType(), row.getCategory(), row.getBizType(), row.getUploadedAt(),
+                row.getSubmissionYear(), row.getTaskCode(),
                 new MaterialDtos.IndicatorRef(row.getIndicatorId(), row.getIndicatorCode(), row.getIndicatorName()),
                 row.getUnitId() == null ? null
                         : new MaterialDtos.UnitRef(row.getUnitId(), row.getUnitCode(), row.getUnitName()),

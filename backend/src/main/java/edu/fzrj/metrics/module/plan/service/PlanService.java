@@ -29,6 +29,7 @@ import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
+import edu.fzrj.metrics.module.task.service.TaskYearActivationService;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -61,6 +62,7 @@ public class PlanService {
     private final UserRoleMapper userRoleMapper;
     private final TaskMapper taskMapper;
     private final TaskYearMapper taskYearMapper;
+    private final TaskYearActivationService taskYearActivationService;
     private final ObjectMapper objectMapper;
     private final PlanReadScopeService planReadScopeService;
 
@@ -68,7 +70,9 @@ public class PlanService {
                        DirectionMapper directionMapper, IndicatorMapper indicatorMapper,
                        IndicatorYearTargetMapper yearTargetMapper, MajorGroupMapper majorGroupMapper,
                        UserRefResolver userRefResolver, UserRoleMapper userRoleMapper,
-                       TaskMapper taskMapper, TaskYearMapper taskYearMapper, ObjectMapper objectMapper,
+                       TaskMapper taskMapper, TaskYearMapper taskYearMapper,
+                       TaskYearActivationService taskYearActivationService,
+                       ObjectMapper objectMapper,
                        PlanReadScopeService planReadScopeService) {
         this.planMapper = planMapper;
         this.planYearMapper = planYearMapper;
@@ -81,6 +85,7 @@ public class PlanService {
         this.userRoleMapper = userRoleMapper;
         this.taskMapper = taskMapper;
         this.taskYearMapper = taskYearMapper;
+        this.taskYearActivationService = taskYearActivationService;
         this.objectMapper = objectMapper;
         this.planReadScopeService = planReadScopeService;
     }
@@ -299,6 +304,7 @@ public class PlanService {
             planYear.setUpdatedBy(userId);
             planYearMapper.insert(planYear);
         }
+        taskYearActivationService.syncPlan(plan.getId(), userId);
         return toDetail(requirePlan(planId));
     }
 

@@ -5,7 +5,13 @@ import type { IndicatorTreeNode } from '@/types/indicator'
 import type { StatsTreeNode } from '@/types/stats'
 import type { TaskListItem } from '@/types/task'
 import { formatPercent } from '@/utils/format'
-import { formatTargetValue, yearTargetMap } from '@/utils/indicator'
+import {
+  completionLevel,
+  completionLevelClass,
+  formatTargetValue,
+  yearTargetMap,
+  type CompletionLevel,
+} from '@/utils/indicator'
 import { primaryTaskIndicator, progressPercentage } from '@/utils/task'
 
 const props = defineProps<{
@@ -21,17 +27,21 @@ const props = defineProps<{
 const emit = defineEmits<{
   retry: []
   detail: [task: TaskListItem]
+  materials: [task: TaskListItem, year: number]
 }>()
 
 const taskViews = computed(() => (props.tasks ?? []).map((task) => {
   const stats = props.statsByTask.get(task.id)
   const primaryIndicator = primaryTaskIndicator(task)
   const caliber = primaryIndicator?.statCaliber ?? props.indicator.statCaliber ?? null
+  const totalTarget = task.totalTarget
+  const hasTarget = typeof totalTarget === 'boolean' ? totalTarget : typeof totalTarget === 'number' && totalTarget > 0
 
   return {
     task,
     parent: primaryIndicator ?? props.indicator,
     caliber,
+    hasTarget,
     yearTargets: yearTargetMap(task.yearTargets),
     actualValue: stats?.actualValue ?? task.actualValue ?? null,
     completionRate: stats?.completionRate ?? task.completionRate ?? null,
@@ -39,6 +49,23 @@ const taskViews = computed(() => (props.tasks ?? []).map((task) => {
     yearStatus: stats?.yearStatus ?? task.yearStatus ?? null,
   }
 }))
+
+function rateLevel(rate: number | null | undefined, hasTarget: boolean): CompletionLevel | null {
+  const percent = progressPercentage(rate)
+  return completionLevel(percent, hasTarget || percent > 0)
+}
+
+function rateClass(rate: number | null | undefined, hasTarget: boolean): string {
+  return completionLevelClass(rateLevel(rate, hasTarget))
+}
+
+function rateColor(rate: number | null | undefined, hasTarget: boolean): string {
+  const level = rateLevel(rate, hasTarget)
+  if (level === 'none') return '#F56C6C'
+  if (level === 'partial') return '#E6A23C'
+  if (level === 'complete') return '#67C23A'
+  return '#2B5BC0'
+}
 </script>
 
 <template>
@@ -122,28 +149,28 @@ const taskViews = computed(() => (props.tasks ?? []).map((task) => {
           <div class="indicator-progress-grid">
             <div class="indicator-progress-item">
               <span>当前完成值</span>
-              <strong>{{ formatTargetValue(view.actualValue, view.caliber) }}</strong>
+              <strong :class="rateClass(view.completionRate, view.hasTarget)">{{ formatTargetValue(view.actualValue, view.caliber) }}</strong>
             </div>
             <div class="indicator-progress-item">
               <span>当年完成率</span>
-              <strong>{{ formatPercent(view.completionRate) }}</strong>
+              <strong :class="rateClass(view.completionRate, view.hasTarget)">{{ formatPercent(view.completionRate) }}</strong>
               <el-progress
                 v-if="view.completionRate !== null"
                 :percentage="progressPercentage(view.completionRate)"
                 :stroke-width="5"
                 :show-text="false"
-                color="#2B5BC0"
+                :color="rateColor(view.completionRate, view.hasTarget)"
               />
             </div>
             <div class="indicator-progress-item">
               <span>五年累计完成率</span>
-              <strong>{{ formatPercent(view.cumulativeRate) }}</strong>
+              <strong :class="rateClass(view.cumulativeRate, view.hasTarget)">{{ formatPercent(view.cumulativeRate) }}</strong>
               <el-progress
                 v-if="view.cumulativeRate !== null"
                 :percentage="progressPercentage(view.cumulativeRate)"
                 :stroke-width="5"
                 :show-text="false"
-                color="#67C23A"
+                :color="rateColor(view.cumulativeRate, view.hasTarget)"
               />
             </div>
           </div>
@@ -152,10 +179,19 @@ const taskViews = computed(() => (props.tasks ?? []).map((task) => {
         <section class="indicator-year-section" aria-label="逐年目标">
           <h4>逐年目标</h4>
           <div class="indicator-year-grid">
-            <div v-for="year in years" :key="year" class="indicator-year-target">
+            <button
+              v-for="year in years"
+              :key="year"
+              type="button"
+              class="indicator-year-target indicator-year-target--link"
+              :title="`查看 ${view.task.code} ${year} 年已提交的材料`"
+              :aria-label="`查看 ${view.task.code} ${year} 年已提交的材料`"
+              @click="emit('materials', view.task, year)"
+            >
               <span>{{ year }} 年</span>
               <strong>{{ formatTargetValue(view.yearTargets.get(year) ?? null, view.caliber) }}</strong>
-            </div>
+              <span class="year-material-hint">查看材料</span>
+            </button>
           </div>
         </section>
 
@@ -329,6 +365,29 @@ const taskViews = computed(() => (props.tasks ?? []).map((task) => {
   border-radius: 6px;
 }
 
+.indicator-year-target--link {
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  appearance: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.indicator-year-target--link:hover,
+.indicator-year-target--link:focus-visible {
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary);
+  outline: none;
+}
+
+.indicator-year-target .year-material-hint {
+  margin-top: 2px;
+  color: var(--el-color-primary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .indicator-progress-item > strong,
 .indicator-year-target > strong {
   display: block;
@@ -338,6 +397,10 @@ const taskViews = computed(() => (props.tasks ?? []).map((task) => {
   font-weight: 600;
   line-height: 1.45;
 }
+
+.indicator-progress-item > strong.completion-value--none { color: var(--el-color-danger); }
+.indicator-progress-item > strong.completion-value--partial { color: var(--el-color-warning); }
+.indicator-progress-item > strong.completion-value--complete { color: var(--el-color-success); }
 
 .indicator-progress-item:first-child > strong,
 .indicator-year-target > strong {

@@ -36,6 +36,58 @@ export function formatTargetValue(
   return formatNumber(target)
 }
 
+/** 实际完成值显示：是否型显示已完成/未完成，比率类按百分比，其余按数值 */
+export function formatActualValue(
+  actual: number | null | undefined,
+  caliber: StatCaliber | null | undefined,
+): string {
+  if (actual === null || actual === undefined) return EMPTY_DISPLAY
+  if (caliber === 'BOOLEAN') return actual > 0 ? '已完成' : '未完成'
+  if (isPercentCaliber(caliber)) return formatPercent(actual)
+  return formatNumber(actual)
+}
+
+/** 年度进度条百分比：优先使用后端完成率；无完成率但目标为 0 且有完成值时按 100%，封顶 100 */
+export function completionPercent(
+  completionRate: number | null | undefined,
+  actualValue: number | null | undefined,
+  target: number | boolean | null | undefined,
+): number {
+  if (completionRate !== null && completionRate !== undefined && Number.isFinite(completionRate)) {
+    return Math.max(0, Math.min(100, Math.round(completionRate * 1000) / 10))
+  }
+  const actual = Number(actualValue)
+  if (typeof target === 'number' && target === 0 && Number.isFinite(actual) && actual > 0) return 100
+  return 0
+}
+
+/** 超额完成数量：实际值大于数值目标时返回差值，否则 null */
+export function exceededAmount(
+  actualValue: number | null | undefined,
+  target: number | boolean | null | undefined,
+): number | null {
+  if (typeof target !== 'number' || actualValue === null || actualValue === undefined) return null
+  const actual = Number(actualValue)
+  if (!Number.isFinite(actual) || actual <= target) return null
+  return Math.round((actual - target) * 10000) / 10000
+}
+
+/** 完成程度：无目标返回 null；0 或空值 red(none)，0–100 yellow(partial)，≥100 green(complete) */
+export type CompletionLevel = 'none' | 'partial' | 'complete'
+
+export function completionLevel(
+  percent: number | null | undefined,
+  hasTarget: boolean,
+): CompletionLevel | null {
+  if (!hasTarget) return null
+  if (percent === null || percent === undefined || !Number.isFinite(percent) || percent <= 0) return 'none'
+  return percent >= 100 ? 'complete' : 'partial'
+}
+
+export function completionLevelClass(level: CompletionLevel | null): string {
+  return level ? `completion-value--${level}` : ''
+}
+
 /** 年度目标数组 → Map<year, target> */
 export function yearTargetMap(yearTargets: YearTarget[] | null | undefined): Map<number, number | boolean | null> {
   const map = new Map<number, number | boolean | null>()

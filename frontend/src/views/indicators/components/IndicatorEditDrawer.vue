@@ -142,6 +142,7 @@ const rules: FormRules = {
   name: [{ required: true, message: '请填写指标名称', trigger: 'blur' }],
   measureType: [{ required: true, message: '请选择计量类型', trigger: 'change' }],
   statCaliber: [{ required: true, message: '请选择统计口径', trigger: 'change' }],
+  unitLabel: [{ required: true, whitespace: true, message: '请填写计量单位', trigger: 'blur' }],
   planYear: [{ required: true, message: '请选择计划完成年份', trigger: 'change' }],
 }
 
@@ -229,6 +230,20 @@ function onMeasureTypeChange(): void {
   if (!allowed.includes(form.statCaliber)) form.statCaliber = allowed[0]
 }
 
+/** 把五年总量按年度平均分配；最后一年补足舍入差额，保证各年之和等于总量 */
+function distributeTotalEvenly(): void {
+  const total = form.totalTarget
+  if (total === null || props.years.length === 0) return
+  const scale = 100
+  const totalUnits = Math.round(total * scale)
+  const base = Math.trunc(totalUnits / props.years.length)
+  const remainder = totalUnits - base * props.years.length
+  props.years.forEach((year, index) => {
+    const units = base + (index === props.years.length - 1 ? remainder : 0)
+    targetInputs[year] = units / scale
+  })
+}
+
 function buildYearTargets(): YearTarget[] | undefined {
   if (!quantitative.value) return undefined
   if (form.statCaliber === 'BOOLEAN') {
@@ -245,7 +260,11 @@ function buildYearTargets(): YearTarget[] | undefined {
 }
 
 const yearSum = computed(() => sumYearTargets(buildYearTargets() ?? []))
-const sumDiff = computed(() => form.totalTarget === null ? null : yearSum.value - form.totalTarget)
+const sumDiff = computed(() => {
+  if (form.totalTarget === null) return null
+  const diff = yearSum.value - form.totalTarget
+  return Math.abs(diff) < 0.005 ? 0 : Math.round(diff * 100) / 100
+})
 
 function quantitativePayload() {
   if (!quantitative.value) {
@@ -449,7 +468,7 @@ async function submit(): Promise<void> {
             <div class="field-tip">计量类型与统计口径必须匹配，否则服务端返回 40007</div>
           </el-form-item>
 
-          <el-form-item v-if="showUnit" label="计量单位">
+          <el-form-item v-if="showUnit" label="计量单位" prop="unitLabel">
             <el-input v-model="form.unitLabel" placeholder="如：项、个、人、门" style="width: 160px" />
           </el-form-item>
 
@@ -468,12 +487,23 @@ async function submit(): Promise<void> {
           </el-form-item>
 
           <el-form-item v-if="showBaseline" label="基线值">
-            <el-input-number v-model="form.baselineValue" controls-position="right" :precision="4" />
+            <el-input-number v-model="form.baselineValue" controls-position="right" :precision="2" />
             <div class="field-tip">基线年的实际值，用于存量 / 增长率计算</div>
           </el-form-item>
 
           <el-form-item v-if="showTotalTarget" label="五年总量">
-            <el-input-number v-model="form.totalTarget" :min="0" controls-position="right" :precision="4" />
+            <div class="total-target-row">
+              <el-input-number v-model="form.totalTarget" :min="0" controls-position="right" :precision="2" />
+              <el-button
+                v-if="form.statCaliber === 'INCREMENT'"
+                size="small"
+                :disabled="formReadOnly || form.totalTarget === null"
+                title="把五年总量按年度数量平均分配"
+                @click="distributeTotalEvenly"
+              >
+                平均分配
+              </el-button>
+            </div>
           </el-form-item>
 
           <el-form-item v-if="form.statCaliber === 'BOOLEAN'" label="计划完成年" prop="planYear">
@@ -489,7 +519,7 @@ async function submit(): Promise<void> {
                 <el-input-number
                   v-model="targetInputs[year]"
                   :min="0"
-                  :precision="isPercentCaliber(form.statCaliber) ? 1 : 4"
+                  :precision="isPercentCaliber(form.statCaliber) ? 1 : 2"
                   controls-position="right"
                 />
               </label>
@@ -579,6 +609,13 @@ async function submit(): Promise<void> {
   font-size: 12px;
   line-height: 20px;
   color: var(--el-text-color-secondary);
+}
+
+.total-target-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .year-target-grid {

@@ -32,6 +32,27 @@ export function maxSizeOf(category: FileCategory): number {
   return FILE_CATEGORY_RULES.find((item) => item.category === category)?.maxSize ?? DIRECT_UPLOAD_MAX_SIZE
 }
 
+/** 浏览器内 Office 预览方式：word docx / sheet xls·xlsx / slide pptx / text txt */
+export type OfficePreviewKind = 'word' | 'sheet' | 'slide' | 'text' | 'unsupported'
+
+/** 旧版 doc / ppt 浏览器无法直接解析，返回 unsupported 由界面提示下载。 */
+export function officePreviewKind(fileName: string): OfficePreviewKind {
+  const ext = fileName.split('.').pop()?.toLowerCase() ?? ''
+  switch (ext) {
+    case 'docx':
+      return 'word'
+    case 'xls':
+    case 'xlsx':
+      return 'sheet'
+    case 'pptx':
+      return 'slide'
+    case 'txt':
+      return 'text'
+    default:
+      return 'unsupported'
+  }
+}
+
 /** 文件大小显示：B / KB / MB / GB，非 B 保留 1 位小数 */
 export function formatFileSize(bytes: number | null | undefined): string {
   if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return EMPTY_DISPLAY

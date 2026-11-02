@@ -94,6 +94,9 @@ export type FileCategory = 'DOCUMENT' | 'PDF' | 'IMAGE' | 'VIDEO' | 'ARCHIVE'
 
 export type PreviewType = 'IMAGE' | 'PDF' | 'OFFICE' | 'VIDEO' | 'UNSUPPORTED'
 
+/** OFFICE 预览方式：KKFILEVIEW 外部服务 / CLIENT 浏览器内渲染 */
+export type PreviewRenderMode = 'KKFILEVIEW' | 'CLIENT'
+
 export type TranscodeStatus = 'PROCESSING' | 'SUCCEEDED' | 'FAILED'
 
 /** GET /dicts/enums 返回：枚举名 → (枚举值 → 中文名) */

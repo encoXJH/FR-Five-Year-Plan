@@ -178,9 +178,10 @@ function caliberOf(row: TaskListItem) {
   return primaryTaskIndicator(row)?.statCaliber ?? 'INCREMENT'
 }
 
-/** 填报入口：年度进行中（IN_PROGRESS）且有填报权限（P07 → P08 联动） */
+/** 填报入口：任务已下发且年度进行中（IN_PROGRESS）且有填报权限（P07 → P08 联动） */
 function canSubmitRow(row: TaskListItem): boolean {
   return canWriteTask(row)
+    && (row.status === 'DISTRIBUTED' || row.status === 'IN_PROGRESS')
     && filters.year === currentYear
     && row.yearStatus != null
     && ['NOT_ACTIVATED', 'IN_PROGRESS'].includes(row.yearStatus)
@@ -311,7 +312,8 @@ onMounted(() => {
         <div v-for="row in page.items" :key="`card-${row.id}`" class="task-card">
           <div class="task-card-header">
             <span class="mono task-card-code">{{ row.code }}</span>
-            <StatusTag v-if="row.yearStatus" kind="TaskYearStatus" :value="row.yearStatus" />
+            <StatusTag v-if="row.status === 'PENDING_DISTRIBUTION'" kind="TaskStatus" :value="row.status" />
+            <StatusTag v-else-if="row.yearStatus" kind="TaskYearStatus" :value="row.yearStatus" />
             <StatusTag v-else kind="TaskStatus" :value="row.status" />
             <el-tag v-if="row.isHistorical" type="info" size="small" effect="plain">历史只读</el-tag>
           </div>
@@ -375,7 +377,8 @@ onMounted(() => {
         </el-table-column>
         <el-table-column label="状态" width="96" align="center">
           <template #default="{ row }">
-            <StatusTag v-if="row.yearStatus" kind="TaskYearStatus" :value="row.yearStatus" />
+            <StatusTag v-if="row.status === 'PENDING_DISTRIBUTION'" kind="TaskStatus" :value="row.status" />
+            <StatusTag v-else-if="row.yearStatus" kind="TaskYearStatus" :value="row.yearStatus" />
             <StatusTag v-else kind="TaskStatus" :value="row.status" />
           </template>
         </el-table-column>

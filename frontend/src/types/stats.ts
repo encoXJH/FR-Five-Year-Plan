@@ -80,6 +80,8 @@ export interface StatsTreeNode {
   targetDirection?: string | null
   target: number | boolean | null
   actualValue: number | null
+  /** STOCK / GROWTH 年度完成总量；GROWTH 的 actualValue 为增长率 */
+  actualTotal?: number | null
   completionRate: number | null
   achieveStatus: AchieveStatus | null
   /** 五年累计完成值（INCREMENT 各年之和；STOCK/GROWTH 最新总量；RATIO/DIRECT_PERCENT 最新比率；BOOLEAN 0/1） */

@@ -13,6 +13,7 @@ import {
   buildSaveAllocationRequest,
   canAssignNewB,
   computeYearSummary,
+  distributeYearTargetsEvenly,
   emptyMatrixTargets,
   isSummableCaliber,
   isSummaryBalanced,
@@ -312,6 +313,83 @@ function removeRow(index: number): void {
   if (!row || rowReadOnly(row)) return
   rows.value.splice(index, 1)
   dirty.value = true
+}
+
+async function confirmAutoDistribute(message: string): Promise<boolean> {
+  try {
+    await ElMessageBox.confirm(message, '自动分配', {
+      confirmButtonText: '继续',
+      cancelButtonText: '取消',
+      type: 'info',
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 自动分配：把指标年度目标平均写入可编辑行，最后一行补差；没有可编辑行时先补充可承接单元。 */
+async function autoDistribute(): Promise<void> {
+  if (readOnly.value || !summable.value) return
+  if (!props.years.some((year) => typeof indicatorTargets.value[year] === 'number')) {
+    ElMessage.warning('请先设置该指标的年度目标')
+    return
+  }
+  // 只读行（历史 / 已下发）已占用的额度先扣除，没有剩余额度时不新增空行
+  const hasRemaining = props.years.some((year) => {
+    const target = indicatorTargets.value[year]
+    if (typeof target !== 'number') return false
+    const fixedTotal = rows.value
+      .filter((row) => !isPendingAllocationRow(row))
+      .reduce((sum, row) => sum + (typeof row.targets[year] === 'number' ? row.targets[year] as number : 0), 0)
+    return target - fixedTotal > 0
+  })
+  if (!hasRemaining) {
+    ElMessage.warning('只读行已完成全部年度目标，无需自动分配')
+    return
+  }
+
+  let editableRows = rows.value.filter((row) => !rowReadOnly(row))
+  if (editableRows.length === 0) {
+    const unitsToAdd = [...addableUnits.value]
+    if (unitsToAdd.length === 0) {
+      ElMessage.warning('暂无可承接新 B 的执行单元')
+      return
+    }
+    const confirmed = await confirmAutoDistribute(
+      `当前没有可编辑的分解行，将为 ${unitsToAdd.length} 个可承接执行单元新增分解行并平均分配，是否继续？`,
+    )
+    if (!confirmed) return
+    for (const unit of unitsToAdd) {
+      rows.value.push({
+        unitId: unit.id,
+        unitCode: unit.code,
+        unitName: unit.name,
+        ownerId: null,
+        isHistorical: false,
+        taskStatus: null,
+        targets: emptyMatrixTargets(props.years),
+      })
+    }
+    editableRows = rows.value.filter((row) => !rowReadOnly(row))
+  } else if (editableRows.some((row) => rowHasTarget(row.targets))) {
+    const confirmed = await confirmAutoDistribute('自动分配将覆盖可编辑行已填写的年度目标，是否继续？')
+    if (!confirmed) return
+  }
+
+  const scale = props.statCaliber === 'INCREMENT' ? 1 : 100
+  const result = distributeYearTargetsEvenly(rows.value, props.years, indicatorTargets.value, scale)
+  if (result.filledYears.length === 0) {
+    ElMessage.warning('没有可分配的年度（目标为空或只读行已满足目标）')
+    return
+  }
+  dirty.value = true
+  const next = new Set(editedCells.value)
+  for (const row of editableRows) {
+    for (const year of result.filledYears) next.add(`${row.unitId}-${year}`)
+  }
+  editedCells.value = next
+  ElMessage.success(`已为 ${editableRows.length} 个执行单元平均分配 ${result.filledYears.length} 个年度目标`)
 }
 
 interface SaveOptions {
@@ -825,6 +903,15 @@ defineExpose({
           />
         </el-select>
         <el-button :disabled="!addRowUnitId" @click="addRow">添加行</el-button>
+        <el-button
+          type="primary"
+          plain
+          :disabled="!summable"
+          :title="summable ? '按指标各年度目标平均分配给可编辑执行单元' : '占比 / 直填百分比 / 是否型不参与合计，无法自动分配'"
+          @click="autoDistribute"
+        >
+          自动分配
+        </el-button>
       </div>
     </el-card>
 

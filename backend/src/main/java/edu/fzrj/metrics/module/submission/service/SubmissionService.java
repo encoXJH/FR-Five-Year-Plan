@@ -374,12 +374,13 @@ public class SubmissionService {
         }
     }
 
-    /** 年度可填报：仅当前自然年，且未核算锁定。 */
+    /** 年度可填报：仅当前自然年，计划未归档且年度未核算锁定。 */
     public void requireFillableYear(Long planId, Integer year) {
         int currentYear = Year.now().getValue();
         if (year != currentYear) {
             throw new BizException(ErrorCode.PARAM_INVALID, "只能填报当前自然年份（" + currentYear + "年）的数据");
         }
+        planService.requireNotArchived(planService.requirePlan(planId));
         PlanYear planYear = planYearMapper.selectOne(new LambdaQueryWrapper<PlanYear>()
                 .eq(PlanYear::getPlanId, planId)
                 .eq(PlanYear::getYear, year)

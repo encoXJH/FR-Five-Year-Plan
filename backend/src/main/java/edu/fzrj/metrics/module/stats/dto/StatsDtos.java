@@ -93,6 +93,8 @@ public final class StatsDtos {
             String targetDirection,
             Object target,
             BigDecimal actualValue,
+            /** STOCK / GROWTH 年度完成总量；GROWTH 的 actualValue 为增长率 */
+            BigDecimal actualTotal,
             BigDecimal completionRate,
             String achieveStatus,
             /** 五年累计完成值（INCREMENT 为各年之和，STOCK/GROWTH 为最新总量，RATIO/DIRECT_PERCENT 为最新比率，BOOLEAN 为 0/1） */

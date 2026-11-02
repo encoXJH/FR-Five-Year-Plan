@@ -91,6 +91,9 @@ public class ManualValueService {
         MetricCalculator.YearResult result = new MetricCalculator.YearResult(
                 request.getValue(), null, null, request.getValue(), null, null);
         String caliber = indicator.getStatCaliber();
+        if ("STOCK".equals(caliber) || "GROWTH".equals(caliber)) {
+            row.setActualTotal(request.getValue());
+        }
         row.setCompletionRate(MetricCalculator.completionRate(caliber, result, row.getTarget()));
         row.setAchieveStatus(MetricCalculator.achieveStatus(
                 indicator.getTargetDirection(), caliber, result, row.getTarget()));

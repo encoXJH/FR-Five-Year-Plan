@@ -411,11 +411,13 @@ public class StatsService {
         BigDecimal target = yearTarget(ctx, a.getId(), year);
         CumulativeCalculator.Cumulative cumulative = cumulativeOfIndicator(a, ctx);
         BigDecimal actualValue;
+        BigDecimal actualTotal;
         BigDecimal completionRate;
         String achieveStatus;
         if ("MANUAL".equals(a.getRollupMode())) {
             IndicatorYearTarget row = yearTargetRow(ctx, a.getId(), year);
             actualValue = row == null ? null : row.getManualActualValue();
+            actualTotal = row == null ? null : row.getActualTotal();
             MetricCalculator.YearResult manual = actualValue == null
                     ? MetricCalculator.YearResult.empty()
                     : new MetricCalculator.YearResult(actualValue, null, null, null, null, null);
@@ -427,12 +429,13 @@ public class StatsService {
             MetricCalculator.YearResult result = MetricCalculator.rollup(a.getStatCaliber(), sources,
                     prevIndicatorTotal(ctx, a, year, plan));
             actualValue = result.actualValue();
+            actualTotal = result.total();
             completionRate = MetricCalculator.completionRate(a.getStatCaliber(), result, target);
             achieveStatus = MetricCalculator.achieveStatus(a.getTargetDirection(), a.getStatCaliber(), result, target);
         }
         return new StatsDtos.TreeNode(a.getId(), a.getCode(), a.getName(), "A", a.getNature(),
                 a.getStatCaliber(), a.getUnitLabel(), a.getTargetDirection(),
-                targetView(a.getStatCaliber(), target), actualValue, completionRate, achieveStatus,
+                targetView(a.getStatCaliber(), target), actualValue, actualTotal, completionRate, achieveStatus,
                 cumulative.actual(), cumulative.rate(), null, null, null, null, null, leaves);
     }
 
@@ -460,7 +463,7 @@ public class StatsService {
                 indicator == null ? null : indicator.getNature(), caliber,
                 indicator == null ? null : indicator.getUnitLabel(),
                 indicator == null ? null : indicator.getTargetDirection(),
-                targetView(caliber, ty.getTarget()), ty.getActualValue(), ty.getCompletionRate(), null,
+                targetView(caliber, ty.getTarget()), ty.getActualValue(), ty.getActualTotal(), ty.getCompletionRate(), null,
                 cumulative.actual(), cumulative.rate(), ty.getTaskId(), unitRef(ctx.units().get(ty.getUnitId())),
                 ty.getYearStatus(), ty.getIsAchieved(), task != null && Boolean.TRUE.equals(task.getIsHistorical()),
                 List.of());

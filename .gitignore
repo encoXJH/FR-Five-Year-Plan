@@ -10,17 +10,36 @@ frontend/node_modules/
 # 本地数据
 data/
 backups/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Python 缓存与临时校验产物
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # IDE 与本地运行记录
 .trae/
 .idea/
 .vscode/
 *.log
+.DS_Store
+Thumbs.db
 
 # 测试与浏览器产物
 frontend/tests/artifacts/
 frontend/test-results/
 frontend/playwright-report/
+frontend/coverage/
+.coverage
+htmlcov/
 
-# 演示与 Excel 导入填充数据（不提交）
+# 演示、临时记录与 Excel 导入填充数据（不提交）
 db/demo/
+/任务.txt
+/*.xls
+/*.xlsx

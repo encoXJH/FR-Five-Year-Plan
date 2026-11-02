@@ -10,8 +10,10 @@ import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
 import edu.fzrj.metrics.module.indicator.service.IndicatorService;
 import edu.fzrj.metrics.module.notify.entity.Notification;
 import edu.fzrj.metrics.module.notify.mapper.NotificationMapper;
+import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.plan.entity.PlanYear;
 import edu.fzrj.metrics.module.plan.mapper.PlanYearMapper;
+import edu.fzrj.metrics.module.plan.service.PlanService;
 import edu.fzrj.metrics.module.submission.dto.SubmissionDtos;
 import edu.fzrj.metrics.module.submission.entity.Review;
 import edu.fzrj.metrics.module.submission.entity.Submission;
@@ -48,6 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -68,6 +71,7 @@ class ReviewServiceTest {
     @Mock private TaskService taskService;
     @Mock private TaskMapper taskMapper;
     @Mock private DataScopeService dataScopeService;
+    @Mock private PlanService planService;
     @Mock private AnnualTargetGuard annualTargetGuard;
 
     private ReviewService reviewService;
@@ -85,7 +89,7 @@ class ReviewServiceTest {
     void setUp() {
         reviewService = new ReviewService(submissionMapper, reviewMapper, indicatorMapper, planYearMapper,
                 notificationMapper, submissionService, actualRecalcService, indicatorService, taskService,
-                taskMapper, dataScopeService, transactionManager(), annualTargetGuard);
+                taskMapper, dataScopeService, planService, transactionManager(), annualTargetGuard);
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
                 new LoginUser(20L, "owner", "校级负责人", null,
                         List.of("SCHOOL_OWNER"), List.of()), null, List.of()));
@@ -174,6 +178,22 @@ class ReviewServiceTest {
         verify(submissionMapper).updateById(any(Submission.class));
         verify(actualRecalcService, never()).recalcTaskYear(anyLong());
         verify(notificationMapper, never()).insert(any(Notification.class));
+    }
+
+    @Test
+    void 已归档计划在审核写入前被拒绝() {
+        Plan plan = new Plan();
+        plan.setStatus("ARCHIVED");
+        when(planService.requirePlan(4L)).thenReturn(plan);
+        doThrow(new BizException(ErrorCode.PLAN_ARCHIVED)).when(planService).requireNotArchived(plan);
+
+        BizException error = assertThrows(BizException.class,
+                () -> reviewService.review(1L, reviewRequest()));
+
+        assertEquals(30002, error.getErrorCode().getCode());
+        verify(reviewMapper, never()).insert(any(Review.class));
+        verify(submissionMapper, never()).updateById(any(Submission.class));
+        verify(actualRecalcService, never()).recalcTaskYear(anyLong());
     }
 
     @Test
