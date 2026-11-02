@@ -1,5 +1,6 @@
-import type { AxiosRequestConfig } from 'axios'
+import axios, { type AxiosRequestConfig } from 'axios'
 import { http } from '@/utils/request'
+import { triggerFileDownload } from '@/utils/file'
 import type { FileBizType } from '@/types/enums'
 import type {
   DownloadUrlInfo,
@@ -7,6 +8,7 @@ import type {
   MultipartInitRequest,
   MultipartInitResponse,
   MultipartSessionInfo,
+  PartUploadUrlInfo,
   PreviewInfo,
 } from '@/types/file'
 
@@ -30,7 +32,24 @@ export function initMultipart(data: MultipartInitRequest): Promise<MultipartInit
   return http.post('/files/multipart/init', data)
 }
 
-/** 上传分片（application/octet-stream，分片编号从 1 开始） */
+export function getPartUploadUrl(uploadId: string, partNumber: number): Promise<PartUploadUrlInfo> {
+  return http.get(`/files/multipart/${uploadId}/parts/${partNumber}/upload-url`)
+}
+
+/** MINIO 预签名直传，不经过业务 Axios 实例，避免附加平台 Authorization。 */
+export function uploadPartDirect(
+  url: string,
+  part: Blob,
+  config?: AxiosRequestConfig,
+): Promise<unknown> {
+  return axios.put(url, part, {
+    headers: { 'Content-Type': 'application/octet-stream' },
+    timeout: 300000,
+    ...config,
+  })
+}
+
+/** LOCAL 上传分片（application/octet-stream，分片编号从 1 开始） */
 export function uploadPart(
   uploadId: string,
   partNumber: number,
@@ -59,4 +78,18 @@ export function getFilePreview(fileId: string, config?: AxiosRequestConfig): Pro
 
 export function getFileDownloadUrl(fileId: string): Promise<DownloadUrlInfo> {
   return http.get(`/files/${fileId}/download-url`)
+}
+
+/** LOCAL 小中型文件用 Blob 确保按原文件名保存；大文件与 MINIO 使用附件直链。 */
+export async function downloadFile(fileId: string, fileName: string, size?: number): Promise<void> {
+  const { url } = await getFileDownloadUrl(fileId)
+  const useBlob = url.startsWith('/') && (size === undefined || size <= 50 * 1024 * 1024)
+  if (!useBlob) {
+    triggerFileDownload(url, fileName)
+    return
+  }
+  const response = await axios.get<Blob>(url, { responseType: 'blob', timeout: 300000 })
+  const blobUrl = URL.createObjectURL(response.data)
+  triggerFileDownload(blobUrl, fileName)
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
 }

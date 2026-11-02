@@ -9,6 +9,7 @@ import {
   importPreview,
 } from '@/api/indicator'
 import { newIdempotencyKey } from '@/utils/idempotency'
+import { triggerFileDownload } from '@/utils/file'
 import type { ImportPreviewResult } from '@/types/indicator'
 
 const props = defineProps<{
@@ -46,11 +47,8 @@ async function handleDownloadTemplate(): Promise<void> {
   try {
     const blob = await downloadImportTemplate(props.planId)
     const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = '指标导入模板.xlsx'
-    link.click()
-    URL.revokeObjectURL(url)
+    triggerFileDownload(url, '指标导入模板.xlsx')
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000)
   } catch {
     // 拦截器已提示
   }
@@ -104,7 +102,7 @@ async function handleConfirm(): Promise<void> {
       idempotencyKey.value,
     )
     step.value = 2
-    ElMessage.success(`导入完成，共创建 ${result.createdCount} 条指标`)
+    ElMessage.success(`导入完成，共创建 ${result.aCount} 条指标`)
     emit('imported')
   } catch {
     // 拦截器已提示；40001 等错误信息已由拦截器展示
@@ -167,10 +165,9 @@ function close(): void {
         "
       />
       <el-table v-if="preview" :data="preview.rows" size="small" border max-height="360">
-        <el-table-column prop="row" label="行号" width="64" align="center" />
+        <el-table-column prop="rowNum" label="行号" width="64" align="center" />
         <el-table-column prop="level" label="层级" width="70" align="center" />
         <el-table-column prop="code" label="编号" width="100" />
-        <el-table-column prop="parentCode" label="上级编号" width="100" />
         <el-table-column prop="name" label="名称" min-width="180" show-overflow-tooltip />
         <el-table-column prop="totalTarget" label="五年目标" width="90" align="right" />
         <el-table-column label="校验结果" min-width="220">

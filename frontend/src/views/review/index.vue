@@ -7,12 +7,12 @@ import FilePreviewPane from '@/components/FilePreviewPane.vue'
 import SubmissionTimeline from '@/views/submission/components/SubmissionTimeline.vue'
 import { batchReview, listPendingReviews, reviewSubmission } from '@/api/review'
 import { getSubmission, listSubmissions } from '@/api/submission'
-import { listPlans } from '@/api/plan'
 import { listIndicators } from '@/api/indicator'
 import { listOrgUnits } from '@/api/orgUnit'
 import type { OrgUnit } from '@/api/orgUnit'
 import { useUserStore } from '@/stores/user'
 import { newIdempotencyKey } from '@/utils/idempotency'
+import { getCurrentPlan } from '@/utils/currentPlan'
 import { ApiError } from '@/utils/request'
 import { formatDateTime, formatPercent, formatRelativeTime } from '@/utils/format'
 import { FILE_CATEGORY_COLORS, formatFileSize } from '@/utils/file'
@@ -22,9 +22,9 @@ import {
   buildMetricValue,
   formatMetricValue,
   isApprovedValueValid,
+  parseSubmissionRemark,
 } from '@/utils/submission'
 import type { PageResult } from '@/types/api'
-import type { PlanCard } from '@/types/plan'
 import type { FileInfo } from '@/types/file'
 import type { StatCaliber } from '@/types/enums'
 import type {
@@ -36,38 +36,50 @@ import type {
 const route = useRoute()
 const userStore = useUserStore()
 
-/** 管理员代审（非校级负责人）：必须填写代审原因（API 第 10 章敏感操作） */
+/** 管理员代审（非校级负责人）：代审原因选填，填写后写入审计日志 */
 const isDelegateReview = computed(
   () => userStore.roles.includes('ADMIN') && !userStore.roles.includes('SCHOOL_OWNER'),
 )
 
 // ---------- 筛选 ----------
 const filters = reactive({
-  planId: '',
+  planId: (typeof route.query.planId === 'string' ? route.query.planId : '') || getCurrentPlan()?.id || '',
   indicatorId: '',
   unitId: '',
   keyword: '',
   dateRange: null as [string, string] | null,
 })
 
-const planOptions = ref<PlanCard[]>([])
 const unitOptions = ref<OrgUnit[]>([])
-const indicatorOptions = ref<{ id: string; label: string }[]>([])
+const indicatorOptions = ref<{ id: string; code: string; name: string; directionName: string | null }[]>([])
+const indicatorGroups = computed(() => {
+  const groups = new Map<string, typeof indicatorOptions.value>()
+  for (const option of indicatorOptions.value) {
+    const name = option.directionName || '未归入建设方向'
+    const list = groups.get(name) ?? []
+    list.push(option)
+    groups.set(name, list)
+  }
+  return [...groups.entries()].map(([name, items]) => ({ name, items }))
+})
 
 async function loadIndicatorOptions(): Promise<void> {
   indicatorOptions.value = []
+  const linkedIndicatorId = filters.indicatorId
   filters.indicatorId = ''
   if (!filters.planId) return
   try {
     const tree = await listIndicators(filters.planId)
-    const options: { id: string; label: string }[] = []
-    for (const node of tree) {
-      options.push({ id: node.id, label: `${node.code} ${node.name}` })
-      for (const child of node.children ?? []) {
-        options.push({ id: child.id, label: `${child.code} ${child.name}` })
-      }
-    }
-    indicatorOptions.value = options
+    const legacyParent = tree.find((node) =>
+      node.children.some((child) => child.id === linkedIndicatorId),
+    )
+    if (legacyParent) filters.indicatorId = legacyParent.id
+    indicatorOptions.value = tree.map((node) => ({
+      id: node.id,
+      code: node.code,
+      name: node.name,
+      directionName: node.directionName ?? null,
+    }))
   } catch {
     // 指标筛选不可用时忽略，保留其他筛选
   }
@@ -94,19 +106,21 @@ function currentQuery() {
   }
 }
 
-async function loadList(keepSelection = false): Promise<void> {
+async function loadList(keepSelection = false, autoSelect = true): Promise<void> {
   listLoading.value = true
   try {
     page.value = await listPendingReviews(currentQuery())
     const previous = keepSelection ? selectedId.value : null
     checkedIds.value = []
     const items = page.value.items
-    const next = items.find((item) => item.id === previous)?.id ?? items[0]?.id ?? null
+    const next = items.find((item) => item.id === previous)?.id
+      ?? (autoSelect ? items[0]?.id ?? null : null)
     selectedId.value = next
     if (next) {
       await loadDetail(next)
     } else {
       detail.value = null
+      detailLoadError.value = null
       history.value = []
     }
   } finally {
@@ -120,7 +134,6 @@ function applyFilters(): void {
 }
 
 function resetFilters(): void {
-  filters.planId = ''
   filters.indicatorId = ''
   filters.unitId = ''
   filters.keyword = ''
@@ -142,35 +155,39 @@ function changePageSize(size: number): void {
 // ---------- 详情 ----------
 const detail = ref<SubmissionDetail | null>(null)
 const detailLoading = ref(false)
+const detailLoadError = ref<{ message: string; requestId: string } | null>(null)
 const history = ref<SubmissionListItem[]>([])
 
-const caliber = computed<StatCaliber>(
-  () => detail.value?.task?.indicator?.statCaliber ?? 'INCREMENT',
-)
-const unitLabel = computed(() => detail.value?.task?.indicator?.unitLabel ?? null)
+const caliber = computed<StatCaliber>(() => detail.value?.statCaliber ?? 'INCREMENT')
 
 const valueText = computed(() =>
-  detail.value ? formatMetricValue(detail.value.value, caliber.value, unitLabel.value) : '—',
+  detail.value ? formatMetricValue(detail.value.value, caliber.value) : '—',
 )
+const detailRemarkParts = computed(() => parseSubmissionRemark(detail.value?.remark))
 
 /** 材料列表（防御后端省略字段） */
 const detailFiles = computed(() => detail.value?.files ?? [])
-const detailHistorical = computed(() => detail.value?.task?.isHistorical === true)
 
 async function loadDetail(id: string): Promise<void> {
   detailLoading.value = true
+  detailLoadError.value = null
   try {
     const data = await getSubmission(id)
     detail.value = data
     initReviewForm(data)
     const taskId = data.task?.id
-    history.value = taskId ? await listSubmissions(taskId).catch(() => []) : []
+    history.value = taskId ? await listSubmissions(taskId) : []
     // 内嵌预览面板（UI 规范 7.7）：有材料时自动预览第一份
     const files = data.files ?? []
     previewFileId.value = files.length > 0 ? files[0].id : null
-  } catch {
+  } catch (error) {
     detail.value = null
+    history.value = []
     previewFileId.value = null
+    detailLoadError.value = {
+      message: error instanceof ApiError && error.message ? error.message : '填报详情加载失败，请重试',
+      requestId: error instanceof ApiError ? error.requestId : '',
+    }
   } finally {
     detailLoading.value = false
   }
@@ -231,9 +248,6 @@ function validateApproved(): string[] {
   if (reduction.value !== null && !reviewForm.comment.trim()) {
     errors.push('核减认定值时必须填写审核意见')
   }
-  if (isDelegateReview.value && !reviewForm.reason.trim()) {
-    errors.push('管理员代审必须填写代审原因')
-  }
   return errors
 }
 
@@ -245,10 +259,6 @@ async function afterReviewed(message: string): Promise<void> {
 async function handleApprove(): Promise<void> {
   const target = detail.value
   if (!target) return
-  if (target.task?.isHistorical) {
-    ElMessage.warning('历史任务只读，不能审核')
-    return
-  }
   const errors = validateApproved()
   if (errors.length > 0) {
     ElMessage.error(errors[0])
@@ -285,16 +295,8 @@ async function handleApprove(): Promise<void> {
 async function handleReject(): Promise<void> {
   const target = detail.value
   if (!target) return
-  if (target.task?.isHistorical) {
-    ElMessage.warning('历史任务只读，不能审核')
-    return
-  }
   if (!reviewForm.comment.trim()) {
     ElMessage.error('驳回时必须填写审核意见（60004）')
-    return
-  }
-  if (isDelegateReview.value && !reviewForm.reason.trim()) {
-    ElMessage.error('管理员代审必须填写代审原因')
     return
   }
   try {
@@ -332,17 +334,13 @@ const batchComment = ref('')
 const batchReason = ref('')
 const batchLoading = ref(false)
 
-const selectableItems = computed(() =>
-  page.value.items.filter((item) => item.task?.isHistorical !== true),
-)
+const selectableItems = computed(() => page.value.items)
 
 const checkedItems = computed(() =>
   selectableItems.value.filter((item) => checkedIds.value.includes(item.id)),
 )
 
 function toggleCheck(id: string, checked: boolean): void {
-  const item = page.value.items.find((entry) => entry.id === id)
-  if (item?.task?.isHistorical) return
   checkedIds.value = checked
     ? [...checkedIds.value, id]
     : checkedIds.value.filter((item) => item !== id)
@@ -365,11 +363,7 @@ function openBatch(): void {
 async function confirmBatch(): Promise<void> {
   const submissionIds = checkedItems.value.map((item) => item.id)
   if (submissionIds.length === 0) {
-    ElMessage.warning('历史任务只读，没有可批量审核的填报')
-    return
-  }
-  if (isDelegateReview.value && !batchReason.value.trim()) {
-    ElMessage.error('管理员代审必须填写代审原因')
+    ElMessage.warning('请先勾选要批量通过的填报')
     return
   }
   batchLoading.value = true
@@ -418,7 +412,7 @@ function closePreview(): void {
 // ---------- 键盘（UI 规范 10.4：↑ / ↓ 上一条 / 下一条；Ctrl + Enter 通过，需二次确认） ----------
 function onKeydown(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-    if (detail.value && !detailHistorical.value && !approving.value && !rejecting.value) {
+    if (detail.value && !approving.value && !rejecting.value) {
       event.preventDefault()
       handleApprove()
     }
@@ -442,6 +436,7 @@ function onKeydown(event: KeyboardEvent): void {
 
 // ---------- 跨页定位（UI 规范 10.4：URL 带 submissionId 时选中、滚动定位并高亮 2 秒） ----------
 const locatedId = ref<string | null>(null)
+const deepLinkMessage = ref<{ type: 'error' | 'warning'; text: string } | null>(null)
 
 async function locateItem(id: string): Promise<void> {
   locatedId.value = id
@@ -454,17 +449,59 @@ async function locateItem(id: string): Promise<void> {
   }, 2000)
 }
 
+async function locateDeepLinkedSubmission(id: string): Promise<void> {
+  deepLinkMessage.value = null
+  try {
+    const linked = await getSubmission(id)
+    if (linked.status !== 'PENDING_REVIEW') {
+      deepLinkMessage.value = { type: 'warning', text: '该填报当前不在待审核状态，无需继续审核' }
+      return
+    }
+    const pageSize = page.value.pageSize
+    let result = page.value
+    let found = result.items.some((item) => item.id === id)
+    while (!found && result.page < Math.ceil(result.total / pageSize)) {
+      result = await listPendingReviews({
+        ...currentQuery(),
+        page: result.page + 1,
+        pageSize,
+      })
+      found = result.items.some((item) => item.id === id)
+    }
+    if (!found) {
+      deepLinkMessage.value = { type: 'warning', text: '该填报不在当前账号的待审核列表中，可能已被处理或不在审核权限范围内' }
+      return
+    }
+    page.value = result
+    checkedIds.value = []
+    selectedId.value = id
+    await loadDetail(id)
+    await locateItem(id)
+  } catch (error) {
+    if (error instanceof ApiError && (error.code === 20004 || error.code === 20005)) {
+      deepLinkMessage.value = { type: 'error', text: '无权查看或审核该填报，请使用具有相应数据权限的账号' }
+    } else if (error instanceof ApiError && error.code === 10003) {
+      deepLinkMessage.value = { type: 'error', text: '该填报不存在或已被删除' }
+    } else {
+      deepLinkMessage.value = {
+        type: 'error',
+        text: error instanceof ApiError ? error.message : '深链填报加载失败，请稍后重试',
+      }
+    }
+  }
+}
+
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   const presetId = typeof route.query.submissionId === 'string' ? route.query.submissionId : null
-  loadList().then(() => {
-    const target = presetId ? page.value.items.find((item) => item.id === presetId) : undefined
-    if (target) {
-      selectItem(target)
-      locateItem(target.id)
-    }
-  })
-  listPlans().then((list) => (planOptions.value = list)).catch(() => undefined)
+  loadList(false, !presetId)
+    .then(async () => {
+      if (presetId) await locateDeepLinkedSubmission(presetId)
+    })
+    .catch(() => {
+      if (presetId) deepLinkMessage.value = { type: 'error', text: '待审核列表加载失败，暂时无法定位该填报' }
+    })
+  void loadIndicatorOptions()
   listOrgUnits().then((list) => (unitOptions.value = list)).catch(() => undefined)
 })
 
@@ -480,6 +517,9 @@ onBeforeUnmount(() => {
         <h1 class="page-title">审核中心</h1>
         <p class="page-subtitle">待审核 {{ page.total }} 条 · ↑ / ↓ 切换上一条 / 下一条 · Ctrl + Enter 通过</p>
       </div>
+    </div>
+
+    <div class="app-action-row batch-actions">
       <el-button
         type="primary"
         :disabled="checkedIds.length === 0"
@@ -491,33 +531,27 @@ onBeforeUnmount(() => {
 
     <el-card shadow="never" class="filter-card">
       <el-form inline @submit.prevent>
-        <el-form-item label="计划">
-          <el-select
-            v-model="filters.planId"
-            clearable
-            placeholder="全部计划"
-            style="width: 200px"
-            @change="loadIndicatorOptions(); applyFilters()"
-          >
-            <el-option v-for="plan in planOptions" :key="plan.id" :label="plan.name" :value="plan.id" />
-          </el-select>
-        </el-form-item>
         <el-form-item label="指标">
           <el-select
             v-model="filters.indicatorId"
             clearable
             filterable
             :disabled="!filters.planId"
-            :placeholder="filters.planId ? '全部指标' : '请先选择计划'"
-            style="width: 220px"
+            popper-class="review-indicator-popper"
+            :placeholder="filters.planId ? '全部指标（可按编码或名称搜索）' : '请先选择计划'"
+            style="width: 280px"
             @change="applyFilters"
           >
-            <el-option
-              v-for="option in indicatorOptions"
-              :key="option.id"
-              :label="option.label"
-              :value="option.id"
-            />
+            <el-option-group v-for="group in indicatorGroups" :key="group.name" :label="group.name">
+              <el-option
+                v-for="option in group.items"
+                :key="option.id"
+                :label="`${option.code} ${option.name}`"
+                :value="option.id"
+              >
+                <span class="opt-code">{{ option.code }}</span><span class="opt-name" :title="option.name">{{ option.name }}</span>
+              </el-option>
+            </el-option-group>
           </el-select>
         </el-form-item>
         <el-form-item label="学院">
@@ -565,6 +599,14 @@ onBeforeUnmount(() => {
       </el-form>
     </el-card>
 
+    <el-alert
+      v-if="deepLinkMessage"
+      :type="deepLinkMessage.type"
+      :title="deepLinkMessage.text"
+      :closable="false"
+      class="deep-link-alert"
+    />
+
     <div class="review-layout" :class="{ 'with-preview': previewFile !== null }">
       <!-- 待审列表 -->
       <el-card shadow="never" class="list-card" v-loading="listLoading">
@@ -588,7 +630,6 @@ onBeforeUnmount(() => {
           >
             <el-checkbox
               :model-value="checkedIds.includes(item.id)"
-              :disabled="item.task?.isHistorical === true"
               @click.stop
               @change="(checked: boolean) => toggleCheck(item.id, checked)"
             />
@@ -596,11 +637,10 @@ onBeforeUnmount(() => {
               <div class="pending-line">
                 <span class="mono pending-code">{{ item.task?.code ?? '—' }}</span>
                 <el-tag size="small" type="warning" effect="light">待审核</el-tag>
-                <el-tag v-if="item.task?.isHistorical" size="small" type="info" effect="plain">历史只读</el-tag>
               </div>
-              <div class="pending-sub">{{ item.task?.unit?.name ?? '—' }}</div>
+              <div class="pending-sub">{{ item.unit?.name ?? '—' }}</div>
               <div class="pending-sub">
-                {{ formatMetricValue(item.value, item.task?.indicator?.statCaliber ?? 'INCREMENT', item.task?.indicator?.unitLabel) }}
+                {{ formatMetricValue(item.value, item.statCaliber) }}
                 · {{ formatRelativeTime(item.submittedAt) }}
                 · 材料 {{ item.fileCount ?? 0 }} 份
               </div>
@@ -628,17 +668,11 @@ onBeforeUnmount(() => {
             <div>
               <div class="detail-title">
                 <span class="mono">{{ detail.task?.code ?? '' }}</span>
-                {{ detail.task?.indicator?.name ?? '' }}
-                <StatusTag
-                  v-if="detail.task?.indicator?.statCaliber"
-                  kind="StatCaliber"
-                  :value="detail.task.indicator.statCaliber"
-                />
-                <el-tag v-if="detailHistorical" type="info" size="small" effect="plain">历史只读</el-tag>
+                {{ (detail.topIndicator ?? detail.indicator)?.name ?? '' }}
+                <StatusTag kind="StatCaliber" :value="detail.statCaliber" />
               </div>
               <div class="detail-meta">
-                {{ detail.task?.unit?.name ?? '—' }}
-                · {{ detail.task?.owner?.name ?? '—' }}
+                {{ detail.unit?.name ?? '—' }}
                 · {{ detail.year }} 年
                 · 提交于 {{ formatDateTime(detail.submittedAt) }}
               </div>
@@ -653,8 +687,11 @@ onBeforeUnmount(() => {
             <el-descriptions-item v-if="detail.sourceNote" label="数据来源说明">
               {{ detail.sourceNote }}
             </el-descriptions-item>
+            <el-descriptions-item v-if="detailRemarkParts.completionDate" label="完成日期">
+              {{ detailRemarkParts.completionDate }}
+            </el-descriptions-item>
             <el-descriptions-item label="完成情况说明">
-              {{ detail.remark ?? '—' }}
+              {{ detailRemarkParts.remark || '—' }}
             </el-descriptions-item>
           </el-descriptions>
 
@@ -671,25 +708,22 @@ onBeforeUnmount(() => {
 
           <template v-if="history.length > 0">
             <h3 class="section-title">历史填报 / 审核记录</h3>
-            <SubmissionTimeline :submissions="history" :caliber="caliber" :unit-label="unitLabel" />
+            <SubmissionTimeline :submissions="history" :caliber="caliber" />
           </template>
 
           <el-divider />
 
-          <template v-if="!detailHistorical">
-            <h3 class="section-title">审核操作</h3>
+          <h3 class="section-title">审核操作</h3>
             <el-form label-width="110px" class="review-form" @submit.prevent>
             <template v-if="caliber === 'INCREMENT'">
               <el-form-item label="认定值">
                 <el-input-number v-model="reviewForm.amount" :min="0" :precision="0" controls-position="right" />
-                <span v-if="unitLabel" class="field-unit">{{ unitLabel }}</span>
                 <span class="field-hint">≤ 填报值 {{ detail.value.amount ?? '—' }}</span>
               </el-form-item>
             </template>
             <template v-else-if="caliber === 'STOCK' || caliber === 'GROWTH'">
               <el-form-item label="认定总量">
                 <el-input-number v-model="reviewForm.total" :min="0" :precision="4" controls-position="right" />
-                <span v-if="unitLabel" class="field-unit">{{ unitLabel }}</span>
                 <span class="field-hint">≤ 填报值 {{ detail.value.total ?? '—' }}</span>
               </el-form-item>
             </template>
@@ -726,36 +760,39 @@ onBeforeUnmount(() => {
               />
             </el-form-item>
 
-            <el-form-item v-if="isDelegateReview" label="代审原因" required>
+            <el-form-item v-if="isDelegateReview" label="代审原因（选填）">
               <el-input
                 v-model="reviewForm.reason"
                 type="textarea"
                 :rows="2"
                 maxlength="500"
                 show-word-limit
-                placeholder="管理员代审属于敏感操作，必须填写原因（≤ 500 字）"
+                placeholder="选填，填写后记录到操作日志（≤ 500 字）"
               />
             </el-form-item>
 
-            <el-form-item label=" ">
-              <div class="review-actions">
-                <el-button type="danger" :loading="rejecting" :disabled="approving" @click="handleReject">
-                  驳回
-                </el-button>
-                <el-button type="success" :loading="approving" :disabled="rejecting" @click="handleApprove">
-                  通过
-                </el-button>
-              </div>
-            </el-form-item>
             </el-form>
-          </template>
-          <el-alert
-            v-else
-            type="info"
-            :closable="false"
-            title="历史任务只读，审核操作已停用；填报内容、材料和审核记录仍可查看"
-          />
+            <div class="app-action-row review-actions">
+              <el-button type="primary" :loading="approving" :disabled="rejecting" @click="handleApprove">
+                通过
+              </el-button>
+              <el-button type="danger" plain :loading="rejecting" :disabled="approving" @click="handleReject">
+                驳回
+              </el-button>
+            </div>
         </template>
+        <el-result
+          v-else-if="detailLoadError && !detailLoading"
+          icon="error"
+          title="填报详情加载失败"
+          :sub-title="detailLoadError.requestId
+            ? `${detailLoadError.message}；请求编号：${detailLoadError.requestId}`
+            : detailLoadError.message"
+        >
+          <template #extra>
+            <el-button type="primary" @click="selectedId && loadDetail(selectedId)">重试</el-button>
+          </template>
+        </el-result>
         <el-empty v-else-if="!detailLoading" :image-size="120" description="从左侧选择一条待审核的填报" />
       </el-card>
 
@@ -789,20 +826,20 @@ onBeforeUnmount(() => {
             placeholder="选填"
           />
         </el-form-item>
-        <el-form-item v-if="isDelegateReview" label="代审原因" required>
+        <el-form-item v-if="isDelegateReview" label="代审原因（选填）">
           <el-input
             v-model="batchReason"
             type="textarea"
             :rows="2"
             maxlength="500"
             show-word-limit
-            placeholder="管理员代审必须填写原因"
+            placeholder="选填，填写后记录到操作日志"
           />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="batchVisible = false">取消</el-button>
-        <el-button type="success" :loading="batchLoading" @click="confirmBatch">批量通过</el-button>
+        <el-button type="primary" :loading="batchLoading" @click="confirmBatch">批量通过</el-button>
       </template>
     </el-dialog>
   </div>
@@ -810,9 +847,6 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   margin-bottom: var(--space-4);
 }
 
@@ -832,6 +866,34 @@ onBeforeUnmount(() => {
 .filter-card {
   margin-bottom: var(--space-4);
   border-radius: var(--radius-card);
+}
+
+:global(.review-indicator-popper) {
+  max-width: 440px;
+}
+
+:global(.review-indicator-popper .el-select-dropdown__item) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+:global(.review-indicator-popper .opt-code) {
+  flex: none;
+  color: var(--el-color-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+:global(.review-indicator-popper .opt-name) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deep-link-alert {
+  margin-bottom: var(--space-4);
 }
 
 .review-layout {
@@ -1088,5 +1150,47 @@ onBeforeUnmount(() => {
   background: var(--el-fill-color-light);
   border-radius: var(--el-border-radius-base);
   font-size: 13px;
+}
+
+@media (max-width: 768px) {
+  .review-layout,
+  .review-layout.with-preview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .preview-card {
+    position: static;
+    height: 520px;
+    min-height: 0;
+  }
+
+  .filter-card :deep(.el-form-item) {
+    display: flex;
+    margin-right: 0;
+  }
+
+  .filter-card :deep(.el-form-item__content),
+  .filter-card :deep(.el-select),
+  .filter-card :deep(.el-input) {
+    width: 100%;
+  }
+
+  .batch-actions .el-button {
+    width: 100%;
+    min-height: 44px;
+    margin: 0;
+  }
+
+  .review-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .review-actions .el-button {
+    width: 100%;
+    min-height: 44px;
+    margin: 0;
+  }
 }
 </style>

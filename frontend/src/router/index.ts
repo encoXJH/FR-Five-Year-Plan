@@ -19,18 +19,17 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/components/Layout/index.vue'),
-    redirect: '/plans',
     children: [
       {
         path: 'dashboard',
-        redirect: '/plans',
+        redirect: '/',
       },
       {
         // P02 首页（计划卡片）
         path: 'plans',
         name: 'Plans',
         component: () => import('@/views/plans/index.vue'),
-        meta: { title: '首页' },
+        meta: { title: '首页', hideForRolesOnly: ['UNIT_OWNER'] },
       },
       {
         // P03 计划概览
@@ -45,6 +44,17 @@ const routes: RouteRecordRaw[] = [
         name: 'PlanIndicators',
         component: () => import('@/views/indicators/index.vue'),
         meta: { title: '指标总表' },
+      },
+      {
+        path: 'plans/:planId/gantt',
+        redirect: (to) => `/plans/${to.params.planId}/indicators`,
+      },
+      {
+        // 关键产出指标进度可视化（计划上下文）
+        path: 'plans/:planId/indicator-progress',
+        name: 'IndicatorProgress',
+        component: () => import('@/views/indicators/progress.vue'),
+        meta: { title: '指标进度可视化' },
       },
       {
         // P04 指标总表（无计划上下文时提示先选计划）
@@ -94,6 +104,13 @@ const routes: RouteRecordRaw[] = [
         name: 'TaskSubmit',
         component: () => import('@/views/submission/index.vue'),
         meta: { title: '任务填报', permissions: ['submission:submit'] },
+      },
+      {
+        // 材料库（跨学院材料检索、上传与预览）
+        path: 'materials',
+        name: 'Materials',
+        component: () => import('@/views/materials/index.vue'),
+        meta: { title: '材料库', permissions: ['material:view'] },
       },
       {
         // P09 审核中心
@@ -180,7 +197,7 @@ router.beforeEach(async (to) => {
     return typeof first !== 'string' || !/^\d+$/.test(first)
   })
   if (hasBadIdParam) {
-    return '/plans'
+    return '/'
   }
   if (!userStore.isLoggedIn) {
     return {
@@ -195,6 +212,7 @@ router.beforeEach(async (to) => {
       return '/login'
     }
   }
+  if (to.path === '/') return userStore.homePath
   const hiddenFor = to.meta.hideForRolesOnly
   if (
     Array.isArray(hiddenFor) &&

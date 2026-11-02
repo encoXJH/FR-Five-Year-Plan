@@ -157,8 +157,8 @@ public final class MetricCalculator {
             case "BOOLEAN" -> {
                 List<BigDecimal> values = safe.stream().map(YearResult::actualValue)
                         .filter(Objects::nonNull).toList();
-                if (values.isEmpty()) {
-                    yield YearResult.empty();
+                if (values.size() != safe.size()) {
+                    yield new YearResult(BigDecimal.ZERO, null, null, null, null, null);
                 }
                 boolean allAchieved = values.stream().allMatch(v -> BigDecimal.ONE.compareTo(v) == 0);
                 yield new YearResult(allAchieved ? BigDecimal.ONE : BigDecimal.ZERO, null, null, null, null, null);

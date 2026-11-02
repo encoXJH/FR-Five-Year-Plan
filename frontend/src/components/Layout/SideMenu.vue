@@ -11,6 +11,7 @@ const route = useRoute()
 const userStore = useUserStore()
 
 function isVisible(item: MenuItem): boolean {
+  if (item.visibleWhen && !item.visibleWhen(route)) return false
   if (item.permissions && !userStore.can(...item.permissions)) return false
   if (
     item.hideForRolesOnly &&
@@ -48,7 +49,7 @@ function resolveIndex(item: MenuItem): string {
     <el-menu-item-group v-for="group in visibleGroups" :key="group.key">
       <template #title>{{ group.title }}</template>
       <el-menu-item v-for="item in group.items" :key="item.path" :index="resolveIndex(item)">
-        <el-icon :size="16"><component :is="item.icon" /></el-icon>
+        <el-icon v-if="item.icon" :size="16"><component :is="item.icon" /></el-icon>
         <template #title>{{ item.title }}</template>
       </el-menu-item>
     </el-menu-item-group>
@@ -121,5 +122,28 @@ function resolveIndex(item: MenuItem): string {
 
 .app-menu.is-collapsed :deep(.el-menu-item .el-icon) {
   margin: 0;
+}
+
+@media (min-width: 769px) and (max-height: 700px) {
+  .app-menu {
+    padding: 2px 0;
+  }
+
+  .app-menu :deep(.el-menu-item-group__title) {
+    padding: 2px var(--space-3) 0;
+    font-size: 10px;
+    line-height: 12px;
+  }
+
+  .app-menu :deep(.el-menu-item) {
+    height: 24px;
+    font-size: 11px;
+    line-height: 24px;
+  }
+
+  .app-menu :deep(.el-menu-item.is-active)::before {
+    top: 3px;
+    bottom: 3px;
+  }
 }
 </style>

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="edu.fzrj.metrics.module.file.mapper.MaterialQueryMapper">
+
+    <sql id="materialFromWhere">
+        FROM file_ref fr
+        JOIN file_info f ON f.id = fr.file_id AND f.deleted = 0
+        LEFT JOIN submission s ON fr.biz_type = 'SUBMISSION' AND s.id = fr.biz_id
+        LEFT JOIN adjustment a ON fr.biz_type = 'ADJUSTMENT' AND a.id = fr.biz_id
+        LEFT JOIN milestone m ON fr.biz_type = 'MILESTONE' AND m.id = fr.biz_id
+        JOIN indicator i ON i.id = CASE fr.biz_type
+            WHEN 'INDICATOR' THEN fr.biz_id
+            WHEN 'SUBMISSION' THEN s.indicator_id
+            WHEN 'ADJUSTMENT' THEN a.indicator_id
+            WHEN 'MILESTONE' THEN m.indicator_id
+            ELSE NULL END AND i.deleted = 0
+        JOIN indicator ti ON ti.id = COALESCE(i.parent_id, i.id)
+            AND ti.level = 'A' AND ti.deleted = 0
+        LEFT JOIN sys_user su ON su.id = f.uploaded_by
+        LEFT JOIN org_unit ou ON ou.id = COALESCE(s.unit_id, su.unit_id) AND ou.deleted = 0
+        WHERE fr.biz_type IN ('INDICATOR', 'SUBMISSION', 'ADJUSTMENT', 'MILESTONE')
+        <if test="query.planId != null">
+            AND ti.plan_id = #{query.planId}
+        </if>
+        <if test="query.indicatorId != null">
+            AND ti.id = #{query.indicatorId}
+        </if>
+        <if test="query.unitId != null">
+            AND COALESCE(s.unit_id, su.unit_id) = #{query.unitId}
+        </if>
+        <if test="query.category != null and query.category != ''">
+            AND f.category = #{query.category}
+        </if>
+        <if test="query.keyword != null">
+            AND (LOWER(f.file_name) LIKE CONCAT('%', #{query.keyword}, '%')
+                OR LOWER(ti.code) LIKE CONCAT('%', #{query.keyword}, '%')
+                OR LOWER(ti.name) LIKE CONCAT('%', #{query.keyword}, '%'))
+        </if>
+        <if test="query.ownerScope != null">
+            AND ti.owner_id = #{query.ownerScope}
+        </if>
+        <if test="query.unitScope != null">
+            AND COALESCE(s.unit_id, su.unit_id) = #{query.unitScope}
+            AND EXISTS (
+                SELECT 1 FROM task scoped_task
+                WHERE scoped_task.top_indicator_id = ti.id
+                    AND scoped_task.unit_id = #{query.unitScope}
+                    AND scoped_task.deleted = 0
+            )
+        </if>
+    </sql>
+
+    <select id="countMaterials" resultType="long">
+        SELECT COUNT(*)
+        <include refid="materialFromWhere"/>
+    </select>
+
+    <select id="selectMaterials" resultType="edu.fzrj.metrics.module.file.dto.MaterialRow">
+        SELECT f.id AS file_id,
+            f.file_name,
+            f.size,
+            f.mime_type,
+            f.category,
+            fr.biz_type,
+            f.uploaded_at,
+            ti.id AS indicator_id,
+            ti.code AS indicator_code,
+            ti.name AS indicator_name,
+            ou.id AS unit_id,
+            ou.code AS unit_code,
+            ou.name AS unit_name,
+            su.id AS uploader_id,
+            su.name AS uploader_name
+        <include refid="materialFromWhere"/>
+        ORDER BY f.uploaded_at DESC, f.id DESC
+        LIMIT #{query.limit} OFFSET #{query.offset}
+    </select>
+</mapper>

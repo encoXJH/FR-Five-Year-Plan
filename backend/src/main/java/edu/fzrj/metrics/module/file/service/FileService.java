@@ -7,16 +7,27 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.common.util.Sha256;
+import edu.fzrj.metrics.module.adjustment.service.AdjustmentService;
 import edu.fzrj.metrics.module.file.dto.FileInfoResponse;
 import edu.fzrj.metrics.module.file.dto.MultipartInitRequest;
 import edu.fzrj.metrics.module.file.entity.FileInfo;
+import edu.fzrj.metrics.module.file.entity.FileRef;
 import edu.fzrj.metrics.module.file.entity.FileUploadSession;
 import edu.fzrj.metrics.module.file.mapper.FileInfoMapper;
+import edu.fzrj.metrics.module.file.mapper.FileRefMapper;
 import edu.fzrj.metrics.module.file.mapper.FileUploadSessionMapper;
+import edu.fzrj.metrics.module.indicator.entity.Indicator;
+import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
+import edu.fzrj.metrics.module.milestone.service.MilestoneService;
+import edu.fzrj.metrics.module.submission.entity.Submission;
+import edu.fzrj.metrics.module.submission.service.SubmissionService;
 import edu.fzrj.metrics.module.system.entity.SysUser;
+import edu.fzrj.metrics.module.task.entity.Task;
+import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +46,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -46,7 +58,8 @@ import java.util.UUID;
 public class FileService {
 
     private static final Set<String> BIZ_TYPES = Set.of(
-            "SUBMISSION_ATTACHMENT", "ADJUSTMENT_ATTACHMENT", "MILESTONE_ATTACHMENT", "IMPORT_FILE");
+            "SUBMISSION_ATTACHMENT", "ADJUSTMENT_ATTACHMENT", "MILESTONE_ATTACHMENT",
+            "INDICATOR_ATTACHMENT", "IMPORT_FILE");
     private static final int PART_SIZE = 5 * 1024 * 1024;
 
     private final FileInfoMapper fileInfoMapper;
@@ -55,19 +68,37 @@ public class FileService {
     private final StorageService storageService;
     private final FileTypeRegistry typeRegistry;
     private final ObjectMapper objectMapper;
+    private final FileRefMapper fileRefMapper;
+    private final SubmissionService submissionService;
+    private final AdjustmentService adjustmentService;
+    private final MilestoneService milestoneService;
+    private final IndicatorMapper indicatorMapper;
+    private final TaskMapper taskMapper;
+    private final ObjectProvider<DirectStorageService> directStorageProvider;
 
     @Value("${app.file.storage-type:LOCAL}")
     private String storageType;
 
     public FileService(FileInfoMapper fileInfoMapper, FileUploadSessionMapper sessionMapper,
                        SysUserMapper sysUserMapper, StorageService storageService,
-                       FileTypeRegistry typeRegistry, ObjectMapper objectMapper) {
+                       FileTypeRegistry typeRegistry, ObjectMapper objectMapper,
+                       FileRefMapper fileRefMapper, SubmissionService submissionService,
+                       AdjustmentService adjustmentService, MilestoneService milestoneService,
+                       IndicatorMapper indicatorMapper, TaskMapper taskMapper,
+                       ObjectProvider<DirectStorageService> directStorageProvider) {
         this.fileInfoMapper = fileInfoMapper;
         this.sessionMapper = sessionMapper;
         this.sysUserMapper = sysUserMapper;
         this.storageService = storageService;
         this.typeRegistry = typeRegistry;
         this.objectMapper = objectMapper;
+        this.fileRefMapper = fileRefMapper;
+        this.submissionService = submissionService;
+        this.adjustmentService = adjustmentService;
+        this.milestoneService = milestoneService;
+        this.indicatorMapper = indicatorMapper;
+        this.taskMapper = taskMapper;
+        this.directStorageProvider = directStorageProvider;
     }
 
     // ---------------- 直接上传 ----------------
@@ -90,7 +121,8 @@ public class FileService {
             throw new BizException(ErrorCode.INTERNAL_ERROR, "读取文件失败");
         }
         return store(file::getInputStream, file.getSize(), originalName, ext, category,
-                file.getContentType(), bizType);
+                StringUtils.hasText(file.getContentType()) ? file.getContentType() : "application/octet-stream",
+                bizType);
     }
 
     // ---------------- 分片上传 ----------------
@@ -106,15 +138,22 @@ public class FileService {
         // 秒传
         FileInfo dup = findBySha256(request.getSha256());
         if (dup != null) {
-            return new InitResult(null, 0, 0, toResponse(dup));
+            return new InitResult(null, 0, 0, toResponse(dup), false);
         }
         int partCount = (int) ((request.getSize() + PART_SIZE - 1) / PART_SIZE);
+        boolean directUpload = isMinio();
         FileUploadSession session = new FileUploadSession();
         session.setUploadId(UUID.randomUUID().toString().replace("-", ""));
         session.setFileName(request.getFileName());
         session.setSize(request.getSize());
         session.setMimeType(request.getMimeType());
+        session.setBizType(request.getBizType());
         session.setSha256(request.getSha256().toLowerCase());
+        session.setStorageType(directUpload ? "MINIO" : "LOCAL");
+        if (directUpload) {
+            session.setStorageKey(newStorageKey(ext));
+            session.setRemoteUploadId(requireDirectStorage().createMultipart(session));
+        }
         session.setPartSize(PART_SIZE);
         session.setPartCount(partCount);
         session.setUploadedParts("[]");
@@ -122,14 +161,24 @@ public class FileService {
         session.setExpiresAt(LocalDateTime.now().plusHours(24));
         session.setCreatedBy(SecurityUtils.getUserId());
         sessionMapper.insert(session);
-        return new InitResult(session.getUploadId(), PART_SIZE, partCount, null);
+        return new InitResult(session.getUploadId(), PART_SIZE, partCount, null, directUpload);
+    }
+
+    public SignedUrlService.SignedUrl partUploadUrl(String uploadId, int partNumber) {
+        FileUploadSession session = requireSession(uploadId);
+        checkPartNumber(session, partNumber);
+        if (!isDirect(session)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "本地上传会话不使用预签名分片地址");
+        }
+        return requireDirectStorage().presignPart(session, partNumber);
     }
 
     @Transactional
     public void uploadPart(String uploadId, int partNumber, InputStream content) {
         FileUploadSession session = requireSession(uploadId);
-        if (partNumber < 1 || partNumber > session.getPartCount()) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "分片编号超出范围");
+        checkPartNumber(session, partNumber);
+        if (isDirect(session)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "MINIO 分片必须通过预签名地址直传");
         }
         try {
             Path partDir = storageService.partDir(uploadId);
@@ -154,35 +203,57 @@ public class FileService {
 
     public SessionInfo getSession(String uploadId) {
         FileUploadSession session = requireSession(uploadId);
+        List<Integer> uploaded = isDirect(session)
+                ? requireDirectStorage().listParts(session).stream()
+                        .map(DirectStorageService.DirectPart::partNumber).toList()
+                : readUploadedParts(session);
         return new SessionInfo(session.getUploadId(), session.getPartSize(),
-                session.getPartCount(), readUploadedParts(session));
+                session.getPartCount(), uploaded, isDirect(session));
     }
 
     @Transactional
     public FileInfoResponse completeMultipart(String uploadId) {
         FileUploadSession session = requireSession(uploadId);
+        if (isDirect(session)) {
+            return completeDirectMultipart(session);
+        }
         List<Integer> uploaded = readUploadedParts(session);
         if (uploaded.size() != session.getPartCount()) {
             throw new BizException(ErrorCode.PART_INVALID, "分片缺失，无法合并");
         }
-        // 秒传兜底（并发上传同一文件）
-        FileInfo dup = findBySha256(session.getSha256());
-        if (dup != null) {
-            finishSession(session);
-            return toResponse(dup);
-        }
         String ext = extOf(session.getFileName());
         String category = checkExt(ext);
         Path partDir = storageService.partDir(uploadId);
+        long actualSize = 0;
         for (int i = 1; i <= session.getPartCount(); i++) {
-            if (!Files.exists(partDir.resolve(String.valueOf(i)))) {
+            Path part = partDir.resolve(String.valueOf(i));
+            if (!Files.exists(part)) {
                 throw new BizException(ErrorCode.PART_INVALID, "分片 " + i + " 缺失");
             }
+            try {
+                actualSize = Math.addExact(actualSize, Files.size(part));
+            } catch (IOException e) {
+                throw new BizException(ErrorCode.INTERNAL_ERROR, "读取分片大小失败");
+            }
+        }
+        if (actualSize != session.getSize()) {
+            throw new BizException(ErrorCode.PART_INVALID, "实际文件大小与声明不一致");
+        }
+        if (actualSize > typeRegistry.maxSizeOf(category)) {
+            throw new BizException(ErrorCode.FILE_TOO_LARGE);
+        }
+        try (InputStream in = new SequenceInputStream(
+                Collections.enumeration(partStreams(partDir, session.getPartCount())))) {
+            if (!typeRegistry.magicMatch(ext, in)) {
+                throw new BizException(ErrorCode.FILE_TYPE_UNSUPPORTED, "文件内容与扩展名不符");
+            }
+        } catch (IOException e) {
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "读取分片失败");
         }
         FileInfoResponse response = store(() -> new SequenceInputStream(
                         Collections.enumeration(partStreams(partDir, session.getPartCount()))),
-                session.getSize(), session.getFileName(), ext, category,
-                session.getMimeType(), null, session.getSha256(), session.getCreatedBy());
+                actualSize, session.getFileName(), ext, category,
+                session.getMimeType(), session.getBizType(), session.getSha256(), session.getCreatedBy());
         finishSession(session);
         try {
             storageService.deletePartDir(uploadId);
@@ -190,6 +261,71 @@ public class FileService {
             log.warn("清理分片目录失败 uploadId={}", uploadId, e);
         }
         return response;
+    }
+
+    private FileInfoResponse completeDirectMultipart(FileUploadSession session) {
+        DirectStorageService direct = requireDirectStorage();
+        List<DirectStorageService.DirectPart> parts = direct.listParts(session);
+        if (parts.size() != session.getPartCount()) {
+            throw new BizException(ErrorCode.PART_INVALID, "分片缺失，无法完成上传");
+        }
+        for (int i = 0; i < parts.size(); i++) {
+            if (parts.get(i).partNumber() != i + 1) {
+                throw new BizException(ErrorCode.PART_INVALID, "分片 " + (i + 1) + " 缺失");
+            }
+        }
+        String ext = extOf(session.getFileName());
+        String category = checkExt(ext);
+        direct.complete(session, parts);
+        String sha256;
+        try {
+            long actualSize = direct.sizeOf(session.getStorageKey());
+            if (actualSize != session.getSize()) {
+                throw new BizException(ErrorCode.PART_INVALID, "实际文件大小与声明不一致");
+            }
+            if (actualSize > typeRegistry.maxSizeOf(category)) {
+                throw new BizException(ErrorCode.FILE_TOO_LARGE);
+            }
+            try (InputStream in = direct.read(session.getStorageKey())) {
+                if (!typeRegistry.magicMatch(ext, in)) {
+                    throw new BizException(ErrorCode.FILE_TYPE_UNSUPPORTED, "文件内容与扩展名不符");
+                }
+            }
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream in = new DigestInputStream(direct.read(session.getStorageKey()), digest)) {
+                in.transferTo(java.io.OutputStream.nullOutputStream());
+            }
+            sha256 = toHex(digest.digest());
+            if (!session.getSha256().equalsIgnoreCase(sha256)) {
+                throw new BizException(ErrorCode.PART_INVALID, "整文件 SHA-256 校验失败");
+            }
+        } catch (BizException e) {
+            deleteDirectQuietly(direct, session.getStorageKey());
+            throw e;
+        } catch (Exception e) {
+            deleteDirectQuietly(direct, session.getStorageKey());
+            log.error("读取 MINIO 直传文件失败 uploadId={}", session.getUploadId(), e);
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "直传文件校验失败");
+        }
+        FileInfo dup = findBySha256(sha256);
+        if (dup != null) {
+            deleteDirectQuietly(direct, session.getStorageKey());
+            finishSession(session);
+            return toResponse(dup);
+        }
+        FileInfoResponse response = insertFileInfo(session.getSize(), session.getFileName(), ext, category,
+                session.getMimeType(), session.getBizType(), "MINIO", session.getStorageKey(), sha256,
+                session.getCreatedBy());
+        finishSession(session);
+        return response;
+    }
+
+    private void deleteDirectQuietly(DirectStorageService direct, String storageKey) {
+        try {
+            direct.delete(storageKey);
+        } catch (IOException e) {
+            log.warn("清理校验失败的 MINIO 文件失败 key={}", storageKey, e);
+        }
     }
 
     private List<InputStream> partStreams(Path partDir, int partCount) {
@@ -223,7 +359,76 @@ public class FileService {
     }
 
     public FileInfoResponse detail(Long fileId) {
-        return toResponse(requireFile(fileId));
+        return toResponse(requireReadable(fileId));
+    }
+
+    public FileInfo requireReadable(Long fileId) {
+        FileInfo fileInfo = requireFile(fileId);
+        if ("TEMP".equals(fileInfo.getStatus())) {
+            if (!Objects.equals(SecurityUtils.getUserId(), fileInfo.getUploadedBy())) {
+                throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
+            }
+            return fileInfo;
+        }
+        List<FileRef> refs = fileRefMapper.selectList(new LambdaQueryWrapper<FileRef>()
+                .eq(FileRef::getFileId, fileId));
+        for (FileRef ref : refs) {
+            try {
+                requireRefAccess(ref, fileInfo);
+                return fileInfo;
+            } catch (BizException e) {
+                if (e.getErrorCode() != ErrorCode.DATA_SCOPE_DENIED) {
+                    throw e;
+                }
+            }
+        }
+        throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
+    }
+
+    private void requireRefAccess(FileRef ref, FileInfo fileInfo) {
+        switch (ref.getBizType()) {
+            case "SUBMISSION" -> {
+                Submission submission = submissionService.requireSubmission(ref.getBizId());
+                submissionService.requireAccess(submission);
+            }
+            case "ADJUSTMENT" -> adjustmentService.requireAccess(
+                    adjustmentService.requireAdjustment(ref.getBizId()));
+            case "MILESTONE" -> milestoneService.requireAccess(
+                    milestoneService.requireMilestone(ref.getBizId()));
+            case "INDICATOR" -> requireIndicatorMaterialAccess(ref.getBizId(), fileInfo);
+            default -> throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
+        }
+    }
+
+    private void requireIndicatorMaterialAccess(Long indicatorId, FileInfo fileInfo) {
+        var user = SecurityUtils.getLoginUser();
+        if (user.getRoles().contains("ADMIN") || user.getRoles().contains("LEADER")) {
+            return;
+        }
+        Indicator indicator = indicatorMapper.selectById(indicatorId);
+        if (indicator == null || indicator.getDeleted() != 0L) {
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
+        }
+        if (user.getRoles().contains("SCHOOL_OWNER")) {
+            Indicator ownerIndicator = indicator;
+            if (ownerIndicator.getParentId() != null) {
+                ownerIndicator = indicatorMapper.selectById(ownerIndicator.getParentId());
+            }
+            if (ownerIndicator != null && Objects.equals(user.getUserId(), ownerIndicator.getOwnerId())) {
+                return;
+            }
+        }
+        if (user.getRoles().contains("UNIT_OWNER") && user.getUnitId() != null) {
+            SysUser uploader = sysUserMapper.selectById(fileInfo.getUploadedBy());
+            long taskCount = taskMapper.selectCount(new LambdaQueryWrapper<Task>()
+                    .eq(Task::getTopIndicatorId, indicatorId)
+                    .eq(Task::getUnitId, user.getUnitId())
+                    .eq(Task::getDeleted, 0L));
+            if (uploader != null && Objects.equals(user.getUnitId(), uploader.getUnitId()) && taskCount > 0) {
+                return;
+            }
+        }
+        throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
     }
 
     // ---------------- 内部 ----------------
@@ -243,13 +448,12 @@ public class FileService {
     private FileInfoResponse store(InputStreamSupplier streamSupplier, long size, String fileName,
                                    String ext, String category, String mimeType, String bizType,
                                    String expectedSha256, Long operatorId) {
-        String storageKey = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy/MM"))
-                + "/" + UUID.randomUUID().toString().replace("-", "") + "." + ext;
+        String storageKey = newStorageKey(ext);
         String sha256;
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             try (InputStream in = new DigestInputStream(streamSupplier.get(), digest)) {
-                storageService.save(in, storageKey);
+                storageService.save(in, storageKey, size);
             }
             sha256 = toHex(digest.digest());
         } catch (Exception e) {
@@ -272,6 +476,13 @@ public class FileService {
             }
             return toResponse(dup);
         }
+        return insertFileInfo(size, fileName, ext, category, mimeType, bizType,
+                currentStorageType(), storageKey, sha256, operatorId);
+    }
+
+    private FileInfoResponse insertFileInfo(long size, String fileName, String ext, String category,
+                                            String mimeType, String bizType, String fileStorageType,
+                                            String storageKey, String sha256, Long operatorId) {
         FileInfo fileInfo = new FileInfo();
         fileInfo.setFileName(fileName);
         fileInfo.setExt(ext);
@@ -280,7 +491,7 @@ public class FileService {
         fileInfo.setCategory(category);
         fileInfo.setBizType(bizType);
         fileInfo.setStatus("TEMP");
-        fileInfo.setStorageType(storageType);
+        fileInfo.setStorageType(fileStorageType);
         fileInfo.setStorageKey(storageKey);
         fileInfo.setSha256(sha256);
         fileInfo.setTranscodeStatus("VIDEO".equals(category) ? "PROCESSING" : null);
@@ -289,6 +500,37 @@ public class FileService {
         fileInfo.setCreatedBy(operatorId);
         fileInfoMapper.insert(fileInfo);
         return toResponse(fileInfo);
+    }
+
+    private String newStorageKey(String ext) {
+        return LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy/MM"))
+                + "/" + UUID.randomUUID().toString().replace("-", "") + "." + ext;
+    }
+
+    private boolean isMinio() {
+        return "MINIO".equalsIgnoreCase(storageType);
+    }
+
+    private String currentStorageType() {
+        return isMinio() ? "MINIO" : "LOCAL";
+    }
+
+    private boolean isDirect(FileUploadSession session) {
+        return "MINIO".equals(session.getStorageType());
+    }
+
+    private DirectStorageService requireDirectStorage() {
+        DirectStorageService direct = directStorageProvider == null ? null : directStorageProvider.getIfAvailable();
+        if (direct == null) {
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "MINIO 直传存储未配置");
+        }
+        return direct;
+    }
+
+    private void checkPartNumber(FileUploadSession session, int partNumber) {
+        if (partNumber < 1 || partNumber > session.getPartCount()) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "分片编号超出范围");
+        }
     }
 
     private FileInfo findBySha256(String sha256) {
@@ -308,6 +550,9 @@ public class FileService {
                 .eq(FileUploadSession::getUploadId, uploadId));
         if (session == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "上传会话不存在");
+        }
+        if (!Objects.equals(SecurityUtils.getUserId(), session.getCreatedBy())) {
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
         }
         if (!"UPLOADING".equals(session.getStatus()) || session.getExpiresAt().isBefore(LocalDateTime.now())) {
             throw new BizException(ErrorCode.NOT_FOUND, "上传会话已过期");
@@ -370,10 +615,10 @@ public class FileService {
     // ---------------- 结果对象 ----------------
 
     public record InitResult(String uploadId, Integer partSize, Integer partCount,
-                             FileInfoResponse fileInfo) {
+                             FileInfoResponse fileInfo, Boolean directUpload) {
     }
 
     public record SessionInfo(String uploadId, Integer partSize, Integer partCount,
-                              List<Integer> uploadedParts) {
+                              List<Integer> uploadedParts, Boolean directUpload) {
     }
 }

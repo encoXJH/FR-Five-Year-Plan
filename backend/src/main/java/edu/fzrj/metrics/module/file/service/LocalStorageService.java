@@ -1,7 +1,6 @@
 package edu.fzrj.metrics.module.file.service;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -16,7 +15,6 @@ import java.util.Comparator;
  * 本地磁盘存储
  */
 @Service
-@ConditionalOnProperty(name = "app.file.storage-type", havingValue = "LOCAL", matchIfMissing = true)
 public class LocalStorageService implements StorageService {
 
     private final Path root;

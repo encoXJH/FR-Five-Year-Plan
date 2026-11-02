@@ -83,7 +83,16 @@ async function handleCommand(command: string): Promise<void> {
 <template>
   <div class="header-bar">
     <div class="brand">
-      <el-icon :size="22" class="menu-trigger" @click="emit('toggle-menu')"><Menu /></el-icon>
+      <el-icon
+        :size="22"
+        class="menu-trigger"
+        role="button"
+        tabindex="0"
+        aria-label="打开导航菜单"
+        @click="emit('toggle-menu')"
+        @keydown.enter.prevent="emit('toggle-menu')"
+        @keydown.space.prevent="emit('toggle-menu')"
+      ><Menu /></el-icon>
       <el-icon :size="24" class="brand-logo"><School /></el-icon>
       <span class="brand-name">福州软件职业技术学院 · 五年计划指标管理平台</span>
       <el-dropdown v-if="routePlanId" trigger="click" @command="switchPlan">
@@ -123,7 +132,16 @@ async function handleCommand(command: string): Promise<void> {
         :hidden="unreadCount === 0"
         class="todo-badge"
       >
-        <el-icon :size="20" class="bell-icon" @click="goTodos"><Bell /></el-icon>
+        <el-icon
+          :size="20"
+          class="bell-icon"
+          role="button"
+          tabindex="0"
+          aria-label="待办与消息"
+          @click="goTodos"
+          @keydown.enter.prevent="goTodos"
+          @keydown.space.prevent="goTodos"
+        ><Bell /></el-icon>
       </el-badge>
       <el-dropdown trigger="click" @command="handleCommand">
         <span class="user-entry">
@@ -240,6 +258,15 @@ async function handleCommand(command: string): Promise<void> {
   color: #ffffff;
   cursor: pointer;
   outline: none;
+}
+
+.plan-entry:focus-visible,
+.bell-icon:focus-visible,
+.user-entry:focus-visible,
+.menu-trigger:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 
 /* 移动端（≤768px）：显示汉堡按钮，压缩品牌名 */

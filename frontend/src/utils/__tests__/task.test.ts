@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canWriteTask, formatDeadline, progressPercentage } from '../task'
+import { canWriteTask, formatDeadline, primaryTaskIndicator, progressPercentage } from '../task'
 
 const NOW = new Date('2026-10-22T12:00:00+08:00')
 
@@ -8,6 +8,20 @@ describe('canWriteTask', () => {
     expect(canWriteTask({ isHistorical: true })).toBe(false)
     expect(canWriteTask({ isHistorical: false })).toBe(true)
     expect(canWriteTask(null)).toBe(false)
+  })
+})
+
+describe('primaryTaskIndicator', () => {
+  const legacy = { id: 'legacy', code: 'A01-1', name: '历史关联指标' }
+  const top = { id: 'a', code: 'A01', name: '所属 A' }
+
+  it('B 主信息优先使用所属 A', () => {
+    expect(primaryTaskIndicator({ indicator: legacy, topIndicator: top })).toBe(top)
+  })
+
+  it('旧响应缺少所属 A 时保留原关联指标兼容', () => {
+    expect(primaryTaskIndicator({ indicator: legacy, topIndicator: null })).toBe(legacy)
+    expect(primaryTaskIndicator({ indicator: legacy })).toBe(legacy)
   })
 })
 

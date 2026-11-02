@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import StatusTag from '@/components/StatusTag.vue'
 import FilePreviewDrawer from '@/components/FilePreviewDrawer.vue'
@@ -30,52 +30,27 @@ import type { AdjustmentFileRef } from '@/types/adjustment'
 import type {
   AdjustmentDetail,
   AdjustmentListItem,
-  AdjustmentScope,
 } from '@/types/adjustment'
 import type { ApprovalNode, Decision } from '@/types/enums'
 
+const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-interface ScopeTab {
-  key: AdjustmentScope
-  label: string
-}
-
-/** 全部记录仅管理员 / 校领导（数据范围为全校）可见 */
-const tabs = computed<ScopeTab[]>(() => {
-  const base: ScopeTab[] = [
-    { key: 'TODO', label: '待我处理' },
-    { key: 'MINE', label: '我发起的' },
-  ]
-  if (userStore.roles.includes('ADMIN') || userStore.roles.includes('LEADER')) {
-    base.push({ key: 'ALL', label: '全部记录' })
-  }
-  return base
-})
-
-const activeTab = ref<AdjustmentScope>('TODO')
-
 const loading = ref(false)
-const page = ref<PageResult<AdjustmentListItem>>({ items: [], total: 0, page: 1, pageSize: 20 })
+const page = ref<PageResult<AdjustmentListItem>>({ items: [], total: 0, page: 1, pageSize: 10 })
 
 async function loadList(): Promise<void> {
   loading.value = true
   try {
     page.value = await listAdjustments({
-      scope: activeTab.value,
+      scope: 'ALL',
       page: page.value.page,
       pageSize: page.value.pageSize,
     })
   } finally {
     loading.value = false
   }
-}
-
-function switchTab(): void {
-  page.value.page = 1
-  closeDrawer()
-  loadList()
 }
 
 function changePage(next: number): void {
@@ -108,7 +83,7 @@ const detail = ref<AdjustmentDetail | null>(null)
 /** 快照年度列（优先任务计划起止年，否则快照中出现过的年份） */
 const snapshotYears = ref<number[]>([])
 
-async function openDetail(row: AdjustmentListItem): Promise<void> {
+async function openDetail(row: Pick<AdjustmentListItem, 'id'>): Promise<void> {
   drawerVisible.value = true
   detailLoading.value = true
   detail.value = null
@@ -140,11 +115,6 @@ async function openDetail(row: AdjustmentListItem): Promise<void> {
   } finally {
     detailLoading.value = false
   }
-}
-
-function closeDrawer(): void {
-  drawerVisible.value = false
-  detail.value = null
 }
 
 const snapshotCaption = computed(() => {
@@ -253,15 +223,24 @@ const timelineNodes = computed<TimelineNode[]>(() => {
 
 const detailHistorical = computed(() => detail.value?.task?.isHistorical === true)
 
-/** 处理区可见：待我处理 Tab + 审批中 + 有审批权限（70005 由服务端兜底） */
-const canDecide = computed(
-  () =>
-    activeTab.value === 'TODO' &&
-    detail.value !== null &&
-    !detailHistorical.value &&
-    isPendingStatus(detail.value.status) &&
-    userStore.can('adjustment:decide'),
-)
+/** 仅当前环节的期望处理人显示审批操作，服务端继续执行相同校验。 */
+const canDecide = computed(() => {
+  const current = detail.value
+  const user = userStore.userInfo
+  if (!current || !user || detailHistorical.value || !isPendingStatus(current.status)
+    || !userStore.can('adjustment:decide')) return false
+  const step = current.steps?.find((item) => item.node === currentNode.value && !item.decision)
+  if (!step) return false
+  if (step.node === 'OWNER_REVIEW') {
+    return step.expectedApprover
+      ? step.expectedApprover.id === user.id
+      : userStore.roles.includes('ADMIN')
+  }
+  if (step.node === 'RECEIVER_CONFIRM') {
+    return userStore.roles.includes('UNIT_OWNER') && step.expectedUnit?.id === user.unit?.id
+  }
+  return step.node === 'LEADER_APPROVAL' && userStore.roles.includes('LEADER')
+})
 
 const showWithdraw = computed(() => {
   const current = detail.value
@@ -371,7 +350,11 @@ function goApply(): void {
   router.push('/adjustments/apply')
 }
 
-onMounted(loadList)
+onMounted(() => {
+  loadList()
+  const linkedId = typeof route.query.adjustmentId === 'string' ? route.query.adjustmentId : null
+  if (linkedId) openDetail({ id: linkedId })
+})
 </script>
 
 <template>
@@ -381,25 +364,19 @@ onMounted(loadList)
         <h1 class="page-title">调整申请与审批</h1>
         <p class="page-subtitle">延期 / 转移 / 目标调整；审批链：初审 → 接收方确认 → 校领导审批</p>
       </div>
-      <el-button
-        v-permission="'adjustment:apply'"
-        type="primary"
-        @click="goApply"
-      >
+    </div>
+    <div class="app-action-row">
+      <el-button v-permission="'adjustment:apply'" type="primary" @click="goApply">
         发起调整申请
       </el-button>
     </div>
 
     <el-card shadow="never" class="list-card">
-      <el-tabs v-model="activeTab" @tab-change="switchTab">
-        <el-tab-pane v-for="tab in tabs" :key="tab.key" :label="tab.label" :name="tab.key" />
-      </el-tabs>
-
       <el-table v-loading="loading" :data="page.items" border size="small" @row-click="openDetail">
         <el-table-column label="类型" width="110">
           <template #default="{ row }">{{ typeLabel(row.type) }}</template>
         </el-table-column>
-        <el-table-column label="B 任务" min-width="180">
+        <el-table-column label="学院任务" min-width="180">
           <template #default="{ row }">
             <template v-if="row.task">
               <span class="mono">{{ row.task.code }}</span>
@@ -440,7 +417,7 @@ onMounted(loadList)
             <StatusTag kind="AdjustmentStatus" :value="row.status" />
           </template>
         </el-table-column>
-        <el-table-column v-if="activeTab === 'TODO'" label="当前环节" width="130" align="center">
+        <el-table-column label="当前环节" width="130" align="center">
           <template #default="{ row }">{{ nodeLabel(row.currentNode ?? nodeOfStatus(row.status)) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="80" fixed="right" align="center">
@@ -482,7 +459,7 @@ onMounted(loadList)
             <el-descriptions-item label="状态">
               <StatusTag kind="AdjustmentStatus" :value="detail.status" />
             </el-descriptions-item>
-            <el-descriptions-item label="B 任务" :span="2">
+            <el-descriptions-item label="学院任务" :span="2">
               <template v-if="detail.task">
                 <span class="mono">{{ detail.task.code }}</span>
                 {{ detail.indicator?.name ?? '' }}
@@ -825,7 +802,22 @@ onMounted(loadList)
 .withdraw-bar {
   margin-top: var(--space-4);
   display: flex;
-  justify-content: flex-end;
+}
+
+@media (max-width: 768px) {
+  .app-action-row :deep(.el-button),
+  .file-row :deep(.el-button),
+  .decision-actions :deep(.el-button),
+  .withdraw-bar :deep(.el-button),
+  :deep(.el-table .el-button) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .file-row,
+  .decision-actions {
+    flex-wrap: wrap;
+  }
 }
 
 :deep(.el-table__row) {

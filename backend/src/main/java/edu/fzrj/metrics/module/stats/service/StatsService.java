@@ -341,7 +341,7 @@ public class StatsService {
                 .toList();
     }
 
-    // ---------------- A → A+ → B 下钻树 ----------------
+    // ---------------- A → B 下钻树（legacy A+ 的 B 提升到所属 A） ----------------
 
     public List<StatsDtos.TreeNode> tree(Long planId, Integer year) {
         return tree(planId, year, currentScope());
@@ -352,10 +352,8 @@ public class StatsService {
         int resolvedYear = resolveYear(plan, year);
         PlanContext ctx = loadContext(plan, resolvedYear, scope);
 
-        // 可见 B 按指标分组
         Map<Long, List<TaskYear>> taskYearsByIndicator = ctx.taskYears().stream()
                 .collect(Collectors.groupingBy(TaskYear::getIndicatorId));
-
         List<Indicator> aList = ctx.indicators().values().stream()
                 .filter(i -> i.getParentId() == null && Boolean.TRUE.equals(i.getIsQuantifiable()))
                 .filter(i -> indicatorVisible(i, scope, ctx))
@@ -364,21 +362,27 @@ public class StatsService {
 
         List<StatsDtos.TreeNode> result = new ArrayList<>();
         for (Indicator a : aList) {
-            List<Indicator> aPlusList = ctx.indicators().values().stream()
+            List<MetricCalculator.YearResult> aPlusResults = ctx.indicators().values().stream()
                     .filter(i -> a.getId().equals(i.getParentId()))
                     .filter(i -> indicatorVisible(i, scope, ctx))
                     .sorted(Comparator.comparing(Indicator::getSort).thenComparing(Indicator::getCode))
+                    .map(ap -> nodeResult(ap, resolvedYear, plan, ctx,
+                            taskYearsByIndicator.getOrDefault(ap.getId(), List.of())))
                     .toList();
-            List<StatsDtos.TreeNode> children = new ArrayList<>();
-            List<MetricCalculator.YearResult> aPlusResults = new ArrayList<>();
-            for (Indicator ap : aPlusList) {
-                List<TaskYear> apTaskYears = taskYearsByIndicator.getOrDefault(ap.getId(), List.of());
-                MetricCalculator.YearResult apResult = nodeResult(ap, resolvedYear, plan, ctx, apTaskYears);
-                aPlusResults.add(apResult);
-                children.add(indicatorNode(ap, resolvedYear, ctx, apTaskYears, apResult));
-            }
-            result.add(aNode(a, resolvedYear, plan, ctx, children, aPlusResults,
-                    taskYearsByIndicator.getOrDefault(a.getId(), List.of())));
+            List<TaskYear> allTaskYears = ctx.taskYears().stream()
+                    .filter(ty -> {
+                        Task task = ctx.tasks().get(ty.getTaskId());
+                        return a.getId().equals(ty.getIndicatorId())
+                                || task != null && a.getId().equals(task.getTopIndicatorId());
+                    })
+                    .toList();
+            List<StatsDtos.TreeNode> leaves = allTaskYears.stream()
+                    .map(ty -> taskLeaf(ty, ctx))
+                    .sorted(Comparator.comparing(n -> n.unit() == null ? "" : n.unit().code(),
+                            Comparator.nullsFirst(String::compareTo)))
+                    .toList();
+            result.add(aNode(a, resolvedYear, plan, ctx, aPlusResults,
+                    taskYearsByIndicator.getOrDefault(a.getId(), List.of()), leaves));
         }
         return result;
     }
@@ -399,36 +403,17 @@ public class StatsService {
                         || t.getTopIndicatorId().equals(indicator.getId()));
     }
 
-    /** A 节点：AUTO_SUM 汇总下级 A+；MANUAL 用人工认定值；不可下分 A 汇总自身 B */
+    /** A 节点：AUTO_SUM 合并直承 B 与 legacy A+；MANUAL 仍取人工认定值。 */
     private StatsDtos.TreeNode aNode(Indicator a, int year, Plan plan, PlanContext ctx,
-                                     List<StatsDtos.TreeNode> aPlusChildren,
                                      List<MetricCalculator.YearResult> aPlusResults,
-                                     List<TaskYear> ownTaskYears) {
+                                     List<TaskYear> ownTaskYears,
+                                     List<StatsDtos.TreeNode> leaves) {
         BigDecimal target = yearTarget(ctx, a.getId(), year);
         CumulativeCalculator.Cumulative cumulative = cumulativeOfIndicator(a, ctx);
-        MetricCalculator.YearResult result;
         BigDecimal actualValue;
         BigDecimal completionRate;
         String achieveStatus;
-        if (!ownTaskYears.isEmpty()) {
-            // 体系改造前的 A 直承历史任务保留在详情和向上汇总中
-            result = MetricCalculator.rollup(a.getStatCaliber(), toYearResults(ownTaskYears),
-                    prevIndicatorTotal(ctx, a, year, plan));
-            actualValue = result.actualValue();
-            completionRate = MetricCalculator.completionRate(a.getStatCaliber(), result, target);
-            achieveStatus = MetricCalculator.achieveStatus(a.getTargetDirection(), a.getStatCaliber(), result, target);
-            List<StatsDtos.TreeNode> leaves = ownTaskYears.stream()
-                    .map(ty -> taskLeaf(ty, ctx))
-                    .sorted(Comparator.comparing(n -> n.unit() == null ? "" : n.unit().code(),
-                            Comparator.nullsFirst(String::compareTo)))
-                    .toList();
-            return new StatsDtos.TreeNode(a.getId(), a.getCode(), a.getName(), "A", a.getNature(),
-                    a.getStatCaliber(), a.getUnitLabel(), a.getTargetDirection(),
-                    targetView(a.getStatCaliber(), target), actualValue, completionRate, achieveStatus,
-                    cumulative.actual(), cumulative.rate(), null, null, null, null, null, leaves);
-        }
         if ("MANUAL".equals(a.getRollupMode())) {
-            // 手工认定：完成值取人工认定值（未认定时为空，不下钻汇总）
             IndicatorYearTarget row = yearTargetRow(ctx, a.getId(), year);
             actualValue = row == null ? null : row.getManualActualValue();
             MetricCalculator.YearResult manual = actualValue == null
@@ -437,7 +422,9 @@ public class StatsService {
             completionRate = MetricCalculator.completionRate(a.getStatCaliber(), manual, target);
             achieveStatus = MetricCalculator.achieveStatus(a.getTargetDirection(), a.getStatCaliber(), manual, target);
         } else {
-            result = MetricCalculator.rollup(a.getStatCaliber(), aPlusResults,
+            List<MetricCalculator.YearResult> sources = new ArrayList<>(toYearResults(ownTaskYears));
+            sources.addAll(aPlusResults);
+            MetricCalculator.YearResult result = MetricCalculator.rollup(a.getStatCaliber(), sources,
                     prevIndicatorTotal(ctx, a, year, plan));
             actualValue = result.actualValue();
             completionRate = MetricCalculator.completionRate(a.getStatCaliber(), result, target);
@@ -446,26 +433,6 @@ public class StatsService {
         return new StatsDtos.TreeNode(a.getId(), a.getCode(), a.getName(), "A", a.getNature(),
                 a.getStatCaliber(), a.getUnitLabel(), a.getTargetDirection(),
                 targetView(a.getStatCaliber(), target), actualValue, completionRate, achieveStatus,
-                cumulative.actual(), cumulative.rate(), null, null, null, null, null, aPlusChildren);
-    }
-
-    /** A+ 节点：汇总可见 B 叶子 */
-    private StatsDtos.TreeNode indicatorNode(Indicator indicator, int year, PlanContext ctx,
-                                             List<TaskYear> taskYears, MetricCalculator.YearResult result) {
-        BigDecimal target = yearTarget(ctx, indicator.getId(), year);
-        CumulativeCalculator.Cumulative cumulative = cumulativeOfIndicator(indicator, ctx);
-        List<StatsDtos.TreeNode> leaves = taskYears.stream()
-                .map(ty -> taskLeaf(ty, ctx))
-                .sorted(Comparator.comparing(n -> n.unit() == null ? "" : n.unit().code(),
-                        Comparator.nullsFirst(String::compareTo)))
-                .toList();
-        return new StatsDtos.TreeNode(indicator.getId(), indicator.getCode(), indicator.getName(),
-                "A_PLUS", indicator.getNature(), indicator.getStatCaliber(), indicator.getUnitLabel(),
-                indicator.getTargetDirection(), targetView(indicator.getStatCaliber(), target),
-                result.actualValue(),
-                MetricCalculator.completionRate(indicator.getStatCaliber(), result, target),
-                MetricCalculator.achieveStatus(indicator.getTargetDirection(), indicator.getStatCaliber(),
-                        result, target),
                 cumulative.actual(), cumulative.rate(), null, null, null, null, null, leaves);
     }
 
@@ -541,6 +508,8 @@ public class StatsService {
                     row == null ? null : targetView(indicator.getStatCaliber(), row.getTarget()),
                     actual,
                     row == null ? null : row.getActualTotal(),
+                    row == null ? null : row.getActualNumerator(),
+                    row == null ? null : row.getActualDenominator(),
                     row == null ? null : row.getCompletionRate(),
                     row == null ? null : row.getAchieveStatus()));
             yearResults.add(row == null ? MetricCalculator.YearResult.empty()

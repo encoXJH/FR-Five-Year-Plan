@@ -69,7 +69,8 @@ public final class TaskDtos {
             String name,
             String statCaliber,
             String unitLabel,
-            String evidenceRequirement) {
+            String evidenceRequirement,
+            String targetDirection) {
     }
 
     /** 任务所属计划引用（任务详情用，供年度范围与展示） */
@@ -151,6 +152,8 @@ public final class TaskDtos {
             Boolean isHistorical,
             Object totalTarget,
             Object yearTarget,
+            /** 全规划期年度目标，供列表展开后直接展示，避免逐任务查询详情 */
+            List<YearTargetView> yearTargets,
             BigDecimal actualValue,
             BigDecimal completionRate,
             /** 五年累计完成值（INCREMENT 各年之和，STOCK/GROWTH 最新总量，RATIO/DIRECT_PERCENT 最新比率，BOOLEAN 0/1） */

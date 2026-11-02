@@ -33,8 +33,20 @@ public class FileUploadSession {
     /** MIME 类型 */
     private String mimeType;
 
+    /** 文件用途 */
+    private String bizType;
+
     /** 整文件 SHA-256 */
     private String sha256;
+
+    /** 存储类型：LOCAL 后端分片 / MINIO 浏览器直传 */
+    private String storageType;
+
+    /** MINIO 对象键 */
+    private String storageKey;
+
+    /** MINIO S3 multipart uploadId */
+    private String remoteUploadId;
 
     /** 分片大小（字节，默认 5MB） */
     private Integer partSize;

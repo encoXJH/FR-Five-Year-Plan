@@ -149,4 +149,11 @@ onMounted(load)
   padding-top: var(--space-4);
   border-top: 1px solid var(--el-border-color-light);
 }
+
+@media (max-width: 768px) {
+  .settings-footer :deep(.el-button) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
 </style>

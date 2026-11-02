@@ -1,8 +1,6 @@
 import { http } from '@/utils/request'
 import type {
   Allocation,
-  DecompositionRequest,
-  DecompositionResult,
   DistributeRequest,
   DistributeResult,
   SaveAllocationRequest,
@@ -18,17 +16,6 @@ export function saveAllocation(
   silent = false,
 ): Promise<Allocation> {
   return http.put(`/indicators/${indicatorId}/allocation`, data, { silent })
-}
-
-export function decomposeIndicator(
-  planId: string,
-  parentId: string,
-  data: DecompositionRequest,
-  idempotencyKey: string,
-): Promise<DecompositionResult> {
-  return http.post(`/plans/${planId}/indicators/${parentId}/decomposition`, data, {
-    headers: { 'Idempotency-Key': idempotencyKey },
-  })
 }
 
 export function distributePlan(

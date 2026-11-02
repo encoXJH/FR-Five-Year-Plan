@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import StatusTag from '@/components/StatusTag.vue'
+import FilePreviewDrawer from '@/components/FilePreviewDrawer.vue'
 import { getTask } from '@/api/task'
 import { listTaskAdjustments } from '@/api/adjustment'
+import { getSubmission, listSubmissions } from '@/api/submission'
 import { useUserStore } from '@/stores/user'
 import { formatDateTime, formatPercent } from '@/utils/format'
 import { formatTargetValue } from '@/utils/indicator'
-import { canWriteTask, progressPercentage } from '@/utils/task'
-import { canApplyForTask, summarizeItems } from '@/utils/adjustment'
+import { primaryTaskIndicator, progressPercentage } from '@/utils/task'
+import { summarizeItems } from '@/utils/adjustment'
 import { enumLabel } from '@/utils/enumLabels'
 import type { TaskDetail } from '@/types/task'
 import type { AdjustmentListItem } from '@/types/adjustment'
+import type { FileInfo } from '@/types/file'
+import type { SubmissionDetail, SubmissionListItem } from '@/types/submission'
 import type { StatCaliber } from '@/types/enums'
 
 const props = defineProps<{
@@ -20,10 +24,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
-  /** 填报入口：年度进行中的任务跳 P08 */
-  submit: [payload: { taskId: string; year: number | null }]
-  /** 发起调整入口：跳 P10 并带入任务 */
-  apply: [payload: { taskId: string }]
 }>()
 
 const visible = computed({
@@ -37,49 +37,15 @@ const activeTab = ref('info')
 
 const userStore = useUserStore()
 
-const caliber = computed<StatCaliber>(() => task.value?.indicator?.statCaliber ?? 'INCREMENT')
-
-/** 进行中年度（填报入口，取第一个 IN_PROGRESS 年份） */
-const activeYear = computed<number | null>(() => {
-  const hit = (task.value?.years ?? []).find((item) => item.yearStatus === 'IN_PROGRESS')
-  return hit?.year ?? null
-})
-
-const canSubmit = computed(
-  () =>
-    canWriteTask(task.value) &&
-    activeYear.value !== null &&
-    userStore.can('submission:submit') &&
-    props.taskId !== null,
-)
-
-/** 发起调整入口：INCREMENT / BOOLEAN 口径 + adjustment:apply 权限，任务未终结 */
-const canApply = computed(
-  () =>
-    canWriteTask(task.value) &&
-    task.value !== null &&
-    userStore.can('adjustment:apply') &&
-    canApplyForTask(task.value.status, task.value.indicator?.statCaliber, task.value.isHistorical),
-)
-
-function goSubmit(): void {
-  if (!props.taskId || !canSubmit.value) return
-  emit('submit', { taskId: props.taskId, year: activeYear.value })
-  visible.value = false
-}
-
-function goApply(): void {
-  if (!props.taskId || !canApply.value) return
-  emit('apply', { taskId: props.taskId })
-  visible.value = false
-}
+const primaryIndicator = computed(() => primaryTaskIndicator(task.value))
+const caliber = computed<StatCaliber>(() => primaryIndicator.value?.statCaliber ?? 'INCREMENT')
 
 // ---------- 调整历史 ----------
 const adjustments = ref<AdjustmentListItem[]>([])
 const adjustmentsLoaded = ref(false)
 
 function adjustmentSummary(item: AdjustmentListItem): string {
-  return summarizeItems(item.items ?? [], task.value?.indicator?.unitLabel)
+  return summarizeItems(item.items ?? [], primaryIndicator.value?.unitLabel)
 }
 
 function transferLine(item: AdjustmentListItem): string {
@@ -88,16 +54,39 @@ function transferLine(item: AdjustmentListItem): string {
   return to ? `${from} → ${to}` : ''
 }
 
+// ---------- 提交记录与佐证材料 ----------
+const submissions = ref<SubmissionListItem[]>([])
+const submissionDetail = ref<SubmissionDetail | null>(null)
+const submissionLoading = ref(false)
+const previewVisible = ref(false)
+const previewFile = ref<FileInfo | null>(null)
+
+async function openSubmission(item: SubmissionListItem): Promise<void> {
+  submissionLoading.value = true
+  try {
+    submissionDetail.value = await getSubmission(item.id)
+  } finally {
+    submissionLoading.value = false
+  }
+}
+
+function openMaterial(file: FileInfo): void {
+  previewFile.value = file
+  previewVisible.value = true
+}
+
 async function load(): Promise<void> {
   if (!props.taskId) return
   loading.value = true
   try {
-    const [detail, history] = await Promise.all([
+    const [detail, history, submissionItems] = await Promise.all([
       getTask(props.taskId),
       listTaskAdjustments(props.taskId).catch(() => [] as AdjustmentListItem[]),
+      listSubmissions(props.taskId).catch(() => [] as SubmissionListItem[]),
     ])
     task.value = detail
     adjustments.value = history
+    submissions.value = submissionItems
     adjustmentsLoaded.value = true
   } finally {
     loading.value = false
@@ -108,6 +97,10 @@ watch(visible, (value) => {
   if (value) {
     task.value = null
     adjustments.value = []
+    submissions.value = []
+    submissionDetail.value = null
+    previewFile.value = null
+    previewVisible.value = false
     adjustmentsLoaded.value = false
     activeTab.value = 'info'
     load()
@@ -116,11 +109,11 @@ watch(visible, (value) => {
 </script>
 
 <template>
-  <el-drawer
+  <el-dialog
     v-model="visible"
-    direction="rtl"
-    size="min(560px, 100vw)"
-    class="task-detail-drawer"
+    width="min(720px, calc(100vw - 32px))"
+    align-center
+    class="task-detail-dialog"
     :title="task ? `任务详情 · ${task.code}` : '任务详情'"
   >
     <div v-loading="loading">
@@ -139,19 +132,19 @@ watch(visible, (value) => {
               <el-descriptions-item label="任务状态">
                 <StatusTag kind="TaskStatus" :value="task.status" />
               </el-descriptions-item>
-              <el-descriptions-item label="关键产出指标" :span="2">
-                {{ task.indicator ? `${task.indicator.code} ${task.indicator.name}` : '—' }}
+              <el-descriptions-item label="所属指标" :span="2">
+                {{ primaryIndicator ? `${primaryIndicator.code} ${primaryIndicator.name}` : '—' }}
               </el-descriptions-item>
               <el-descriptions-item label="执行单元">
                 {{ task.unit ? `${task.unit.code} ${task.unit.name}` : '—' }}
               </el-descriptions-item>
               <el-descriptions-item label="学院负责人">{{ task.owner?.name ?? '—' }}</el-descriptions-item>
               <el-descriptions-item label="统计口径">
-                <StatusTag v-if="task.indicator?.statCaliber" kind="StatCaliber" :value="task.indicator.statCaliber" />
+                <StatusTag v-if="primaryIndicator?.statCaliber" kind="StatCaliber" :value="primaryIndicator.statCaliber" />
                 <template v-else>—</template>
               </el-descriptions-item>
               <el-descriptions-item label="五年目标">
-                {{ formatTargetValue(task.totalTarget ?? null, caliber) }}{{ task.indicator?.unitLabel ? ` ${task.indicator.unitLabel}` : '' }}
+                {{ formatTargetValue(task.totalTarget ?? null, caliber) }}{{ primaryIndicator?.unitLabel ? ` ${primaryIndicator.unitLabel}` : '' }}
               </el-descriptions-item>
             </el-descriptions>
 
@@ -184,6 +177,40 @@ watch(visible, (value) => {
                 </template>
               </el-table-column>
             </el-table>
+          </el-tab-pane>
+
+          <el-tab-pane label="提交记录" name="submissions">
+            <div v-if="submissions.length > 0" class="submission-list">
+              <button
+                v-for="item in submissions"
+                :key="item.id"
+                type="button"
+                class="submission-record"
+                :class="{ 'is-active': submissionDetail?.id === item.id }"
+                @click="openSubmission(item)"
+              >
+                <span>{{ item.year }} 年 · 第 {{ item.revisionNo }} 次提交</span>
+                <StatusTag kind="SubmissionStatus" :value="item.status" />
+                <small>{{ formatDateTime(item.submittedAt ?? item.createdAt) }} · 材料 {{ item.fileCount ?? 0 }} 份</small>
+              </button>
+            </div>
+            <el-empty v-else :image-size="80" description="该任务暂无提交记录" />
+
+            <div v-if="submissionDetail" v-loading="submissionLoading" class="submission-materials">
+              <h3 class="section-title">提交材料（{{ submissionDetail.files.length }} 份）</h3>
+              <div v-if="submissionDetail.files.length > 0" class="material-list">
+                <el-button
+                  v-for="file in submissionDetail.files"
+                  :key="file.id"
+                  text
+                  type="primary"
+                  @click="openMaterial(file)"
+                >
+                  {{ file.fileName }}
+                </el-button>
+              </div>
+              <el-empty v-else :image-size="60" description="本次提交未上传材料" />
+            </div>
           </el-tab-pane>
 
           <el-tab-pane label="调整历史" name="adjustments">
@@ -219,16 +246,30 @@ watch(visible, (value) => {
       </template>
       <el-empty v-else-if="!loading" :image-size="80" description="加载失败或任务不存在" />
     </div>
-    <template v-if="canSubmit || canApply" #footer>
-      <div class="drawer-footer">
-        <el-button v-if="canApply" type="warning" plain @click="goApply">发起调整</el-button>
-        <el-button v-if="canSubmit" type="primary" @click="goSubmit">填报</el-button>
-      </div>
-    </template>
-  </el-drawer>
+  </el-dialog>
+  <FilePreviewDrawer v-model="previewVisible" :file="previewFile" />
 </template>
 
 <style scoped>
+:global(.task-detail-dialog) {
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+  margin: 0;
+  border-radius: 10px;
+}
+
+:global(.task-detail-dialog .el-dialog__body) {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+@media (max-width: 768px) {
+  :global(.task-detail-dialog) {
+    max-height: calc(100dvh - 32px);
+  }
+}
+
 .history-alert {
   margin-bottom: var(--space-3);
 }
@@ -250,6 +291,56 @@ watch(visible, (value) => {
 
 .empty-text {
   color: var(--el-text-color-placeholder);
+}
+
+.submission-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.submission-record {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--el-border-radius-base);
+  background: var(--el-bg-color);
+  color: var(--el-text-color-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.submission-record.is-active {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+.submission-record small {
+  grid-column: 1 / -1;
+  color: var(--el-text-color-secondary);
+}
+
+.submission-materials {
+  margin-top: var(--space-4);
+}
+
+.material-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.material-list .el-button {
+  max-width: 100%;
+  height: auto;
+  min-height: 32px;
+  margin: 0;
+  white-space: normal;
+  text-align: left;
 }
 
 .history-timeline {
@@ -277,11 +368,5 @@ watch(visible, (value) => {
   margin-top: 2px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
-}
-
-.drawer-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2);
 }
 </style>

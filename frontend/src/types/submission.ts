@@ -33,51 +33,68 @@ export interface ReviewRecord {
   createdAt: string
 }
 
+export interface SubmissionTaskRef {
+  id: string
+  code: string
+}
+
+export interface SubmissionIndicatorRef {
+  id: string
+  code: string
+  name: string
+  level: string
+}
+
+export interface SubmissionHistoryRecord {
+  revisionNo: number
+  value: MetricValue
+  fileIds: string[]
+  submittedAt: string
+  submittedBy: UserRef | null
+}
+
 /** GET /tasks/{taskId}/submissions 列表项 */
 export interface SubmissionListItem {
   id: string
-  taskId: string
+  planId: string
+  task: SubmissionTaskRef | null
+  indicator: SubmissionIndicatorRef | null
+  /** 所属 A；旧响应可能缺省 */
+  topIndicator?: SubmissionIndicatorRef | null
+  unit: UnitRef | null
   year: number
+  statCaliber: StatCaliber
   status: SubmissionStatus
   value: MetricValue
+  revisionNo: number
+  version: number
+  submittedAt: string | null
+  submittedBy?: UserRef | null
+  reviewedAt?: string | null
+  reviewer?: UserRef | null
+  createdAt: string
+  fileCount?: number
   approvedValue?: MetricValue | null
   remark?: string | null
-  /** DIRECT_PERCENT 数据来源说明（字段名以后端为准，见开发决策记录） */
   sourceNote?: string | null
   fileIds?: string[]
   files?: FileInfo[]
-  version: number
-  submittedAt?: string | null
-  createdAt: string
-  updatedAt?: string
-  createdBy?: UserRef | null
-  /** 是否管理员代填（API 第 10 章敏感操作标识） */
+  updatedAt?: string | null
   isProxy?: boolean | null
-  /** 代填原因（代填时由后端返回） */
   proxyReason?: string | null
-  /** 列表接口可能直接带最近一次审核意见 */
   reviews?: ReviewRecord[]
 }
 
-/** GET /submissions/{id} 详情（含材料、审核记录） */
+/** GET /submissions/{id} 详情（含材料、审核记录、历史快照） */
 export interface SubmissionDetail extends SubmissionListItem {
+  approvedValue: MetricValue | null
+  remark: string | null
+  sourceNote: string | null
   files: FileInfo[]
   reviews: ReviewRecord[]
-  task?: {
-    id: string
-    code: string
-    isHistorical: boolean
-    indicator?: {
-      id: string
-      code: string
-      name: string
-      statCaliber?: StatCaliber | null
-      unitLabel?: string | null
-      evidenceRequirement?: string | null
-    } | null
-    unit?: UnitRef | null
-    owner?: UserRef | null
-  } | null
+  histories: SubmissionHistoryRecord[]
+  isProxy: boolean | null
+  updatedAt: string | null
 }
 
 /** POST /tasks/{taskId}/submissions 请求体（API 16.4） */
@@ -113,32 +130,8 @@ export interface PendingReviewQuery {
   pageSize?: number
 }
 
-/** GET /reviews/pending 列表项 */
-export interface PendingReviewItem {
-  id: string
-  year: number
-  status: SubmissionStatus
-  value: MetricValue
-  remark?: string | null
-  sourceNote?: string | null
-  submittedAt: string | null
-  fileCount?: number | null
-  task?: {
-    id: string
-    code: string
-    isHistorical: boolean
-    indicator?: {
-      id: string
-      code: string
-      name: string
-      statCaliber?: StatCaliber | null
-      unitLabel?: string | null
-    } | null
-    unit?: UnitRef | null
-    owner?: UserRef | null
-  } | null
-  version?: number
-}
+/** GET /reviews/pending 列表项，与填报列表共用后端 ListItem 契约 */
+export type PendingReviewItem = SubmissionListItem
 
 /** POST /submissions/{id}/review 请求体（API 15.5） */
 export interface ReviewRequest {
@@ -146,7 +139,8 @@ export interface ReviewRequest {
   comment?: string | null
   /** 核减认定值（不能大于填报值，60005） */
   approvedValue?: MetricValue | null
-  version?: number
+  /** 当前填报版本，审核乐观锁必传 */
+  version: number
   /** 管理员代审原因（敏感操作，API 第 10 章） */
   reason?: string | null
 }

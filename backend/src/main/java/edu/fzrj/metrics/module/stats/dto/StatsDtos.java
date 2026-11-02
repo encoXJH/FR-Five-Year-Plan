@@ -79,8 +79,8 @@ public final class StatsDtos {
     }
 
     /**
-     * A → A+ → B 下钻树节点。B 叶子节点带 taskId / unit / yearStatus / isAchieved / isHistorical；
-     * A / A+ 节点带 children。target 对 BOOLEAN 口径为 Boolean（计划完成年 true）。
+     * A → B 下钻树节点。legacy A+ 的 B 提升到所属 A，B 叶子带 taskId / unit / yearStatus / isAchieved / isHistorical；
+     * target 对 BOOLEAN 口径为 Boolean（计划完成年 true）。
      */
     public record TreeNode(
             @JsonSerialize(using = ToStringSerializer.class) Long id,
@@ -128,6 +128,8 @@ public final class StatsDtos {
             Object target,
             BigDecimal actualValue,
             BigDecimal actualTotal,
+            BigDecimal actualNumerator,
+            BigDecimal actualDenominator,
             BigDecimal completionRate,
             String achieveStatus) {
     }

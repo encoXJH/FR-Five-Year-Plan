@@ -32,6 +32,43 @@ export function buildMetricValue(caliber: StatCaliber, input: Partial<MetricValu
   return value
 }
 
+const BOOLEAN_REMARK_PATTERN = /^\[FZSU_BOOLEAN\](\{[^\r\n]*\})\[\/FZSU_BOOLEAN\](?:\r?\n)?/
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+
+export interface SubmissionRemarkParts {
+  remark: string
+  completionDate: string
+}
+
+/** 从 remark 解析 BOOLEAN 完成日期，普通说明保持原样。 */
+export function parseSubmissionRemark(raw: string | null | undefined): SubmissionRemarkParts {
+  const text = raw ?? ''
+  const match = text.match(BOOLEAN_REMARK_PATTERN)
+  if (!match) return { remark: text, completionDate: '' }
+  try {
+    const metadata = JSON.parse(match[1]) as { completionDate?: unknown }
+    if (typeof metadata.completionDate !== 'string' || !DATE_PATTERN.test(metadata.completionDate)) {
+      return { remark: text, completionDate: '' }
+    }
+    return { remark: text.slice(match[0].length), completionDate: metadata.completionDate }
+  } catch {
+    return { remark: text, completionDate: '' }
+  }
+}
+
+/** BOOLEAN 完成日期以结构化元数据附入 remark；重复保存会先移除旧元数据。 */
+export function serializeSubmissionRemark(
+  caliber: StatCaliber,
+  remark: string | null | undefined,
+  completionDate: string | null | undefined,
+): string | null {
+  if (caliber !== 'BOOLEAN') return remark || null
+  const plainRemark = parseSubmissionRemark(remark).remark
+  if (!completionDate || !DATE_PATTERN.test(completionDate)) return plainRemark || null
+  const metadata = `[FZSU_BOOLEAN]${JSON.stringify({ completionDate })}[/FZSU_BOOLEAN]`
+  return `${metadata}${plainRemark ? `\n${plainRemark}` : ''}`
+}
+
 /** 占比实时计算：分母为 0 / 空值时返回 null（界面显示 —，UI 规范 3.4） */
 export function computeRatio(
   numerator: number | null | undefined,
@@ -81,6 +118,47 @@ export function approvedReduction(
     }
   }
   return null
+}
+
+export interface RecognizedAnnualValue {
+  actualValue?: number | null
+  actualNumerator?: number | null
+  actualDenominator?: number | null
+}
+
+/** 按当前候选值与已认定数据投影年度完成率；仅用于提示，最终以后端 BigDecimal 计算为准。 */
+export function projectAnnualCompletionRate(
+  caliber: StatCaliber,
+  target: number | boolean | null | undefined,
+  recognized: RecognizedAnnualValue | null | undefined,
+  candidate: MetricValue,
+): number | null {
+  if (typeof target !== 'number' || !Number.isFinite(target) || target <= 0 || caliber === 'BOOLEAN') {
+    return null
+  }
+  let actual: number | null = null
+  switch (caliber) {
+    case 'INCREMENT':
+      if (typeof candidate.amount === 'number') {
+        actual = (recognized?.actualValue ?? 0) + candidate.amount
+      }
+      break
+    case 'STOCK':
+    case 'GROWTH':
+      actual = typeof candidate.total === 'number' ? candidate.total : null
+      break
+    case 'RATIO': {
+      if (typeof candidate.numerator !== 'number' || typeof candidate.denominator !== 'number') break
+      const numerator = (recognized?.actualNumerator ?? 0) + candidate.numerator
+      const denominator = (recognized?.actualDenominator ?? 0) + candidate.denominator
+      actual = denominator === 0 ? null : numerator / denominator
+      break
+    }
+    case 'DIRECT_PERCENT':
+      actual = typeof candidate.percent === 'number' ? candidate.percent : null
+      break
+  }
+  return actual === null || !Number.isFinite(actual) ? null : actual / target
 }
 
 /** MetricValue 按口径展示（填报记录、审核详情；比率 ×100 显示 %，UI 规范 3.4） */

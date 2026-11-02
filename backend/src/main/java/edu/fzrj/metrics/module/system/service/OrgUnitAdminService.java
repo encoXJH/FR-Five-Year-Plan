@@ -19,7 +19,7 @@ import java.util.Set;
 
 /**
  * 执行单元管理（API 约定 15.10、PRD FR-M12-01）：新增 / 修改 / 停用。
- * code 用于 B 任务编号，创建后不允许修改（API 约定第 9 章）；
+ * code 用于 学院任务编号，创建后不允许修改（API 约定第 9 章）；
  * 停用前校验在途任务（DISTRIBUTED / IN_PROGRESS），有则拒绝。
  */
 @Service
@@ -70,7 +70,7 @@ public class OrgUnitAdminService {
         PatchHelper patch = new PatchHelper(body);
         OrgUnit unit = requireUnit(unitId);
         if (patch.has("code") && !unit.getCode().equalsIgnoreCase(patch.text("code"))) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "单元编码用于 B 任务编号，创建后不允许修改");
+            throw new BizException(ErrorCode.PARAM_INVALID, "单元编码用于 学院任务编号，创建后不允许修改");
         }
         if (patch.has("type") && !unit.getType().equals(patch.text("type"))) {
             throw new BizException(ErrorCode.PARAM_INVALID, "单元类型创建后不允许修改");
@@ -117,7 +117,7 @@ public class OrgUnitAdminService {
     public OrgUnit requireBAssignable(Long unitId) {
         OrgUnit unit = requireUnit(unitId);
         if (!Boolean.TRUE.equals(unit.getIsEnabled()) || !Boolean.TRUE.equals(unit.getIsBAssignable())) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "执行单元已停用或不可承接新 B 任务");
+            throw new BizException(ErrorCode.PARAM_INVALID, "执行单元已停用或不可承接新 学院任务");
         }
         return unit;
     }
@@ -131,7 +131,7 @@ public class OrgUnitAdminService {
                 .in(Task::getStatus, IN_FLIGHT_TASK_STATUS));
         if (inFlight > 0) {
             throw new BizException(ErrorCode.PARAM_INVALID,
-                    "该单元存在 " + inFlight + " 条在途 B 任务（已下发 / 执行中），不能停用；请先完成或转移");
+                    "该单元存在 " + inFlight + " 条在途 学院任务（已下发 / 执行中），不能停用；请先完成或转移");
         }
     }
 

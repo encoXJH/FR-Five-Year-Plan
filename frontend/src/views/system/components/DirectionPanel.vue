@@ -8,7 +8,7 @@ import { listUsers } from '@/api/system'
 import { useUserStore } from '@/stores/user'
 import { EMPTY_DISPLAY } from '@/utils/format'
 import type { Direction, PlanCard, PlanDetail } from '@/types/plan'
-import type { Indicator, IndicatorTreeNode } from '@/types/indicator'
+import type { IndicatorTreeNode } from '@/types/indicator'
 import type { SystemUser } from '@/types/system'
 
 const userStore = useUserStore()
@@ -19,17 +19,20 @@ const planId = ref('')
 const plan = ref<PlanDetail | null>(null)
 const directions = ref<Direction[]>([])
 const leaders = ref<SystemUser[]>([])
-const aRows = ref<Indicator[]>([])
+const aRows = ref<IndicatorTreeNode[]>([])
 const loading = ref(false)
 const leadersLoading = ref(false)
 
 const assignmentDrafts = reactive<Record<string, string | null>>({})
 const assignmentSavingId = ref('')
-const assignmentReadonly = computed(
-  () => (plan.value?.indicatorsFinalized ?? false) || plan.value?.status === 'ARCHIVED',
-)
+const assignmentReadonly = computed(() => plan.value?.status === 'ARCHIVED')
 
-function flattenA(nodes: IndicatorTreeNode[]): Indicator[] {
+function assignmentRowReadonly(row: IndicatorTreeNode): boolean {
+  return assignmentReadonly.value || row.status === 'DISTRIBUTED'
+    || row.children.some((child) => child.status === 'DISTRIBUTED')
+}
+
+function flattenA(nodes: IndicatorTreeNode[]): IndicatorTreeNode[] {
   return nodes.flatMap((node) => [
     ...(node.level === 'A' ? [node] : []),
     ...flattenA(node.children ?? []),
@@ -84,7 +87,7 @@ watch(planId, (id, previous) => {
   if (id && id !== previous) void loadAll().catch(() => undefined)
 })
 
-// ---------- S 级任务 ----------
+// ---------- 主要建设方向 ----------
 const dialogVisible = ref(false)
 const saving = ref(false)
 const editing = ref<Direction | null>(null)
@@ -108,7 +111,7 @@ function openEdit(row: Direction): void {
 
 async function submit(): Promise<void> {
   if (!form.name.trim()) {
-    ElMessage.warning('请填写 S 级任务名称')
+    ElMessage.warning('请填写 主要建设方向名称')
     return
   }
   saving.value = true
@@ -120,14 +123,14 @@ async function submit(): Promise<void> {
         leaderId: form.leaderId,
         version: editing.value.version,
       })
-      ElMessage.success('S 级任务已更新')
+      ElMessage.success('主要建设方向已更新')
     } else {
       await createDirection(planId.value, {
         name: form.name.trim(),
         sort: form.sort,
         leaderId: form.leaderId,
       })
-      ElMessage.success('S 级任务已新增')
+      ElMessage.success('主要建设方向已新增')
     }
     dialogVisible.value = false
     directions.value = await listDirections(planId.value)
@@ -141,12 +144,12 @@ async function submit(): Promise<void> {
 async function remove(row: Direction): Promise<void> {
   try {
     await ElMessageBox.confirm(
-      `确认删除 S 级任务「${row.name}」？已关联 A 级指标时服务端将拒绝删除。`,
-      '删除 S 级任务',
+      `确认删除 主要建设方向「${row.name}」？已关联 指标时服务端将拒绝删除。`,
+      '删除 主要建设方向',
       { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' },
     )
     await deleteDirection(row.id)
-    ElMessage.success('S 级任务已删除')
+    ElMessage.success('主要建设方向已删除')
     await loadAll()
   } catch {
     // 取消或拦截器已提示
@@ -157,12 +160,12 @@ function directionName(id: string | null | undefined): string {
   return directions.value.find((item) => item.id === id)?.name ?? EMPTY_DISPLAY
 }
 
-function assignmentDirty(row: Indicator): boolean {
+function assignmentDirty(row: IndicatorTreeNode): boolean {
   return (assignmentDrafts[row.id] ?? null) !== (row.directionId ?? null)
 }
 
-async function saveAssignment(row: Indicator): Promise<void> {
-  if (assignmentReadonly.value || !assignmentDirty(row)) return
+async function saveAssignment(row: IndicatorTreeNode): Promise<void> {
+  if (assignmentRowReadonly(row) || !assignmentDirty(row)) return
   assignmentSavingId.value = row.id
   try {
     await updateIndicatorDirection(row.id, assignmentDrafts[row.id] ?? null, row.version)
@@ -177,50 +180,52 @@ async function saveAssignment(row: Indicator): Promise<void> {
 </script>
 
 <template>
-  <el-alert v-if="!canManage" type="warning" :closable="false" title="仅具有 system:manage 权限的管理员可配置 S 级任务" />
+  <el-alert v-if="!canManage" type="warning" :closable="false" title="仅具有 system:manage 权限的管理员可配置 主要建设方向" />
   <div v-else v-loading="loading">
     <div class="panel-toolbar">
       <el-select v-model="planId" placeholder="请选择计划" style="width: 320px">
         <el-option v-for="item in plans" :key="item.id" :label="item.name" :value="item.id" />
       </el-select>
       <el-button :disabled="!planId" @click="loadAll">刷新</el-button>
-      <el-button type="primary" :disabled="!planId" @click="openCreate">新增 S 级任务</el-button>
+    </div>
+    <div class="app-action-row panel-actions">
+      <el-button type="primary" :disabled="!planId" @click="openCreate">新增 主要建设方向</el-button>
     </div>
 
     <el-empty v-if="!planId" description="暂无可配置的计划" />
     <template v-else>
       <el-card shadow="never" class="section-card">
-        <template #header><span class="card-title">S 级任务与总负责人</span></template>
+        <template #header><span class="card-title">主要建设方向与总负责人</span></template>
         <el-table :data="directions" border>
-          <el-table-column prop="name" label="S 级任务" min-width="220" />
+          <el-table-column prop="name" label="主要建设方向" min-width="220" />
           <el-table-column prop="sort" label="排序" width="90" align="right">
             <template #default="{ row }">{{ row.sort ?? EMPTY_DISPLAY }}</template>
           </el-table-column>
           <el-table-column label="总负责人（LEADER）" min-width="160">
             <template #default="{ row }">{{ row.leader?.name ?? EMPTY_DISPLAY }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="150" fixed="right">
+          <el-table-column label="操作" width="120" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
               <el-button link type="danger" @click="remove(row)">删除</el-button>
             </template>
           </el-table-column>
-          <template #empty><el-empty :image-size="70" description="尚未配置 S 级任务" /></template>
+          <template #empty><el-empty :image-size="70" description="尚未配置 主要建设方向" /></template>
         </el-table>
       </el-card>
 
       <el-card shadow="never" class="section-card">
-        <template #header><span class="card-title">A 级指标的 S 归属</span></template>
+        <template #header><span class="card-title">指标的 S 归属</span></template>
         <el-alert
           v-if="assignmentReadonly"
           type="info"
           :closable="false"
-          title="指标体系已定稿或计划已归档，S 归属只读"
+          title="计划已归档，S 归属只读"
           class="assignment-alert"
         />
         <el-table :data="aRows" border>
           <el-table-column prop="code" label="A 编号" width="110" class-name="mono" />
-          <el-table-column prop="name" label="A 级指标" min-width="220" show-overflow-tooltip />
+          <el-table-column prop="name" label="指标" min-width="220" show-overflow-tooltip />
           <el-table-column label="当前归属" min-width="160">
             <template #default="{ row }">{{ directionName(row.directionId) }}</template>
           </el-table-column>
@@ -231,7 +236,7 @@ async function saveAssignment(row: Indicator): Promise<void> {
                 clearable
                 filterable
                 placeholder="不归属 S"
-                :disabled="assignmentReadonly"
+                :disabled="assignmentRowReadonly(row)"
                 style="width: 100%"
               >
                 <el-option v-for="item in directions" :key="item.id" :label="item.name" :value="item.id" />
@@ -243,7 +248,7 @@ async function saveAssignment(row: Indicator): Promise<void> {
               <el-button
                 link
                 type="primary"
-                :disabled="assignmentReadonly || !assignmentDirty(row)"
+                :disabled="assignmentRowReadonly(row) || !assignmentDirty(row)"
                 :loading="assignmentSavingId === row.id"
                 @click="saveAssignment(row)"
               >
@@ -251,12 +256,12 @@ async function saveAssignment(row: Indicator): Promise<void> {
               </el-button>
             </template>
           </el-table-column>
-          <template #empty><el-empty :image-size="70" description="该计划暂无 A 级指标" /></template>
+          <template #empty><el-empty :image-size="70" description="该计划暂无 指标" /></template>
         </el-table>
       </el-card>
     </template>
 
-    <el-dialog v-model="dialogVisible" :title="editing ? '编辑 S 级任务' : '新增 S 级任务'" width="480px">
+    <el-dialog v-model="dialogVisible" :title="editing ? '编辑 主要建设方向' : '新增 主要建设方向'" width="480px">
       <el-form label-width="110px">
         <el-form-item label="名称" required>
           <el-input v-model="form.name" maxlength="100" show-word-limit />
@@ -293,8 +298,36 @@ async function saveAssignment(row: Indicator): Promise<void> {
 <style scoped>
 .panel-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-3);
   margin-bottom: var(--space-4);
+}
+
+.panel-actions {
+  margin-bottom: var(--space-4);
+}
+
+@media (max-width: 768px) {
+  .panel-toolbar :deep(.el-button),
+  .panel-actions :deep(.el-button),
+  :deep(.el-table .el-button) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 600px) {
+  .panel-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .panel-toolbar :deep(.el-select),
+  .panel-toolbar :deep(.el-button) {
+    width: 100% !important;
+    margin-left: 0;
+  }
 }
 
 .section-card + .section-card {

@@ -1,5 +1,9 @@
-import type { StatCaliber } from '@/types/enums'
-import type { AllocationYearSummary } from '@/types/allocation'
+import type { StatCaliber, TaskStatus } from '@/types/enums'
+import type {
+  Allocation,
+  AllocationYearSummary,
+  SaveAllocationRequest,
+} from '@/types/allocation'
 
 /** 矩阵单元格编辑态：年 → 目标值 */
 export type MatrixTargets = Record<number, number | boolean | null>
@@ -10,7 +14,74 @@ export interface MatrixRow {
   unitName: string
   ownerId: string | null
   isHistorical: boolean
+  taskStatus: TaskStatus | null
   targets: MatrixTargets
+}
+
+/** 共享编辑器向页面 / 抽屉同步的只读状态快照。 */
+export interface AllocationEditorState {
+  indicatorId: string
+  rows: MatrixRow[]
+  dirty: boolean
+  balanced: boolean
+  version: number
+  serverBalanced: boolean | null
+  loading: boolean
+  saving: boolean
+  canDistribute: boolean
+  distributeBlockReasons: string[]
+  hasAnyTarget: boolean
+  missingOwners: MatrixRow[]
+  ineligibleTargetRows: MatrixRow[]
+  summary: AllocationYearSummary[]
+  allocatedFiveYear: number
+  fiveYearDiff: number | null
+  lastSavedAt: string | null
+}
+
+export function emptyMatrixTargets(years: number[]): MatrixTargets {
+  return Object.fromEntries(years.map((year) => [year, null]))
+}
+
+/** 服务端矩阵与本地编辑态之间只做这一份转换，供分解页和编辑抽屉共用。 */
+export function allocationToMatrixRows(
+  allocation: Allocation,
+  years: number[],
+  caliber: StatCaliber,
+): MatrixRow[] {
+  return (allocation.rows ?? []).map((row) => {
+    const targets = emptyMatrixTargets(years)
+    for (const year of years) {
+      const value = row.yearTargets?.find((item) => item.year === year)?.target
+      targets[year] = caliber === 'BOOLEAN'
+        ? (value === true || value === 1 ? true : null)
+        : (typeof value === 'number' ? value : null)
+    }
+    return {
+      unitId: row.unit.id,
+      unitCode: row.unit.code,
+      unitName: row.unit.name,
+      ownerId: row.owner?.id ?? null,
+      isHistorical: row.isHistorical,
+      taskStatus: row.taskStatus,
+      targets,
+    }
+  })
+}
+
+export function buildSaveAllocationRequest(
+  rows: MatrixRow[],
+  years: number[],
+  version: number,
+): SaveAllocationRequest {
+  return {
+    version,
+    rows: rows.map((row) => ({
+      unitId: row.unitId,
+      ownerId: row.ownerId,
+      yearTargets: years.map((year) => ({ year, target: row.targets[year] ?? null })),
+    })),
+  }
 }
 
 /** 新增分解与转移接收共用：仅启用且允许承接新 B 的单元合格 */
@@ -19,6 +90,12 @@ export function canAssignNewB(unit: {
   isBAssignable?: boolean | null
 }): boolean {
   return unit.isEnabled === true && unit.isBAssignable === true
+}
+
+/** 本地新增或待下发学院可编辑并进入本次下发；已生效及历史任务只读。 */
+export function isPendingAllocationRow(row: Pick<MatrixRow, 'isHistorical' | 'taskStatus'>): boolean {
+  return !row.isHistorical
+    && (row.taskStatus === null || row.taskStatus === 'PENDING_DISTRIBUTION')
 }
 
 /** 是否需要做「B 合计 = A+ 目标」求和校验（比率 / 是否型不校验，PRD 4.5） */
@@ -72,9 +149,9 @@ export function computeYearSummary(
   })
 }
 
-/** 是否全部年度平衡（非求和口径由调用方直接视为平衡） */
+/** 是否全部年度可下发：允许超额，合计低于指标目标才不平衡 */
 export function isSummaryBalanced(summary: AllocationYearSummary[]): boolean {
-  return summary.every((item) => item.diff === null || item.diff === 0)
+  return summary.every((item) => item.diff === null || item.diff >= 0)
 }
 
 /** 缺负责人的行（有目标但未指定学院负责人，下发时 50002） */

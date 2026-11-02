@@ -1,7 +1,6 @@
 package edu.fzrj.metrics.module.indicator.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import edu.fzrj.metrics.common.api.FieldError;
 import edu.fzrj.metrics.common.api.UserRef;
 import edu.fzrj.metrics.common.datascope.DataScopeService;
@@ -16,8 +15,8 @@ import edu.fzrj.metrics.module.indicator.mapper.DirectionMapper;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorYearTargetMapper;
 import edu.fzrj.metrics.module.indicator.service.support.IndicatorRules;
-import edu.fzrj.metrics.module.plan.dto.PlanDtos;
 import edu.fzrj.metrics.module.plan.entity.Plan;
+import edu.fzrj.metrics.module.plan.service.PlanReadScopeService;
 import edu.fzrj.metrics.module.plan.service.PlanService;
 import edu.fzrj.metrics.module.system.entity.OrgUnit;
 import edu.fzrj.metrics.module.system.entity.SysUser;
@@ -32,7 +31,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -44,7 +42,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * 指标体系 A / A+（API 约定 15.3）：树查询、新增、修改、删除、年度目标、定稿
+ * 指标体系 A / A+（API 约定 15.3）：树查询、新增、修改、删除、年度目标、下发前校验
  */
 @Service
 public class IndicatorService {
@@ -57,11 +55,12 @@ public class IndicatorService {
     private final PlanService planService;
     private final UserRefResolver userRefResolver;
     private final DataScopeService dataScopeService;
+    private final PlanReadScopeService planReadScopeService;
 
     public IndicatorService(IndicatorMapper indicatorMapper, IndicatorYearTargetMapper yearTargetMapper,
                             DirectionMapper directionMapper, OrgUnitMapper orgUnitMapper,
                             TaskMapper taskMapper, PlanService planService, UserRefResolver userRefResolver,
-                            DataScopeService dataScopeService) {
+                            DataScopeService dataScopeService, PlanReadScopeService planReadScopeService) {
         this.indicatorMapper = indicatorMapper;
         this.yearTargetMapper = yearTargetMapper;
         this.directionMapper = directionMapper;
@@ -70,27 +69,27 @@ public class IndicatorService {
         this.planService = planService;
         this.userRefResolver = userRefResolver;
         this.dataScopeService = dataScopeService;
+        this.planReadScopeService = planReadScopeService;
     }
 
     // ---------------- 查询 ----------------
 
-    /** 指标列表 / 树（按数据范围过滤：SCHOOL_OWNER 只看自己负责的；UNIT_OWNER 阶段 2 看不到） */
+    /** 指标列表 / 树：全校、本人负责指标与本单元任务取并集，并保留关联指标的父 A。 */
     public List<IndicatorDtos.TreeNode> tree(Long planId, String level, Long directionId,
                                              Long ownerId, String keyword, String view) {
-        planService.requirePlan(planId);
-        Long scopeOwner = scopeOwnerFilter();
-        if (scopeOwner != null && scopeOwner < 0) {
-            return List.of();
-        }
+        Plan plan = planService.requirePlan(planId);
+        planReadScopeService.requireVisible(plan);
+        List<Task> visibleTasks = planReadScopeService.visibleTasks(planId);
         List<Indicator> all = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
                 .eq(Indicator::getPlanId, planId)
                 .eq(Indicator::getDeleted, 0L)
                 .orderByAsc(Indicator::getSort).orderByAsc(Indicator::getCode));
         Map<Long, Long> effectiveOwners = effectiveOwners(all);
         Map<Long, Direction> directions = directionMap(all);
+        Set<Long> visibleIndicatorIds = planReadScopeService.visibleIndicatorIds(all, visibleTasks);
 
         List<Indicator> scoped = all.stream()
-                .filter(i -> scopeOwner == null || scopeOwner.equals(effectiveOwners.get(i.getId())))
+                .filter(i -> visibleIndicatorIds.contains(i.getId()))
                 .toList();
         List<Indicator> matched = scoped.stream()
                 .filter(i -> !StringUtils.hasText(level) || level.equals(i.getLevel()))
@@ -101,7 +100,7 @@ public class IndicatorService {
                 .toList();
 
         Map<Long, SysUser> users = userRefResolver.mapOf(effectiveOwners.values());
-        Map<Long, List<IndicatorDtos.YearTargetView>> targetViews = targetViewsOf(all);
+        Map<Long, List<IndicatorDtos.YearTargetView>> targetViews = targetViewsOf(scoped);
         boolean treeView = "tree".equalsIgnoreCase(view == null ? "" : view);
         if (!treeView) {
             return matched.stream()
@@ -158,9 +157,11 @@ public class IndicatorService {
         if (!StringUtils.hasText(request.getLevel())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "层级必填");
         }
+        if (IndicatorRules.LEVEL_A_PLUS.equals(request.getLevel())) {
+            throw new BizException(ErrorCode.LEVEL_INVALID, "新流程不再支持创建 A+，请直接在 A 下分配 B");
+        }
         Plan plan = planService.requirePlan(planId);
         planService.requireNotArchived(plan);
-        planService.requireNotFinalized(plan);
         validateEnums(request.getLevel(), request.getNature(), request.getMeasureType(),
                 request.getStatCaliber(), request.getTargetDirection(), request.getRollupMode());
 
@@ -176,10 +177,10 @@ public class IndicatorService {
         Set<String> existingCodes = existingCodes(planId);
         if (IndicatorRules.LEVEL_A.equals(request.getLevel())) {
             if (request.getParentId() != null) {
-                throw new BizException(ErrorCode.LEVEL_INVALID, "A 类指标不能设置上级");
+                throw new BizException(ErrorCode.LEVEL_INVALID, "指标不能设置上级");
             }
             if (request.getIsQuantifiable() == null) {
-                throw new BizException(ErrorCode.PARAM_INVALID, "A 类指标必须指定是否可量化");
+                throw new BizException(ErrorCode.PARAM_INVALID, "指标必须指定是否可量化");
             }
             indicator.setIsQuantifiable(request.getIsQuantifiable());
             if (request.getDirectionId() != null) {
@@ -209,6 +210,7 @@ public class IndicatorService {
             }
             IndicatorRules.requireAPlusAttachable(parent.getLevel(), parent.getIsQuantifiable());
             dataScopeService.canAccessIndicatorOwner(parent.getOwnerId());
+            requireSubtreeEditable(parent);
             indicator.setDirectionId(parent.getDirectionId());
             indicator.setParentId(parent.getId());
             indicator.setOwnerId(request.getOwnerId());
@@ -274,8 +276,8 @@ public class IndicatorService {
         Indicator indicator = requireIndicator(indicatorId);
         Plan plan = planService.requirePlan(indicator.getPlanId());
         planService.requireNotArchived(plan);
-        planService.requireNotFinalized(plan);
         dataScopeService.canAccessIndicatorOwner(effectiveOwnerOf(indicator));
+        requireSubtreeEditable(indicator);
         int version = patch.versionRequired();
         planService.requireVersion(indicator.getVersion(), version);
         boolean wasQuantifiable = IndicatorRules.isQuantifiable(indicator.getLevel(), indicator.getIsQuantifiable());
@@ -346,7 +348,7 @@ public class IndicatorService {
                 indicator.setRollupMode(rollup);
             }
         } else if (patch.has("isQuantifiable") || patch.has("rollupMode")) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "isQuantifiable 和 rollupMode 仅用于 A 类指标");
+            throw new BizException(ErrorCode.PARAM_INVALID, "isQuantifiable 和 rollupMode 仅用于 指标");
         }
 
         boolean quantifiable = IndicatorRules.isQuantifiable(indicator.getLevel(), indicator.getIsQuantifiable());
@@ -386,14 +388,11 @@ public class IndicatorService {
         requireAdmin();
         Indicator indicator = requireIndicator(indicatorId);
         if (!IndicatorRules.LEVEL_A.equals(indicator.getLevel()) || indicator.getParentId() != null) {
-            throw new BizException(ErrorCode.LEVEL_INVALID, "只能配置 A 类指标的 S 归属");
+            throw new BizException(ErrorCode.LEVEL_INVALID, "只能配置 指标的 S 归属");
         }
         Plan plan = planService.requirePlan(indicator.getPlanId());
         planService.requireNotArchived(plan);
-        planService.requireNotFinalized(plan);
-        if (!"DRAFT".equals(indicator.getStatus())) {
-            throw new BizException(ErrorCode.INDICATOR_FINALIZED, "只能修改草稿 A 的 S 归属");
-        }
+        requireSubtreeEditable(indicator);
         planService.requireVersion(indicator.getVersion(), request.getVersion());
         if (request.getDirectionId() != null) {
             requireDirectionInPlan(request.getDirectionId(), indicator.getPlanId());
@@ -428,8 +427,7 @@ public class IndicatorService {
         Plan plan = planService.requirePlan(indicator.getPlanId());
         planService.requireNotArchived(plan);
         dataScopeService.canAccessIndicatorOwner(effectiveOwnerOf(indicator));
-        // 阶段 2 判据：定稿（plan.finalizedAt 非空）即锁定；已下发（DISTRIBUTED）同样禁删
-        if (plan.getFinalizedAt() != null || !"DRAFT".equals(indicator.getStatus())) {
+        if (hasDistributedScope(indicator)) {
             throw new BizException(ErrorCode.INDICATOR_DISTRIBUTED);
         }
         Long children = indicatorMapper.selectCount(new LambdaQueryWrapper<Indicator>()
@@ -452,8 +450,8 @@ public class IndicatorService {
         Indicator indicator = requireIndicator(indicatorId);
         Plan plan = planService.requirePlan(indicator.getPlanId());
         planService.requireNotArchived(plan);
-        planService.requireNotFinalized(plan);
         dataScopeService.canAccessIndicatorOwner(effectiveOwnerOf(indicator));
+        requireSubtreeEditable(indicator);
         planService.requireVersion(indicator.getVersion(), request.getVersion());
         IndicatorRules.requireYearTargetsAllowed(indicator.getLevel(), indicator.getIsQuantifiable());
 
@@ -479,7 +477,7 @@ public class IndicatorService {
         return toDetail(requireIndicator(indicatorId));
     }
 
-    /** 校验并规范化年度目标（创建 / PUT / 定稿共用） */
+    /** 校验并规范化年度目标（创建 / PUT 共用） */
     public Map<Integer, BigDecimal> validateYearTargets(Plan plan, String statCaliber, BigDecimal totalTarget,
                                                         BigDecimal baselineValue,
                                                         List<IndicatorDtos.YearTargetItem> items) {
@@ -509,21 +507,12 @@ public class IndicatorService {
         return targets;
     }
 
-    // ---------------- 定稿 ----------------
+    // ---------------- 下发前校验 ----------------
 
-    @Transactional
-    public PlanDtos.Detail finalizePlan(Long planId, Integer version) {
-        Plan plan = planService.requirePlan(planId);
-        planService.requireNotArchived(plan);
-        planService.requireVersion(plan.getVersion(), version);
-        if (plan.getFinalizedAt() != null) {
-            throw new BizException(ErrorCode.PLAN_STATUS_INVALID, "指标体系已定稿");
-        }
-        List<Indicator> all = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
-                .eq(Indicator::getPlanId, planId)
-                .eq(Indicator::getDeleted, 0L));
+    /** 下发前复核完整性与守恒规则，不修改计划或指标状态。 */
+    public void validateForDistribution(Plan plan, List<Indicator> all) {
         if (all.isEmpty()) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "指标体系为空，不能定稿");
+            throw new BizException(ErrorCode.PARAM_INVALID, "指标体系为空，不能下发");
         }
         Map<Long, Long> effectiveOwners = effectiveOwners(all);
         Map<Long, Map<Integer, BigDecimal>> targetsByIndicator = loadTargets(
@@ -580,7 +569,7 @@ public class IndicatorService {
             }
         }
         if (!errors.isEmpty()) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "指标体系不完整，不能定稿", errors);
+            throw new BizException(ErrorCode.PARAM_INVALID, "指标体系不完整，不能下发", errors);
         }
         if (!sumErrors.isEmpty()) {
             throw new BizException(ErrorCode.YEAR_TARGETS_SUM_INVALID,
@@ -594,6 +583,9 @@ public class IndicatorService {
             List<BigDecimal> childrenTotals = all.stream()
                     .filter(i -> a.getId().equals(i.getParentId()))
                     .map(Indicator::getTotalTarget).toList();
+            if (childrenTotals.isEmpty()) {
+                continue;
+            }
             try {
                 IndicatorRules.requireAutoSumConservation(a.getStatCaliber(), a.getRollupMode(),
                         a.getTotalTarget(), childrenTotals);
@@ -605,22 +597,6 @@ public class IndicatorService {
             throw new BizException(ErrorCode.A_PLUS_SUM_INVALID,
                     ErrorCode.A_PLUS_SUM_INVALID.getMessage(), conservationErrors);
         }
-
-        Long userId = SecurityUtils.getUserId();
-        LocalDateTime now = LocalDateTime.now();
-        plan.setFinalizedAt(now);
-        plan.setFinalizedBy(userId);
-        plan.setUpdatedBy(userId);
-        if (planService.updatePlan(plan)) {
-            throw new BizException(ErrorCode.VERSION_CONFLICT, "数据已被他人修改，请刷新后重试");
-        }
-        indicatorMapper.update(null, new LambdaUpdateWrapper<Indicator>()
-                .eq(Indicator::getPlanId, planId)
-                .eq(Indicator::getStatus, "DRAFT")
-                .eq(Indicator::getDeleted, 0L)
-                .set(Indicator::getStatus, "FINALIZED")
-                .set(Indicator::getUpdatedBy, userId));
-        return planService.detail(planId);
     }
 
     // ---------------- 公共工具（供导入复用） ----------------
@@ -633,6 +609,39 @@ public class IndicatorService {
             throw new BizException(ErrorCode.NOT_FOUND, "指标不存在");
         }
         return indicator;
+    }
+
+    public boolean hasLegacyAPlus(Indicator indicator) {
+        Long count = indicatorMapper.selectCount(new LambdaQueryWrapper<Indicator>()
+                .eq(Indicator::getParentId, indicator.getId())
+                .eq(Indicator::getLevel, IndicatorRules.LEVEL_A_PLUS)
+                .eq(Indicator::getDeleted, 0L));
+        return count != null && count > 0;
+    }
+
+    /** 自身、下属 A+ 或关联 B 已下发后，整棵指标子树进入生效保护。 */
+    public boolean hasDistributedScope(Indicator indicator) {
+        if ("DISTRIBUTED".equals(indicator.getStatus())) {
+            return true;
+        }
+        Long distributedChildren = indicatorMapper.selectCount(new LambdaQueryWrapper<Indicator>()
+                .eq(Indicator::getParentId, indicator.getId())
+                .eq(Indicator::getStatus, "DISTRIBUTED")
+                .eq(Indicator::getDeleted, 0L));
+        if (distributedChildren != null && distributedChildren > 0) {
+            return true;
+        }
+        Long effectiveTasks = taskMapper.selectCount(taskRelationQuery(indicator)
+                .and(query -> query.isNotNull(Task::getDistributedAt)
+                        .or().ne(Task::getStatus, "PENDING_DISTRIBUTION")
+                        .or().eq(Task::getIsHistorical, true)));
+        return effectiveTasks != null && effectiveTasks > 0;
+    }
+
+    public void requireSubtreeEditable(Indicator indicator) {
+        if (hasDistributedScope(indicator)) {
+            throw new BizException(ErrorCode.TASK_DISTRIBUTED, "指标或下属任务已下发，修改目标需要发起目标调整");
+        }
     }
 
     public Set<String> existingCodes(Long planId) {
@@ -745,18 +754,6 @@ public class IndicatorService {
 
     // ---------------- 内部 ----------------
 
-    /** 数据范围过滤：全校 → null；SCHOOL_OWNER → 本人 id；仅 UNIT_OWNER → -1（阶段 2 不可见） */
-    private Long scopeOwnerFilter() {
-        LoginUser user = SecurityUtils.getLoginUser();
-        if (dataScopeService.isAllData(user)) {
-            return null;
-        }
-        if (dataScopeService.isOwnerScope(user)) {
-            return user.getUserId();
-        }
-        return -1L;
-    }
-
     private Map<Long, Long> effectiveOwners(List<Indicator> all) {
         Map<Long, Indicator> byId = all.stream().collect(Collectors.toMap(Indicator::getId, Function.identity()));
         Map<Long, Long> result = new java.util.HashMap<>();
@@ -847,7 +844,7 @@ public class IndicatorService {
 
     private Direction requireDirectionInPlan(Long directionId, Long planId) {
         if (directionId == null) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "A 类指标必须指定主要建设方向");
+            throw new BizException(ErrorCode.PARAM_INVALID, "指标必须指定主要建设方向");
         }
         Direction direction = directionMapper.selectOne(new LambdaQueryWrapper<Direction>()
                 .eq(Direction::getId, directionId)

@@ -40,16 +40,19 @@ public class DirectionService {
     private final UserRoleMapper userRoleMapper;
     private final UserRefResolver userRefResolver;
     private final PlanService planService;
+    private final IndicatorService indicatorService;
 
     public DirectionService(DirectionMapper directionMapper, IndicatorMapper indicatorMapper,
                             MajorGroupMapper majorGroupMapper, UserRoleMapper userRoleMapper,
-                            UserRefResolver userRefResolver, PlanService planService) {
+                            UserRefResolver userRefResolver, PlanService planService,
+                            IndicatorService indicatorService) {
         this.directionMapper = directionMapper;
         this.indicatorMapper = indicatorMapper;
         this.majorGroupMapper = majorGroupMapper;
         this.userRoleMapper = userRoleMapper;
         this.userRefResolver = userRefResolver;
         this.planService = planService;
+        this.indicatorService = indicatorService;
     }
 
     public List<DirectionDtos.Item> list(Long planId) {
@@ -75,7 +78,6 @@ public class DirectionService {
     public DirectionDtos.Item create(Long planId, DirectionDtos.CreateRequest request) {
         Plan plan = planService.requirePlan(planId);
         planService.requireNotArchived(plan);
-        planService.requireNotFinalized(plan);
         Direction direction = new Direction();
         direction.setPlanId(planId);
         applySubject(direction, request.getSubjectType(), request.getMajorGroupId());
@@ -97,7 +99,12 @@ public class DirectionService {
         boolean structureTouched = patch.has("subjectType") || patch.has("name")
                 || patch.has("sort") || patch.has("majorGroupId");
         if (structureTouched) {
-            planService.requireNotFinalized(plan);
+            List<Indicator> related = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
+                    .eq(Indicator::getDirectionId, directionId)
+                    .eq(Indicator::getDeleted, 0L));
+            if (related.stream().anyMatch(indicatorService::hasDistributedScope)) {
+                throw new BizException(ErrorCode.TASK_DISTRIBUTED, "该 S 级任务下存在已下发指标，不能修改结构");
+            }
         }
         int version = patch.versionRequired();
         planService.requireVersion(direction.getVersion(), version);
@@ -138,7 +145,6 @@ public class DirectionService {
         Direction direction = requireDirection(directionId);
         Plan plan = planService.requirePlan(direction.getPlanId());
         planService.requireNotArchived(plan);
-        planService.requireNotFinalized(plan);
         Long count = indicatorMapper.selectCount(new LambdaQueryWrapper<Indicator>()
                 .eq(Indicator::getDirectionId, directionId)
                 .eq(Indicator::getDeleted, 0L));

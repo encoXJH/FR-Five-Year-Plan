@@ -7,7 +7,6 @@ import edu.fzrj.metrics.common.util.PatchHelper;
 import edu.fzrj.metrics.module.indicator.dto.IndicatorDtos;
 import edu.fzrj.metrics.module.indicator.service.DecompositionService;
 import edu.fzrj.metrics.module.indicator.service.IndicatorService;
-import edu.fzrj.metrics.module.plan.dto.PlanDtos;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -67,7 +66,7 @@ public class IndicatorController {
 
     @Operation(summary = "一页式新建 A+ 并保存 B 分解草稿",
             description = "权限：indicator:edit + allocation:edit；同一事务创建 A+（含年度目标）并整体保存 B 草稿；"
-                    + "不定稿、不下发、不通知；必须带 Idempotency-Key")
+                    + "不下发、不通知；必须带 Idempotency-Key")
     @PostMapping("/api/v1/plans/{planId}/indicators/{parentId}/decomposition")
     @PreAuthorize("hasAuthority('indicator:edit') and hasAuthority('allocation:edit')")
     @Idempotent
@@ -84,7 +83,7 @@ public class IndicatorController {
         return indicatorService.detail(indicatorId);
     }
 
-    @Operation(summary = "修改指标（带 version，冲突 10005；定稿后 40005）", description = "权限：indicator:edit")
+    @Operation(summary = "修改未下发指标（带 version，冲突 10005；已下发 50003）", description = "权限：indicator:edit")
     @PatchMapping("/api/v1/indicators/{indicatorId}")
     @PreAuthorize("hasAuthority('indicator:edit')")
     @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId")
@@ -92,8 +91,8 @@ public class IndicatorController {
         return indicatorService.patch(indicatorId, new PatchHelper(body));
     }
 
-    @Operation(summary = "配置或清除草稿 A 的 S 归属（同步下属 A+）",
-            description = "仅 ADMIN；带 version（冲突 10005）；定稿后不可修改")
+    @Operation(summary = "配置或清除未下发 A 的 S 归属（同步下属 A+）",
+            description = "仅 ADMIN；带 version（冲突 10005）；自身或下属已下发后不可修改")
     @PutMapping("/api/v1/indicators/{indicatorId}/direction")
     @PreAuthorize("hasAuthority('system:manage')")
     @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId")
@@ -102,7 +101,7 @@ public class IndicatorController {
         return indicatorService.assignDirection(indicatorId, request);
     }
 
-    @Operation(summary = "删除指标（定稿或已下发后 40004；有 A+ 子级 40008）", description = "权限：indicator:edit")
+    @Operation(summary = "删除未下发指标（已下发后 40004；有 A+ 子级 40008）", description = "权限：indicator:edit")
     @DeleteMapping("/api/v1/indicators/{indicatorId}")
     @PreAuthorize("hasAuthority('indicator:edit')")
     @AuditLog(action = "DELETE", resourceType = "indicator", resourceId = "#indicatorId")
@@ -110,8 +109,8 @@ public class IndicatorController {
         indicatorService.delete(indicatorId);
     }
 
-    @Operation(summary = "设置五年总量和年度目标（INCREMENT 校验 Σ年=总量 40002；比率类不求和；BOOLEAN 完成年唯一）",
-            description = "权限：indicator:edit；定稿后修改返回 40005")
+    @Operation(summary = "设置未下发指标的五年总量和年度目标（INCREMENT 校验 Σ年=总量 40002；比率类不求和；BOOLEAN 完成年唯一）",
+            description = "权限：indicator:edit；自身或下属已下发后须发起目标调整")
     @PutMapping("/api/v1/indicators/{indicatorId}/year-targets")
     @PreAuthorize("hasAuthority('indicator:edit')")
     @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId")
@@ -133,14 +132,4 @@ public class IndicatorController {
         return manualValueService.recognize(indicatorId, year, request);
     }
 
-    @Operation(summary = "指标体系定稿（校验 ΣA+=ΣA 40003、负责人、年度目标完整；通过后锁定）",
-            description = "权限：plan:manage；需带 version；必须带 Idempotency-Key")
-    @PostMapping("/api/v1/plans/{planId}/indicators/finalize")
-    @PreAuthorize("hasAuthority('plan:manage')")
-    @edu.fzrj.metrics.common.idempotent.Idempotent
-    @AuditLog(action = "FINALIZE", resourceType = "plan", resourceId = "#planId")
-    public PlanDtos.Detail finalizePlan(@PathVariable Long planId,
-                                        @Valid @RequestBody IndicatorDtos.FinalizeRequest request) {
-        return indicatorService.finalizePlan(planId, request.getVersion());
-    }
 }

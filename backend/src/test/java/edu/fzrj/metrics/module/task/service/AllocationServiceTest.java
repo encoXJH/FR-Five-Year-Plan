@@ -22,6 +22,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -39,7 +40,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -195,6 +198,179 @@ class AllocationServiceTest {
         verifyNoTaskWrites();
     }
 
+    @Test
+    void 纯A保存直承B时编号和三级归属均指向A() {
+        usePureA();
+        when(indicatorService.requireIndicator(INDICATOR_ID)).thenReturn(indicator);
+        when(planService.requirePlan(PLAN_ID)).thenReturn(plan);
+        when(taskMapper.selectList(any())).thenReturn(List.of());
+        when(taskYearMapper.selectList(any())).thenReturn(List.of());
+        when(orgUnitAdminService.requireBAssignable(UNIT_ID)).thenReturn(unit);
+        SysUser owner = new SysUser();
+        owner.setId(OWNER_ID);
+        when(userRefResolver.mapOf(any())).thenReturn(Map.of(OWNER_ID, owner));
+        doAnswer(invocation -> {
+            Task task = invocation.getArgument(0);
+            task.setId(100L);
+            return 1;
+        }).when(taskMapper).insert(any(Task.class));
+        when(indicatorService.updateIndicator(indicator)).thenReturn(1);
+        when(indicatorService.loadTargets(anyList())).thenReturn(Map.of(INDICATOR_ID,
+                Map.of(2026, new BigDecimal("10"), 2027, new BigDecimal("20"))));
+
+        allocationService.putAllocation(INDICATOR_ID, request(List.of(row(OWNER_ID, "10", "20"))));
+
+        ArgumentCaptor<Task> taskCaptor = ArgumentCaptor.forClass(Task.class);
+        verify(taskMapper).insert(taskCaptor.capture());
+        Task created = taskCaptor.getValue();
+        assertEquals("A01-C01", created.getCode());
+        assertEquals(INDICATOR_ID, created.getIndicatorId());
+        assertEquals(INDICATOR_ID, created.getTopIndicatorId());
+        ArgumentCaptor<TaskYear> yearCaptor = ArgumentCaptor.forClass(TaskYear.class);
+        verify(taskYearMapper, times(2)).insert(yearCaptor.capture());
+        assertTrue(yearCaptor.getAllValues().stream()
+                .allMatch(year -> INDICATOR_ID.equals(year.getIndicatorId())));
+    }
+
+    @Test
+    void legacyA的GET聚合同一A下直承与A加历史B() {
+        usePureA();
+        Task direct = new Task();
+        direct.setId(101L);
+        direct.setIndicatorId(INDICATOR_ID);
+        direct.setTopIndicatorId(INDICATOR_ID);
+        direct.setUnitId(UNIT_ID);
+        direct.setCode("A01-C01");
+        Task legacy = new Task();
+        legacy.setId(102L);
+        legacy.setIndicatorId(99L);
+        legacy.setTopIndicatorId(INDICATOR_ID);
+        legacy.setUnitId(UNIT_ID);
+        legacy.setCode("A01-1-C01");
+        TaskYear directYear = taskYear(1001L, 2026, "3");
+        directYear.setTaskId(101L);
+        TaskYear legacyYear = taskYear(1002L, 2026, "5");
+        legacyYear.setTaskId(102L);
+        when(indicatorService.requireIndicator(INDICATOR_ID)).thenReturn(indicator);
+        when(planService.requirePlan(PLAN_ID)).thenReturn(plan);
+        when(taskMapper.selectList(any())).thenReturn(List.of(direct, legacy));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(directYear, legacyYear));
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit));
+        when(indicatorService.loadTargets(anyList())).thenReturn(Map.of(INDICATOR_ID,
+                Map.of(2026, new BigDecimal("8"), 2027, BigDecimal.ZERO)));
+
+        TaskDtos.AllocationView view = allocationService.getAllocation(INDICATOR_ID);
+
+        assertEquals(2, view.rows().size());
+        assertEquals(0, new BigDecimal("8").compareTo(view.summary().get(0).allocatedTarget()));
+    }
+
+    @Test
+    void 含legacyA加的A禁止保存直承B并返回40006() {
+        usePureA();
+        when(indicatorService.requireIndicator(INDICATOR_ID)).thenReturn(indicator);
+        when(indicatorService.hasLegacyAPlus(indicator)).thenReturn(true);
+
+        BizException error = assertThrows(BizException.class,
+                () -> allocationService.putAllocation(INDICATOR_ID, request(List.of())));
+
+        assertEquals(40006, error.getErrorCode().getCode());
+        verifyNoTaskWrites();
+    }
+
+    @Test
+    void 已下发指标可保留旧学院并追加新学院() {
+        usePureA();
+        indicator.setStatus("DISTRIBUTED");
+        historicalTask.setIsHistorical(false);
+        historicalTask.setStatus("DISTRIBUTED");
+        OrgUnit newUnit = new OrgUnit();
+        newUnit.setId(42L);
+        newUnit.setCode("C02");
+        newUnit.setName("数字金融产业学院");
+        Task newTask = new Task();
+        newTask.setId(32L);
+        newTask.setIndicatorId(INDICATOR_ID);
+        newTask.setUnitId(42L);
+        newTask.setOwnerId(52L);
+        newTask.setStatus("PENDING_DISTRIBUTION");
+        newTask.setIsHistorical(false);
+        when(indicatorService.requireIndicator(INDICATOR_ID)).thenReturn(indicator);
+        when(planService.requirePlan(PLAN_ID)).thenReturn(plan);
+        when(taskMapper.selectList(any())).thenReturn(List.of(historicalTask), List.of(historicalTask, newTask));
+        when(orgUnitAdminService.requireUnit(UNIT_ID)).thenReturn(unit);
+        when(orgUnitAdminService.requireBAssignable(42L)).thenReturn(newUnit);
+        when(taskYearMapper.selectList(any())).thenReturn(historicalYears, List.of(), List.of());
+        when(userRefResolver.mapOf(any())).thenReturn(Map.of(OWNER_ID, new SysUser(), 52L, new SysUser()));
+        doAnswer(invocation -> {
+            invocation.getArgument(0, Task.class).setId(32L);
+            return 1;
+        }).when(taskMapper).insert(any(Task.class));
+        when(indicatorService.updateIndicator(indicator)).thenReturn(1);
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit, newUnit));
+        when(indicatorService.loadTargets(anyList())).thenReturn(Map.of(INDICATOR_ID,
+                Map.of(2026, new BigDecimal("15"), 2027, new BigDecimal("25"))));
+
+        allocationService.putAllocation(INDICATOR_ID, request(List.of(
+                row(OWNER_ID, "10", "20"), rowForUnit(42L, 52L, "5", "5"))));
+
+        ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
+        verify(taskMapper).insert(captor.capture());
+        assertEquals(42L, captor.getValue().getUnitId());
+        assertEquals("PENDING_DISTRIBUTION", captor.getValue().getStatus());
+        verify(taskMapper, never()).updateById(historicalTask);
+    }
+
+    @Test
+    void 已生效任务修改目标或负责人返回50003() {
+        usePureA();
+        indicator.setStatus("DISTRIBUTED");
+        historicalTask.setIsHistorical(false);
+        historicalTask.setStatus("IN_PROGRESS");
+        when(indicatorService.requireIndicator(INDICATOR_ID)).thenReturn(indicator);
+        when(planService.requirePlan(PLAN_ID)).thenReturn(plan);
+        when(taskMapper.selectList(any())).thenReturn(List.of(historicalTask));
+        when(orgUnitAdminService.requireUnit(UNIT_ID)).thenReturn(unit);
+        when(taskYearMapper.selectList(any())).thenReturn(historicalYears);
+        when(userRefResolver.mapOf(any())).thenReturn(Map.of(OWNER_ID, new SysUser(), 52L, new SysUser()));
+
+        BizException targetError = assertThrows(BizException.class,
+                () -> allocationService.putAllocation(INDICATOR_ID,
+                        request(List.of(row(OWNER_ID, "11", "20")))));
+        BizException ownerError = assertThrows(BizException.class,
+                () -> allocationService.putAllocation(INDICATOR_ID,
+                        request(List.of(row(52L, "10", "20")))));
+
+        assertEquals(50003, targetError.getErrorCode().getCode());
+        assertEquals(50003, ownerError.getErrorCode().getCode());
+        verifyNoTaskWrites();
+    }
+
+    @Test
+    void 已生效任务不能移出矩阵() {
+        usePureA();
+        indicator.setStatus("DISTRIBUTED");
+        historicalTask.setIsHistorical(false);
+        historicalTask.setStatus("DISTRIBUTED");
+        when(indicatorService.requireIndicator(INDICATOR_ID)).thenReturn(indicator);
+        when(planService.requirePlan(PLAN_ID)).thenReturn(plan);
+        when(taskMapper.selectList(any())).thenReturn(List.of(historicalTask));
+
+        BizException error = assertThrows(BizException.class,
+                () -> allocationService.putAllocation(INDICATOR_ID, request(List.of())));
+
+        assertEquals(50003, error.getErrorCode().getCode());
+        verifyNoTaskWrites();
+    }
+
+    private void usePureA() {
+        indicator.setParentId(null);
+        indicator.setLevel("A");
+        indicator.setCode("A01");
+        indicator.setIsQuantifiable(true);
+        indicator.setStatus("DRAFT");
+    }
+
     private void stubExistingAllocation() {
         when(indicatorService.requireIndicator(INDICATOR_ID)).thenReturn(indicator);
         when(planService.requirePlan(PLAN_ID)).thenReturn(plan);
@@ -224,6 +400,12 @@ class AllocationServiceTest {
         row.setYearTargets(List.of(
                 yearTarget(2026, firstTarget),
                 yearTarget(2027, secondTarget)));
+        return row;
+    }
+
+    private TaskDtos.AllocationRow rowForUnit(Long unitId, Long ownerId, String firstTarget, String secondTarget) {
+        TaskDtos.AllocationRow row = row(ownerId, firstTarget, secondTarget);
+        row.setUnitId(unitId);
         return row;
     }
 

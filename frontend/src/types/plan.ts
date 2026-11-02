@@ -131,7 +131,7 @@ export interface UpdateTemplateRequest {
   version: number
 }
 
-/** S 级任务，仅在 ADMIN 系统管理中展示 */
+/** 主要建设方向，仅在 ADMIN 系统管理中展示 */
 export interface Direction {
   id: string
   planId: string

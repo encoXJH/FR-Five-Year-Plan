@@ -68,7 +68,7 @@ export interface IndicatorStat {
   cumulativeRate: number | null
 }
 
-/** GET /plans/{planId}/stats/tree?year= 下钻树节点（A → A+ → B） */
+/** GET /plans/{planId}/stats/tree?year= 下钻树节点（现行 A → B，A_PLUS 仅历史兼容） */
 export interface StatsTreeNode {
   id: string
   code: string
@@ -100,6 +100,9 @@ export interface TrendYearItem {
   target: number | boolean | null
   actualValue: number | null
   actualTotal: number | null
+  /** RATIO 原始值；接口未返回时保持空值，不在前端推算 */
+  actualNumerator?: number | null
+  actualDenominator?: number | null
   completionRate: number | null
   achieveStatus: AchieveStatus | null
 }

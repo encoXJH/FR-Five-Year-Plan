@@ -212,4 +212,16 @@ onMounted(load)
   gap: var(--space-3);
   margin-top: var(--space-3);
 }
+
+@media (max-width: 768px) {
+  .desc :deep(.el-button),
+  .sync-actions :deep(.el-button) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .sync-actions {
+    flex-wrap: wrap;
+  }
+}
 </style>

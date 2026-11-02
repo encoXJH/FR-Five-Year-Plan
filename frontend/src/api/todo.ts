@@ -3,9 +3,14 @@ import type { PageResult } from '@/types/api'
 import type { NotificationItem } from '@/types/notification'
 import type { TodosResult } from '@/types/todo'
 
-/** GET /todos（API 15.9，已登录） */
-export function getTodos(): Promise<TodosResult> {
-  return http.get('/todos')
+export type TodoQuery = {
+  planId?: string
+  year?: number
+}
+
+/** GET /todos（API 15.9，已登录；不传过滤条件时返回全部待办） */
+export function getTodos(query: TodoQuery = {}): Promise<TodosResult> {
+  return http.get('/todos', query)
 }
 
 export type NotificationQuery = {

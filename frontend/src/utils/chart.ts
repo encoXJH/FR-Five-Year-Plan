@@ -94,8 +94,8 @@ export function useEChart(theme?: string) {
     chart.value = null
   })
 
-  function setOption(option: EChartsOption): void {
-    ensureChart()?.setOption(option)
+  function setOption(option: EChartsOption, notMerge = false): void {
+    ensureChart()?.setOption(option, { notMerge })
   }
 
   return { container, chart, setOption }

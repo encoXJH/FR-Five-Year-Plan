@@ -122,8 +122,11 @@ class TaskServiceTest {
         when(taskMapper.selectPage(any(), any())).thenReturn(taskPage);
 
         TaskYear firstYear = taskYear(11L, 1L);
+        TaskYear firstNextYear = taskYear(13L, 1L);
+        firstNextYear.setYear(2027);
+        firstNextYear.setTarget(BigDecimal.valueOf(2));
         TaskYear secondYear = taskYear(12L, 2L);
-        when(taskYearMapper.selectList(any())).thenReturn(List.of(firstYear, secondYear));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(firstNextYear, firstYear, secondYear));
 
         Indicator indicator = new Indicator();
         indicator.setId(100L);
@@ -148,6 +151,9 @@ class TaskServiceTest {
         assertEquals(2, result.getItems().size());
         assertEquals("2026-12-31", result.getItems().get(0).deadline());
         assertEquals("2026-12-31", result.getItems().get(1).deadline());
+        assertEquals(List.of(2026, 2027), result.getItems().get(0).yearTargets().stream()
+                .map(TaskDtos.YearTargetView::year).toList());
+        assertEquals(BigDecimal.valueOf(2), result.getItems().get(0).yearTargets().get(1).target());
         verify(settingService, times(1)).getValue("plan.fillDeadline", "12-31");
     }
 

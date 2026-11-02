@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import BackButton from '@/components/BackButton.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import {
   copyTemplate,
@@ -12,7 +13,7 @@ import {
 } from '@/api/template'
 import { listPlans, savePlanAsTemplate } from '@/api/plan'
 import { formatDateTime } from '@/utils/format'
-import type { PlanCard, PlanTemplate, PlanTemplateDetail, TemplateStructureNode } from '@/types/plan'
+import type { PlanCard, PlanTemplate, PlanTemplateDetail } from '@/types/plan'
 
 const loading = ref(false)
 const templates = ref<PlanTemplate[]>([])
@@ -47,10 +48,7 @@ function resetFilters(): void {
 }
 
 function structureSummary(row: PlanTemplate): string {
-  const parts: string[] = []
-  if (row.indicatorCountA !== null) parts.push(`A ${row.indicatorCountA}`)
-  if (row.indicatorCountAPlus !== null) parts.push(`A+ ${row.indicatorCountAPlus}`)
-  return parts.length > 0 ? parts.join(' · ') : '—'
+  return row.indicatorCountA === null ? '—' : `A ${row.indicatorCountA}`
 }
 
 // ---------- 结构查看 ----------
@@ -58,7 +56,11 @@ const structureVisible = ref(false)
 const structureLoading = ref(false)
 const currentTemplate = ref<PlanTemplateDetail | null>(null)
 
-const templateIndicators = computed(() => currentTemplate.value?.content?.indicators ?? [])
+const templateIndicators = computed(() =>
+  (currentTemplate.value?.content?.indicators ?? [])
+    .filter((node) => node.nodeType === 'A')
+    .map((node) => ({ ...node, children: [] })),
+)
 const structureJson = computed(() =>
   currentTemplate.value?.content ? JSON.stringify(currentTemplate.value.content, null, 2) : '',
 )
@@ -72,12 +74,6 @@ async function openStructure(row: PlanTemplate): Promise<void> {
   } finally {
     structureLoading.value = false
   }
-}
-
-function nodeIconType(node: TemplateStructureNode): string {
-  if (node.nodeType === 'A') return 'A'
-  if (node.nodeType === 'A_PLUS') return 'A+'
-  return node.nodeType
 }
 
 // ---------- 重命名 ----------
@@ -195,11 +191,14 @@ onMounted(loadTemplates)
 </script>
 
 <template>
+  <BackButton />
   <div class="page-header">
     <div>
       <h1 class="page-title">模板管理</h1>
       <p class="page-subtitle">维护计划模板，用于快速新建计划</p>
     </div>
+  </div>
+  <div class="app-action-row">
     <el-button type="primary" @click="openSaveAs">从计划另存为模板</el-button>
   </div>
 
@@ -244,18 +243,21 @@ onMounted(loadTemplates)
       <el-table-column label="更新时间" width="150">
         <template #default="{ row }">{{ formatDateTime(row.updatedAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right" align="center">
+      <el-table-column label="操作" width="180" fixed="right" align="center">
         <template #default="{ row }">
           <el-button link type="primary" @click="openStructure(row)">查看结构</el-button>
           <el-button link type="primary" @click="openRename(row)">编辑</el-button>
-          <el-button link type="primary" @click="handleCopy(row)">复制</el-button>
-          <el-button
-            link
-            :type="row.isEnabled ? 'danger' : 'success'"
-            @click="handleToggle(row)"
-          >
-            {{ row.isEnabled ? '停用' : '启用' }}
-          </el-button>
+          <el-dropdown trigger="click" class="more-dropdown">
+            <el-button link type="primary">更多</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item @click="handleCopy(row)">复制</el-dropdown-item>
+                <el-dropdown-item @click="handleToggle(row)">
+                  {{ row.isEnabled ? '停用' : '启用' }}
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </template>
       </el-table-column>
       <template #empty>
@@ -282,7 +284,7 @@ onMounted(loadTemplates)
         >
           <template #default="{ data }">
             <span class="tree-node">
-              <el-tag size="small" effect="plain" round>{{ nodeIconType(data) }}</el-tag>
+              <el-tag size="small" effect="plain" round>A</el-tag>
               <span>{{ data.code ? `${data.code} ` : '' }}{{ data.name }}</span>
               <span v-if="data.statCaliber" class="node-extra">
                 {{ data.statCaliber }}<template v-if="data.unit"> · {{ data.unit }}</template>
@@ -353,9 +355,22 @@ onMounted(loadTemplates)
   color: var(--el-text-color-secondary);
 }
 
+.more-dropdown {
+  margin-left: 12px;
+}
+
 .filter-card {
   margin-bottom: var(--space-4);
   border-radius: var(--radius-card);
+}
+
+@media (max-width: 768px) {
+  .app-action-row :deep(.el-button),
+  .filter-card :deep(.el-button),
+  :deep(.el-table .el-button) {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 .structure-meta {

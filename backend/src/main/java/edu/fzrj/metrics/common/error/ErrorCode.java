@@ -47,8 +47,8 @@ public enum ErrorCode {
     HAS_CHILDREN(40008, 409, "存在下级数据，不能删除"),
 
     // 5xxxx 分解下发
-    ALLOCATION_SUM_INVALID(50001, 422, "B 分解合计与 A+ 目标不一致"),
-    TASK_OWNER_MISSING(50002, 422, "B 任务没有指定学院项目负责人"),
+    ALLOCATION_SUM_INVALID(50001, 422, "学院分解合计低于指标目标"),
+    TASK_OWNER_MISSING(50002, 422, "学院任务没有指定学院项目负责人"),
     TASK_DISTRIBUTED(50003, 409, "任务已下发"),
     YEAR_NOT_ACTIVATED(50004, 409, "该年度尚未激活，不能填报"),
     INDICATOR_NOT_FINALIZED(50005, 409, "指标体系尚未定稿，不能下发"),
@@ -61,6 +61,7 @@ public enum ErrorCode {
     REVIEW_COMMENT_REQUIRED(60004, 422, "驳回时必须填写审核意见"),
     CONFIRMED_EXCEEDS_SUBMITTED(60005, 422, "认定值不能大于填报值"),
     VALUE_CALIBER_MISMATCH(60006, 422, "填报值与统计口径不匹配"),
+    ANNUAL_TARGET_EXCEEDED(60007, 422, "提交或审核后年度完成值将超过年度目标"),
 
     // 7xxxx 调整审批
     ADJUST_AMOUNT_EXCEEDED(70001, 422, "调整数量超过尚未完成的量"),

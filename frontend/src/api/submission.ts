@@ -20,6 +20,23 @@ export function createSubmission(
   return http.post(`/tasks/${taskId}/submissions`, data)
 }
 
+export interface YearUploadItem {
+  submissionId: string
+  indicatorId: string
+  indicatorCode: string | null
+  indicatorName: string | null
+  taskCode: string | null
+  unitName: string | null
+  submittedAt: string | null
+  submittedByName: string | null
+  status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED'
+}
+
+/** GET /plans/{planId}/submissions/uploads?year= 当年已上传指标清单 */
+export function listYearUploads(planId: string, year: number): Promise<YearUploadItem[]> {
+  return http.get(`/plans/${planId}/submissions/uploads`, { year })
+}
+
 export function getSubmission(submissionId: string): Promise<SubmissionDetail> {
   return http.get(`/submissions/${submissionId}`)
 }

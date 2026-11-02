@@ -3,13 +3,14 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AdjustmentCompareTable from './components/AdjustmentCompareTable.vue'
+import BackButton from '@/components/BackButton.vue'
 import MaterialUploader from '@/views/submission/components/MaterialUploader.vue'
 import { createAdjustment, previewAdjustment } from '@/api/adjustment'
-import { getTask, listTasks } from '@/api/task'
+import { getTask, listAllTasks } from '@/api/task'
 import { listOrgUnits } from '@/api/orgUnit'
 import type { OrgUnit } from '@/api/orgUnit'
 import { listPlans } from '@/api/plan'
-import { listIndicators } from '@/api/indicator'
+import { getIndicator, listIndicators } from '@/api/indicator'
 import { useUserStore } from '@/stores/user'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { ApiError } from '@/utils/request'
@@ -22,7 +23,7 @@ import {
 } from '@/utils/adjustment'
 import { formatTargetValue, hasQuantitativeFields, isPercentCaliber } from '@/utils/indicator'
 import { canAssignNewB, percentToStore } from '@/utils/allocation'
-import { canWriteTask } from '@/utils/task'
+import { canWriteTask, primaryTaskIndicator } from '@/utils/task'
 import type { FieldError } from '@/types/api'
 import type { PlanCard } from '@/types/plan'
 import type { TaskDetail, TaskListItem } from '@/types/task'
@@ -42,7 +43,7 @@ const isAdmin = computed(() => userStore.roles.includes('ADMIN'))
 // ---------- 步骤 ----------
 const step = ref(1)
 
-// ---------- B 任务选择 ----------
+// ---------- 学院任务选择 ----------
 const taskOptions = ref<TaskListItem[]>([])
 const taskLoading = ref(false)
 const task = ref<TaskDetail | null>(null)
@@ -58,7 +59,8 @@ const form = reactive({
   fileIds: [] as string[],
 })
 
-const caliber = computed<StatCaliber | null>(() => task.value?.indicator?.statCaliber ?? null)
+const primaryIndicator = computed(() => primaryTaskIndicator(task.value))
+const caliber = computed<StatCaliber | null>(() => primaryIndicator.value?.statCaliber ?? null)
 const isBoolean = computed(() => caliber.value === 'BOOLEAN')
 const isTargetChange = computed(() => form.type === 'TARGET_CHANGE')
 const isHistoricalTask = computed(
@@ -155,6 +157,16 @@ async function selectTask(taskId: string): Promise<void> {
     if (isBoolean.value && planYear.length === 1) {
       form.fromYear = planYear[0]
     }
+    if (route.query.type === 'POSTPONE' && ['INCREMENT', 'BOOLEAN'].includes(caliber.value ?? '')) {
+      const fromYear = Number(route.query.fromYear)
+      const toYear = Number(route.query.toYear)
+      const amount = Number(route.query.amount)
+      form.type = 'POSTPONE'
+      if (fromYearOptions.value.includes(fromYear)) form.fromYear = fromYear
+      if (toYearOptions.value.includes(toYear) && form.fromYear !== null && toYear > form.fromYear) form.toYear = toYear
+      if (isBoolean.value) form.amount = 1
+      else if (Number.isFinite(amount) && amount > 0) form.amount = amount
+    }
   } catch {
     // 拦截器已提示
   }
@@ -190,6 +202,11 @@ const tcYearOptions = computed<number[]>(() => {
   return list
 })
 
+const compareYears = computed(() => isTargetChange.value ? tcYearOptions.value : planYears.value)
+const compareCaliber = computed<StatCaliber>(() =>
+  isTargetChange.value ? (tcIndicator.value?.caliber ?? 'INCREMENT') : (caliber.value ?? 'INCREMENT'),
+)
+
 async function selectTcPlan(planId: string): Promise<void> {
   tcForm.planId = planId
   tcForm.indicatorId = ''
@@ -200,22 +217,26 @@ async function selectTcPlan(planId: string): Promise<void> {
     const tree = await listIndicators(planId)
     const options: { id: string; label: string; caliber: StatCaliber }[] = []
     for (const node of tree) {
-      if (hasQuantitativeFields(node.level, node.isQuantifiable) && node.statCaliber) {
+      if (node.level === 'A' && hasQuantitativeFields(node.level, node.isQuantifiable) && node.statCaliber) {
         options.push({ id: node.id, label: `${node.code} ${node.name}`, caliber: node.statCaliber })
-      }
-      for (const child of node.children ?? []) {
-        if (hasQuantitativeFields(child.level, child.isQuantifiable) && child.statCaliber) {
-          options.push({
-            id: child.id,
-            label: `${child.code} ${child.name}`,
-            caliber: child.statCaliber,
-          })
-        }
       }
     }
     indicatorOptions.value = options
   } catch {
     // 拦截器已提示
+  }
+}
+
+async function presetTargetChange(indicatorId: string): Promise<void> {
+  const detail = await getIndicator(indicatorId)
+  if (detail.level !== 'A') {
+    ElMessage.warning('目标调整请选择 指标')
+    return
+  }
+  form.type = 'TARGET_CHANGE'
+  await selectTcPlan(detail.planId)
+  if (indicatorOptions.value.some((item) => item.id === detail.id)) {
+    tcForm.indicatorId = detail.id
   }
 }
 
@@ -254,7 +275,7 @@ function validateForm(): string[] {
   if (!form.type) errors.push('请选择调整类型')
   if (isTargetChange.value) {
     if (!tcForm.planId) errors.push('请选择所属计划')
-    if (!tcForm.indicatorId) errors.push('请选择要调整的 A / A+ 指标')
+    if (!tcForm.indicatorId) errors.push('请选择要调整的 指标')
     if (tcForm.year === null) errors.push('请选择目标年度')
     if (!tcIsBoolean.value && !tcIsPercent.value && tcForm.target === undefined) {
       errors.push('请填写新的目标值')
@@ -263,7 +284,7 @@ function validateForm(): string[] {
       errors.push('请填写新的目标百分比')
     }
   } else {
-    if (!form.taskId) errors.push('请选择 B 任务')
+    if (!form.taskId) errors.push('请选择 学院任务')
     if (form.fromYear === null) errors.push('请选择原年度')
     if (!isBoolean.value && (form.amount === undefined || form.amount <= 0)) {
       errors.push('请填写调整数量（≥ 1）')
@@ -293,7 +314,7 @@ async function handlePreview(): Promise<void> {
     return
   }
   if (!isTargetChange.value && !canWriteTask(task.value)) {
-    ElMessage.warning('请等待 B 任务详情加载完成')
+    ElMessage.warning('请等待 学院任务详情加载完成')
     return
   }
   const request = buildRequest()
@@ -341,7 +362,7 @@ const submitSummary = computed(() => {
         amount: isBoolean.value ? undefined : form.amount,
       },
     ],
-    task.value?.indicator?.unitLabel,
+    primaryIndicator.value?.unitLabel,
   )}${isTransferType(form.type as AdjustmentType) ? `，接收单元：${receiverOptions.value.find((u) => u.id === form.toUnitId)?.name ?? ''}` : ''}`
 })
 
@@ -403,10 +424,15 @@ function backToEdit(): void {
   step.value = 1
 }
 
-onMounted(() => {
+onMounted(async () => {
+  const presetTaskId = typeof route.query.taskId === 'string' ? route.query.taskId : ''
+  const presetIndicatorId = typeof route.query.indicatorId === 'string' ? route.query.indicatorId : ''
   taskLoading.value = true
-  listTasks({ page: 1, pageSize: 200, isHistorical: false })
-    .then((page) => (taskOptions.value = page.items.filter((item) => canWriteTask(item))))
+  const tasksPromise = listAllTasks({
+    indicatorId: presetIndicatorId || undefined,
+    isHistorical: false,
+  })
+    .then((items) => (taskOptions.value = items.filter((item) => canWriteTask(item))))
     .catch(() => undefined)
     .finally(() => (taskLoading.value = false))
   listOrgUnits()
@@ -417,12 +443,19 @@ onMounted(() => {
       .then((list) => (planOptions.value = list))
       .catch(() => undefined)
   }
-  const presetTaskId = typeof route.query.taskId === 'string' ? route.query.taskId : ''
-  if (presetTaskId) {
-    selectTask(presetTaskId).finally(() => {
-      watchReady.value = true
-    })
-  } else {
+  try {
+    if (presetTaskId) {
+      await selectTask(presetTaskId)
+    } else if (presetIndicatorId && isAdmin.value) {
+      await presetTargetChange(presetIndicatorId)
+    }
+    await tasksPromise
+    if (!presetTaskId && presetIndicatorId && !isAdmin.value && taskOptions.value.length === 1) {
+      await selectTask(taskOptions.value[0].id)
+    }
+  } catch {
+    // 深链上下文无效时保留空白表单，由拦截器提示具体权限或不存在原因
+  } finally {
     watchReady.value = true
   }
 })
@@ -430,12 +463,12 @@ onMounted(() => {
 
 <template>
   <div>
+    <BackButton />
     <div class="page-header">
       <div>
         <h1 class="page-title">发起调整申请</h1>
         <p class="page-subtitle">延期 / 转移 / 目标调整；审批通过后生效，全程留痕</p>
       </div>
-      <el-button @click="router.push('/adjustments')">返回列表</el-button>
     </div>
 
     <el-steps :active="step - 1" align-center class="apply-steps" finish-status="success">
@@ -454,7 +487,7 @@ onMounted(() => {
           class="form-alert"
         />
         <el-form label-width="110px" label-position="left" @submit.prevent>
-          <el-form-item v-if="!isTargetChange" label="B 任务" required>
+          <el-form-item v-if="!isTargetChange" label="学院任务" required>
             <el-select
               v-model="form.taskId"
               filterable
@@ -467,7 +500,7 @@ onMounted(() => {
               <el-option
                 v-for="option in taskOptions"
                 :key="option.id"
-                :label="`${option.code} ${option.indicator?.name ?? ''}`"
+                :label="`${option.code} ${primaryTaskIndicator(option)?.name ?? ''}`"
                 :value="option.id"
               />
             </el-select>
@@ -528,8 +561,8 @@ onMounted(() => {
                 controls-position="right"
                 :disabled="formReadonly"
               />
-              <span v-if="task?.indicator?.unitLabel" class="field-unit">
-                {{ task.indicator.unitLabel }}
+              <span v-if="primaryIndicator?.unitLabel" class="field-unit">
+                {{ primaryIndicator.unitLabel }}
               </span>
               <span class="field-tip-inline">不超过可调量（70001）</span>
             </el-form-item>
@@ -566,7 +599,7 @@ onMounted(() => {
                   :value="unit.id"
                 />
               </el-select>
-              <div class="field-tip">接收方原本没有该 A+ 的 B 任务时，生效后系统自动新建</div>
+              <div class="field-tip">接收方原本没有该指标的学院任务时，生效后系统自动新建</div>
             </el-form-item>
           </template>
 
@@ -592,7 +625,7 @@ onMounted(() => {
               <el-select
                 v-model="tcForm.indicatorId"
                 filterable
-                placeholder="选择 A / A+ 指标"
+                placeholder="选择 指标"
                 style="width: 100%"
                 :disabled="step === 2 || !tcForm.planId"
                 @change="preview = null"
@@ -716,8 +749,9 @@ onMounted(() => {
 
           <AdjustmentCompareTable
             :snapshot="preview.snapshot"
-            :years="planYears"
-            :caliber="caliber ?? 'INCREMENT'"
+            :years="compareYears"
+            :caliber="compareCaliber"
+            :type="form.type || undefined"
             caption="试算结果（未生效）"
           />
 

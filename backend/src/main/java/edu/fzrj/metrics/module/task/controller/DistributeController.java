@@ -26,7 +26,7 @@ public class DistributeController {
         this.distributeService = distributeService;
     }
 
-    @Operation(summary = "下发 B 任务（indicatorIds 为空 = 全部可下发指标；校验链 50005 → 50001 → 50002；已下发的跳过）",
+    @Operation(summary = "直接下发 B 任务（indicatorIds 为空 = 全部可下发指标；下发前校验完整性、40002、40003、50001、50002；已下发的跳过）",
             description = "权限：task:distribute；需带 version；必须带 Idempotency-Key")
     @PostMapping("/api/v1/plans/{planId}/distribute")
     @PreAuthorize("hasAuthority('task:distribute')")

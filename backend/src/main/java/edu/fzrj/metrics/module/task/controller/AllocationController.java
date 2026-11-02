@@ -34,7 +34,7 @@ public class AllocationController {
         return allocationService.getAllocation(indicatorId);
     }
 
-    @Operation(summary = "保存分解矩阵（整体替换；允许合计不一致存草稿，下发时强制校验 50001；已下发指标 50003）",
+    @Operation(summary = "保存分解矩阵（整体替换；允许合计不足存草稿，下发时强制校验 50001；已下发指标 50003）",
             description = "权限：allocation:edit；需带 version；不可下分 A 只允许一个承接单元")
     @PutMapping("/api/v1/indicators/{indicatorId}/allocation")
     @PreAuthorize("hasAuthority('allocation:edit')")

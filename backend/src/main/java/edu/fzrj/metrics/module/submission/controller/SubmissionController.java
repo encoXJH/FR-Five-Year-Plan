@@ -7,7 +7,9 @@ import edu.fzrj.metrics.common.idempotent.Idempotent;
 import edu.fzrj.metrics.common.util.PatchHelper;
 import edu.fzrj.metrics.module.plan.dto.PlanDtos;
 import edu.fzrj.metrics.module.submission.dto.SubmissionDtos;
+import edu.fzrj.metrics.module.submission.dto.YearUploadDtos;
 import edu.fzrj.metrics.module.submission.service.SubmissionService;
+import edu.fzrj.metrics.module.submission.service.YearUploadService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -31,9 +33,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class SubmissionController {
 
     private final SubmissionService submissionService;
+    private final YearUploadService yearUploadService;
 
-    public SubmissionController(SubmissionService submissionService) {
+    public SubmissionController(SubmissionService submissionService, YearUploadService yearUploadService) {
         this.submissionService = submissionService;
+        this.yearUploadService = yearUploadService;
+    }
+
+    @Operation(summary = "当年已上传指标清单", description = "已提交审核的填报记录，含指标名、上传时间、上传人、审核状态；按数据范围")
+    @GetMapping("/plans/{planId}/submissions/uploads")
+    public java.util.List<YearUploadDtos.UploadItem> yearUploads(@PathVariable Long planId,
+                                                                 @org.springframework.web.bind.annotation.RequestParam Integer year) {
+        return yearUploadService.list(planId, year);
     }
 
     @Operation(summary = "某 B 任务的填报记录", description = "已登录，按数据范围，越权 20005")

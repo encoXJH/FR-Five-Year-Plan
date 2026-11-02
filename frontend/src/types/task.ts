@@ -1,5 +1,5 @@
 import type { UnitRef, UserRef } from './api'
-import type { StatCaliber, TaskStatus, TaskYearStatus } from './enums'
+import type { StatCaliber, TargetDirection, TaskStatus, TaskYearStatus } from './enums'
 
 /** 任务关联的指标引用 */
 export interface TaskIndicatorRef {
@@ -10,6 +10,7 @@ export interface TaskIndicatorRef {
   unitLabel?: string | null
   /** 佐证材料要求（填报页展示） */
   evidenceRequirement?: string | null
+  targetDirection?: TargetDirection | null
 }
 
 /** 任务所属计划引用 */
@@ -24,7 +25,7 @@ export interface TaskPlanRef {
 export interface TaskListItem {
   id: string
   planId: string
-  /** 任务编号，如 A01-2-C03 */
+  /** 新任务编号，如 A01-C03；历史编号保持原样 */
   code: string
   indicator: TaskIndicatorRef | null
   topIndicator?: TaskIndicatorRef | null
@@ -35,6 +36,8 @@ export interface TaskListItem {
   totalTarget?: number | boolean | null
   /** 展示年度的目标 / 完成值（年度见 yearStatus 对应行；未激活年度为 null） */
   yearTarget?: number | boolean | null
+  /** 全规划期年度目标，列表展开时无需逐任务查询详情 */
+  yearTargets?: { year: number; target: number | boolean | null }[]
   actualValue?: number | null
   /** 完成率（小数），null 显示 — */
   completionRate?: number | null
@@ -71,6 +74,22 @@ export interface TaskYearItem {
 export interface TaskDetail extends TaskListItem {
   years: TaskYearItem[]
   plan?: TaskPlanRef | null
+}
+
+/** 待补做记录 */
+export interface MakeupItem {
+  id: string
+  task: { id: string; code: string }
+  fromTaskYearId: string
+  fromYear: number
+  toYear: number
+  gapAmount: number
+  madeUpAmount: number | null
+  status: 'PENDING' | 'DONE' | 'CANCELLED'
+  adjustmentId: string | null
+  version: number
+  createdAt: string
+  updatedAt: string
 }
 
 /** GET /tasks 查询参数 */

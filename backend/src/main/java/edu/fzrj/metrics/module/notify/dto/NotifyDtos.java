@@ -22,6 +22,8 @@ public final class NotifyDtos {
     public record TodoItem(
             String type,
             @JsonSerialize(using = ToStringSerializer.class) Long bizId,
+            @JsonSerialize(using = ToStringSerializer.class) Long planId,
+            Integer year,
             String bizCode,
             String detail,
             LocalDateTime todoSince,

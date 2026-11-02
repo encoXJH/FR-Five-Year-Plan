@@ -6,6 +6,9 @@ import {
   computeRatio,
   formatMetricValue,
   isApprovedValueValid,
+  parseSubmissionRemark,
+  projectAnnualCompletionRate,
+  serializeSubmissionRemark,
 } from '../submission'
 import type { StatCaliber } from '@/types/enums'
 
@@ -55,6 +58,32 @@ describe('buildMetricValue', () => {
   })
 })
 
+describe('BOOLEAN 完成日期 remark 结构化保存', () => {
+  it('保存与回显往返一致，重复序列化不叠加元数据', () => {
+    const saved = serializeSubmissionRemark('BOOLEAN', '已完成验收', '2026-10-30')
+    expect(saved).toContain('"completionDate":"2026-10-30"')
+    expect(parseSubmissionRemark(saved)).toEqual({
+      remark: '已完成验收',
+      completionDate: '2026-10-30',
+    })
+    expect(serializeSubmissionRemark('BOOLEAN', saved, '2026-10-30')).toBe(saved)
+  })
+
+  it('清空日期会移除旧元数据并保留说明', () => {
+    const saved = serializeSubmissionRemark('BOOLEAN', '补充说明', '2026-10-30')
+    expect(serializeSubmissionRemark('BOOLEAN', saved, '')).toBe('补充说明')
+    expect(serializeSubmissionRemark('BOOLEAN', '', null)).toBeNull()
+  })
+
+  it('其他口径不修改说明，非法元数据不静默吞掉文本', () => {
+    expect(serializeSubmissionRemark('INCREMENT', '普通说明', '2026-10-30')).toBe('普通说明')
+    expect(parseSubmissionRemark('[FZSU_BOOLEAN]bad json[/FZSU_BOOLEAN]')).toEqual({
+      remark: '[FZSU_BOOLEAN]bad json[/FZSU_BOOLEAN]',
+      completionDate: '',
+    })
+  })
+})
+
 describe('computeRatio 占比实时计算', () => {
   it('分子 ÷ 分母', () => {
     expect(computeRatio(62, 100)).toBeCloseTo(0.62)
@@ -101,6 +130,44 @@ describe('approvedReduction 核减量', () => {
   it('无核减返回 null', () => {
     expect(approvedReduction('INCREMENT', { amount: 2 }, { amount: 2 })).toBeNull()
     expect(approvedReduction('BOOLEAN', { achieved: true }, { achieved: true })).toBeNull()
+  })
+})
+
+describe('projectAnnualCompletionRate 年度目标超限提示投影', () => {
+  it('INCREMENT 累计已认定值，等于目标与超过目标可区分', () => {
+    expect(projectAnnualCompletionRate('INCREMENT', 10, { actualValue: 6 }, { amount: 4 })).toBe(1)
+    expect(projectAnnualCompletionRate('INCREMENT', 10, { actualValue: 6 }, { amount: 5 })).toBe(1.1)
+  })
+
+  it('STOCK 与 GROWTH 使用候选最新总量，不累加已认定值', () => {
+    for (const caliber of ['STOCK', 'GROWTH'] as const) {
+      expect(projectAnnualCompletionRate(caliber, 100, { actualValue: 500 }, { total: 100 })).toBe(1)
+      expect(projectAnnualCompletionRate(caliber, 100, { actualValue: 80 }, { total: 101 })).toBe(1.01)
+    }
+  })
+
+  it('RATIO 分别累计已认定与候选分子分母', () => {
+    const recognized = { actualNumerator: 40, actualDenominator: 100 }
+    expect(projectAnnualCompletionRate('RATIO', 0.4, recognized, { numerator: 20, denominator: 50 })).toBe(1)
+    expect(projectAnnualCompletionRate('RATIO', 0.4, recognized, { numerator: 20, denominator: 40 }))
+      .toBeCloseTo(60 / 140 / 0.4)
+  })
+
+  it('DIRECT_PERCENT 使用候选最新百分比', () => {
+    expect(projectAnnualCompletionRate('DIRECT_PERCENT', 0.8, { actualValue: 0.9 }, { percent: 0.8 })).toBe(1)
+    expect(projectAnnualCompletionRate('DIRECT_PERCENT', 0.8, { actualValue: 0.7 }, { percent: 0.81 }))
+      .toBeCloseTo(1.0125)
+  })
+
+  it('BOOLEAN 与无有效目标不投影', () => {
+    expect(projectAnnualCompletionRate('BOOLEAN', true, null, { achieved: true })).toBeNull()
+    expect(projectAnnualCompletionRate('INCREMENT', 0, null, { amount: 1 })).toBeNull()
+    expect(projectAnnualCompletionRate('INCREMENT', null, null, { amount: 1 })).toBeNull()
+  })
+
+  it('候选输入不完整时不显示超限提示', () => {
+    expect(projectAnnualCompletionRate('INCREMENT', 10, null, {})).toBeNull()
+    expect(projectAnnualCompletionRate('RATIO', 0.4, null, { numerator: 1 })).toBeNull()
   })
 })
 

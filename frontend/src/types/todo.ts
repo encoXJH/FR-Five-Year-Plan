@@ -8,6 +8,8 @@ export type TodoGroup = 'FILL' | 'REVIEW' | 'ACCEPT' | 'APPROVAL'
 export interface TodoItem {
   type: TodoGroup | string
   bizId: string
+  planId: string | null
+  year: number | null
   bizCode: string | null
   detail: string | null
   todoSince: string

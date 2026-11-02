@@ -5,7 +5,7 @@ export const FALLBACK_ENUM_LABELS: Record<string, Record<string, string>> = {
   PlanStatus: { DRAFT: '草稿', ACTIVE: '执行中', ARCHIVED: '已归档' },
   PlanSource: { BLANK: '空白新建', TEMPLATE: '从模板新建', COPY: '复制已有计划' },
   SubjectType: { SCHOOL: '校级', MAJOR_GROUP: '专业群' },
-  IndicatorLevel: { A: 'A 类', A_PLUS: 'A+ 类', B: 'B 类' },
+  IndicatorLevel: { A: '指标', A_PLUS: '历史指标', B: '学院任务' },
   IndicatorNature: { CONSTRAINT: '约束性', DEVELOPMENT: '发展性' },
   MeasureType: {
     NUMBER: '数值',

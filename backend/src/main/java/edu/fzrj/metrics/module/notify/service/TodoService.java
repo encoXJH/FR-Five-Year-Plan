@@ -19,6 +19,7 @@ import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
 
+import java.time.Year;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -71,19 +72,26 @@ public class TodoService {
     }
 
     public NotifyDtos.TodoView todos() {
+        return todos(null, null);
+    }
+
+    public NotifyDtos.TodoView todos(Long planId, Integer year) {
         LoginUser user = SecurityUtils.getLoginUser();
         List<NotifyDtos.TodoItem> items = new ArrayList<>();
         items.addAll(fillTodos(user));
         items.addAll(reviewTodos(user));
-        items.addAll(acceptTodos(user));
         items.addAll(approvalTodos(user));
         items.sort(Comparator.comparing(NotifyDtos.TodoItem::todoSince,
                 Comparator.nullsLast(Comparator.naturalOrder())));
+        List<NotifyDtos.TodoItem> filtered = items.stream()
+                .filter(item -> planId == null || planId.equals(item.planId()))
+                .filter(item -> year == null || year.equals(item.year()))
+                .toList();
         Map<String, Long> summary = new HashMap<>();
-        for (NotifyDtos.TodoItem item : items) {
+        for (NotifyDtos.TodoItem item : filtered) {
             summary.merge(item.type(), 1L, Long::sum);
         }
-        return new NotifyDtos.TodoView(items, summary);
+        return new NotifyDtos.TodoView(filtered, summary);
     }
 
     /**
@@ -106,6 +114,7 @@ public class TodoService {
         List<TaskYear> years = taskYearMapper.selectList(new LambdaQueryWrapper<TaskYear>()
                 .in(TaskYear::getTaskId, taskMap.keySet())
                 .eq(TaskYear::getDeleted, 0L)
+                .eq(TaskYear::getYear, Year.now().getValue())
                 .in(TaskYear::getYearStatus, List.of("IN_PROGRESS", "MAKEUP_PENDING", "NOT_ACTIVATED")));
         if (years.isEmpty()) {
             return List.of();
@@ -119,7 +128,7 @@ public class TodoService {
                     Task task = taskMap.get(ty.getTaskId());
                     String detail = "MAKEUP_PENDING".equals(ty.getYearStatus())
                             ? ty.getYear() + " 年未达标待补做" : ty.getYear() + " 年待填报";
-                    return new NotifyDtos.TodoItem("FILL", ty.getTaskId(),
+                    return new NotifyDtos.TodoItem("FILL", ty.getTaskId(), ty.getPlanId(), ty.getYear(),
                             task == null ? null : task.getCode(), detail, ty.getUpdatedAt(),
                             fillDeadlineOfYear(ty.getYear()));
                 })
@@ -159,28 +168,11 @@ public class TodoService {
                 .filter(s -> taskMap.containsKey(s.getTaskId()))
                 .map(s -> {
                     Task task = taskMap.get(s.getTaskId());
-                    return new NotifyDtos.TodoItem("REVIEW", s.getId(),
+                    return new NotifyDtos.TodoItem("REVIEW", s.getId(), s.getPlanId(), s.getYear(),
                             task.getCode(),
                             s.getYear() + " 年填报待审核", s.getSubmittedAt(),
                             fillDeadlineOfYear(s.getYear()));
                 })
-                .toList();
-    }
-
-    /** 待确认接收（学院负责人，本单元）：已下发但未确认的任务 */
-    private List<NotifyDtos.TodoItem> acceptTodos(LoginUser user) {
-        if (!user.getRoles().contains("UNIT_OWNER") || user.getUnitId() == null) {
-            return List.of();
-        }
-        return taskMapper.selectList(new LambdaQueryWrapper<Task>()
-                        .eq(Task::getUnitId, user.getUnitId())
-                        .eq(Task::getIsHistorical, false)
-                        .eq(Task::getStatus, "DISTRIBUTED")
-                        .isNull(Task::getAcceptedAt)
-                        .eq(Task::getDeleted, 0L))
-                .stream()
-                .map(t -> new NotifyDtos.TodoItem("ACCEPT", t.getId(), t.getCode(),
-                        "任务待确认接收", t.getDistributedAt(), null))
                 .toList();
     }
 
@@ -202,7 +194,7 @@ public class TodoService {
                 .filter(a -> a.getTaskId() == null || taskMap.containsKey(a.getTaskId()))
                 .map(a -> {
                     Task task = a.getTaskId() == null ? null : taskMap.get(a.getTaskId());
-                    return new NotifyDtos.TodoItem("APPROVAL", a.getId(),
+                    return new NotifyDtos.TodoItem("APPROVAL", a.getId(), a.getPlanId(), null,
                             task == null ? null : task.getCode(),
                             "调整审批待处理（" + a.getCurrentNode() + "）", a.getCreatedAt(), null);
                 })

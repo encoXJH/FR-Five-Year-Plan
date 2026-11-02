@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -26,7 +27,8 @@ public class TodoController {
             description = "已登录；按当前用户角色与数据范围聚合，不分页；items 按 todoSince 升序，summary 为各类型计数；"
                     + "bizId 语义：FILL/ACCEPT=任务 id，REVIEW=填报 id，APPROVAL=调整申请 id")
     @GetMapping
-    public NotifyDtos.TodoView todos() {
-        return todoService.todos();
+    public NotifyDtos.TodoView todos(@RequestParam(required = false) Long planId,
+                                     @RequestParam(required = false) Integer year) {
+        return todoService.todos(planId, year);
     }
 }

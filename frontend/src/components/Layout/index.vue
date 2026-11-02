@@ -1,16 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, ref } from 'vue'
 import { Expand, Fold } from '@element-plus/icons-vue'
 import HeaderBar from './HeaderBar.vue'
 import SideMenu from './SideMenu.vue'
-import { listPlans } from '@/api/plan'
-import type { PlanCard } from '@/types/plan'
-
-const route = useRoute()
-
-const pageTitle = computed(() => (typeof route.meta.title === 'string' ? route.meta.title : ''))
-const isHome = computed(() => route.path === '/plans' || route.path === '/dashboard')
 
 // ---------- 侧栏折叠（UI 规范 5.1），状态持久化到 localStorage ----------
 const COLLAPSED_KEY = 'fzsu.menuCollapsed'
@@ -23,23 +15,6 @@ function toggleCollapse(): void {
   collapsed.value = !collapsed.value
   localStorage.setItem(COLLAPSED_KEY, collapsed.value ? '1' : '0')
 }
-
-// ---------- 面包屑计划名（首页 / 计划名 / 页面） ----------
-const plans = ref<PlanCard[]>([])
-const routePlanId = computed(() =>
-  typeof route.params.planId === 'string' ? route.params.planId : '',
-)
-const currentPlanName = computed(
-  () => plans.value.find((p) => p.id === routePlanId.value)?.name ?? '',
-)
-
-onMounted(() => {
-  listPlans()
-    .then((list) => {
-      plans.value = list
-    })
-    .catch(() => undefined)
-})
 
 /** 移动端（≤768px）侧边栏收起为抽屉，由顶栏汉堡按钮打开 */
 const menuDrawerVisible = ref(false)
@@ -77,18 +52,6 @@ function closeMenuDrawer(): void {
         </div>
       </el-aside>
       <el-container class="app-right">
-        <div class="app-breadcrumb">
-          <el-breadcrumb separator="/">
-            <el-breadcrumb-item :to="{ path: '/plans' }">首页</el-breadcrumb-item>
-            <el-breadcrumb-item
-              v-if="routePlanId && currentPlanName"
-              :to="{ path: `/plans/${routePlanId}` }"
-            >
-              {{ currentPlanName }}
-            </el-breadcrumb-item>
-            <el-breadcrumb-item v-if="!isHome && pageTitle">{{ pageTitle }}</el-breadcrumb-item>
-          </el-breadcrumb>
-        </div>
         <el-main class="app-main">
           <router-view />
         </el-main>
@@ -122,7 +85,7 @@ function closeMenuDrawer(): void {
 
 .app-body {
   height: calc(100% - var(--app-header-height));
-  overflow-x: auto;
+  overflow-x: visible;
 }
 
 /* 折叠直接切换宽度，避免工作台表格随宽度过渡逐帧重排 */
@@ -184,22 +147,20 @@ function closeMenuDrawer(): void {
 }
 
 .app-right {
-  min-width: calc(var(--app-content-min-width) - var(--app-aside-width));
+  min-width: 0;
   flex-direction: column;
 }
 
-.app-breadcrumb {
-  display: flex;
-  align-items: center;
-  height: var(--app-breadcrumb-height);
-  padding: 0 var(--space-5);
-  background-color: var(--el-bg-color);
-  border-bottom: 1px solid var(--el-border-color-light);
-}
-
 .app-main {
+  min-width: 0;
   padding: var(--space-5);
   background-color: var(--el-bg-color-page);
+}
+
+@media (min-width: 769px) and (max-height: 700px) {
+  .app-main {
+    padding: var(--space-3);
+  }
 }
 
 /* 移动端（≤768px）：侧边栏隐藏改顶栏抽屉菜单，内容区取消最小宽度（UI 规范 5.2） */

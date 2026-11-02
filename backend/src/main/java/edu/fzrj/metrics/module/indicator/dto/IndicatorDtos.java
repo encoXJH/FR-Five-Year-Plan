@@ -122,13 +122,6 @@ public final class IndicatorDtos {
         private List<YearTargetItem> yearTargets;
     }
 
-    /** 定稿请求 */
-    @Data
-    public static class FinalizeRequest {
-        @NotNull(message = "缺少 version（乐观锁版本号）")
-        private Integer version;
-    }
-
     /** ADMIN 设置草稿 A 的 S 归属 */
     @Data
     public static class DirectionAssignRequest {
@@ -238,8 +231,8 @@ public final class IndicatorDtos {
 
     // ---------------- 导入 ----------------
 
-    public record ImportRowResult(Integer rowNum, String level, String code, String name,
-                                  Boolean valid, List<String> errors) {
+    public record ImportRowResult(Integer rowNum, String level, String code, String parentCode, String name,
+                                  BigDecimal totalTarget, Boolean valid, List<String> errors) {
     }
 
     public record ImportPreviewResponse(String importId, Integer totalRows, Integer validRows,

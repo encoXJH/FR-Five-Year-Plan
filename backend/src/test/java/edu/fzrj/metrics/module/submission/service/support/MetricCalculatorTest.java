@@ -243,6 +243,31 @@ class MetricCalculatorTest {
         }
 
         @Test
+        void 一个下级完成另一个无数据时父级不能判完成() {
+            YearResult r = MetricCalculator.rollup("BOOLEAN", List.of(
+                    MetricCalculator.yearActual("BOOLEAN", List.of(ApprovedValue.bool(true)), null),
+                    YearResult.empty()), null);
+            assertEquals(0, BigDecimal.ZERO.compareTo(r.actualValue()));
+        }
+
+        @Test
+        void 全部下级明确完成时父级才完成() {
+            YearResult r = MetricCalculator.rollup("BOOLEAN", List.of(
+                    MetricCalculator.yearActual("BOOLEAN", List.of(ApprovedValue.bool(true)), null),
+                    MetricCalculator.yearActual("BOOLEAN", List.of(ApprovedValue.bool(true)), null)), null);
+            assertEquals(0, BigDecimal.ONE.compareTo(r.actualValue()));
+        }
+
+        @Test
+        void 全部下级无数据时父级保持未开始() {
+            YearResult r = MetricCalculator.rollup("BOOLEAN",
+                    List.of(YearResult.empty(), YearResult.empty()), null);
+            assertNull(r.actualValue());
+            assertEquals("NOT_STARTED",
+                    MetricCalculator.achieveStatus("HIGHER_BETTER", "BOOLEAN", r, BigDecimal.ONE));
+        }
+
+        @Test
         void 完成率完成年完成为一() {
             YearResult r = MetricCalculator.yearActual("BOOLEAN",
                     List.of(ApprovedValue.bool(true)), null);
