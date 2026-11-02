@@ -35,6 +35,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+<<<<<<< HEAD
+=======
+import java.time.LocalDateTime;
+>>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -294,7 +298,9 @@ public class PlanService {
             PlanYear planYear = new PlanYear();
             planYear.setPlanId(plan.getId());
             planYear.setYear(year);
-            planYear.setStatus("NOT_ACTIVATED");
+            planYear.setStatus("ACTIVE");
+            planYear.setActivatedAt(LocalDateTime.now());
+            planYear.setActivatedBy(userId);
             planYear.setCreatedBy(userId);
             planYear.setUpdatedBy(userId);
             planYearMapper.insert(planYear);

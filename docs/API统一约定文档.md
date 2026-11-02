@@ -810,7 +810,11 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | GET | `/indicators/{indicatorId}/allocation` | 仅获取 A+ 的分解矩阵：合格执行单元 × 年度、历史冻结目标及合计校验结果；其他层级返回 40006 | `allocation:edit` |
 | PUT | `/indicators/{indicatorId}/allocation` | 保存非历史 B 草稿，允许合计不足或超额；已下发指标可追加合格学院，新增行须启用且 `isBAssignable=true`；历史及已生效任务必须原样保留，不得改负责人、改目标或删除 | `allocation:edit` |
 | POST ⚡ | `/plans/{planId}/distribute` | DRAFT 与历史 FINALIZED 均可直接下发；`indicatorIds` 为空时处理全部可下发 A+。下发前依次复核完整性（10001）、年度目标五年守恒（40002）、A/A+ 拆分守恒（40003）、B 分解平衡（50001）及学院负责人（50002），并再次校验单元资格；已下发指标存在追加的待下发 B 时仅处理新任务，无待办对象幂等跳过 | `task:distribute` |
+<<<<<<< HEAD
 | POST ⚡ | `/plans/{planId}/years/{year}/activate` | 管理员手动激活年度；计划启动后各年度默认未激活，激活后该年已下发任务的年度状态转为进行中，重复激活幂等。填报仅允许当前自然年份且年度未锁定；历史任务跳过且不生成待办或提醒 | `settlement:manage` |
+=======
+| POST ⚡ | `/plans/{planId}/years/{year}/activate` | 历史兼容接口；现行规则为计划启动后全部年度默认激活，前端不再提供手动激活入口。填报仅允许当前自然年份且年度未锁定；历史任务跳过且不生成待办或提醒 | `settlement:manage` |
+>>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 | GET | `/tasks` | B 任务列表（可按 `unitId`、`indicatorId`、`year`、`status`、`yearStatus`、`isHistorical` 过滤），每项返回 `isHistorical` | 按数据范围 |
 | GET | `/tasks/{taskId}` | B 任务详情（各年度目标、完成值、状态、`isHistorical`）；历史任务及既有记录只读可见 | 按数据范围 |
 | POST ⚡ | `/tasks/{taskId}/accept` | 历史兼容接口；现行学院角色不再分配此权限，下发后无需接收即可按年度状态填报 | `task:accept` |

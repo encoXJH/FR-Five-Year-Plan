@@ -65,6 +65,14 @@ async function openIndicatorDetail(id: string): Promise<void> {
   }
 }
 
+<<<<<<< HEAD
+=======
+function openTrendGantt(): void {
+  if (!indicatorTrend.value) return
+  router.push({ path: `/indicators/${indicatorTrend.value.indicatorId}`, query: { from: route.fullPath } })
+}
+
+>>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 const plans = ref<PlanCard[]>([])
 const planId = ref<string>((route.query.planId as string) || '')
 const plan = ref<PlanDetail | null>(null)
@@ -977,6 +985,7 @@ onMounted(async () => {
       </div>
     </el-dialog>
 
+<<<<<<< HEAD
     <el-dialog
       v-model="trendVisible"
       title="指标统计详情"
@@ -986,6 +995,16 @@ onMounted(async () => {
       destroy-on-close
     >
       <div v-loading="trendLoading" class="trend-dialog-body">
+=======
+    <el-drawer
+      v-model="trendVisible"
+      title="指标统计详情"
+      size="min(760px, 100vw)"
+      class="indicator-trend-drawer"
+      destroy-on-close
+    >
+      <div v-loading="trendLoading" class="trend-drawer-body">
+>>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
         <template v-if="indicatorTrend">
           <div class="trend-heading">
             <div><span class="mono">{{ indicatorTrend.code }}</span><h2>{{ indicatorTrend.name }}</h2></div>
@@ -1011,10 +1030,21 @@ onMounted(async () => {
               <template #default="{ row }"><StatusTag v-if="row.achieveStatus" kind="AchieveStatus" :value="row.achieveStatus" /><span v-else>—</span></template>
             </el-table-column>
           </el-table>
+<<<<<<< HEAD
         </template>
         <el-empty v-else-if="!trendLoading" description="暂未获取到指标趋势数据" :image-size="80" />
       </div>
     </el-dialog>
+=======
+          <div class="trend-footer">
+            <span>留在统计报表查看数据，筛选条件不会丢失</span>
+            <el-button type="primary" plain @click="openTrendGantt">查看任务甘特图</el-button>
+          </div>
+        </template>
+        <el-empty v-else-if="!trendLoading" description="暂未获取到指标趋势数据" :image-size="80" />
+      </div>
+    </el-drawer>
+>>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
   </div>
 </template>
 
@@ -1310,7 +1340,11 @@ onMounted(async () => {
   }
 }
 
+<<<<<<< HEAD
 .trend-dialog-body { min-height: 240px; }
+=======
+.trend-drawer-body { min-height: 240px; }
+>>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 .trend-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .trend-heading .mono { color: #2B5BC0; font-weight: 600; }
 .trend-heading h2 { margin: 5px 0 0; font-size: 18px; line-height: 1.5; }
@@ -1320,6 +1354,10 @@ onMounted(async () => {
 .trend-summary strong { font-size: 20px; font-variant-numeric: tabular-nums; }
 .trend-summary .primary-value { color: #2B5BC0; }
 .trend-table { width: 100%; }
+<<<<<<< HEAD
+=======
+.trend-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; color: #909399; font-size: 12px; }
+>>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 
 @media (max-width: 600px) {
   .stats-filter :deep(.el-form-item) {
@@ -1350,5 +1388,9 @@ onMounted(async () => {
 
   .trend-summary { grid-template-columns: 1fr; }
   .trend-summary > div { padding: 10px 12px; }
+<<<<<<< HEAD
+=======
+  .trend-footer { align-items: stretch; flex-direction: column; }
+>>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 }
 </style>

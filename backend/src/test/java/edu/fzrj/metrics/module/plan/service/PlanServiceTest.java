@@ -148,6 +148,7 @@ class PlanServiceTest {
     }
 
     @Test
+<<<<<<< HEAD
     void 启动计划后年度默认未激活等待管理员手动激活() {
         Plan plan = draftPlan();
         when(planMapper.selectOne(any())).thenReturn(plan);
@@ -164,6 +165,8 @@ class PlanServiceTest {
     }
 
     @Test
+=======
+>>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
     void 计划卡片只统计可见指标任务并计算完成率() {
         LocalDateTime createdAt = LocalDateTime.of(2026, 1, 1, 8, 0);
         Plan plan = new Plan();
