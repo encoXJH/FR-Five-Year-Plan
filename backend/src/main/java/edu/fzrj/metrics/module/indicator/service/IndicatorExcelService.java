@@ -89,20 +89,15 @@ public class IndicatorExcelService {
         return head;
     }
 
-    /** 导入模板（含一行 A 示例、一行 A+ 示例；第二 sheet 为填写说明） */
+    /** 导入模板（含一行 A 示例；第二 sheet 为填写说明） */
     public byte[] buildImportTemplate(Plan plan) {
         List<Object> exampleA = new ArrayList<>(List.of(
                 "A", "A01", "", "新增省级及以上教学成果奖", "约束性", "数值", "增量累计型",
                 "项", "越大越好", "自动汇总", "是", "以省教育厅公布的获奖文件为准", "", 5));
-        List<Object> exampleAp = new ArrayList<>(List.of(
-                "A+", "A01-1", "A01", "新增省级教学成果奖", "约束性", "数值", "增量累计型",
-                "项", "越大越好", "", "", "按第一完成单位统计", "", 4));
         for (int year = plan.getStartYear(); year <= plan.getEndYear(); year++) {
             exampleA.add(1);
-            exampleAp.add(year == plan.getStartYear() ? 0 : 1);
         }
         exampleA.add("owner1");
-        exampleAp.add("owner1");
 
         List<List<Object>> notes = new ArrayList<>();
         notes.add(List.of("枚举列可填编码或中文：指标性质（CONSTRAINT 约束性 / DEVELOPMENT 发展性）"));
@@ -110,16 +105,16 @@ public class IndicatorExcelService {
         notes.add(List.of("统计口径：INCREMENT 增量累计型 / STOCK 存量时点型 / GROWTH 增长率型 / RATIO 占比型 / DIRECT_PERCENT 直填百分比型 / BOOLEAN 是否型"));
         notes.add(List.of("合法组合：数值→增量/存量；是否→是否型；百分比-可量化→增长率/占比；百分比-不可量化→直填百分比"));
         notes.add(List.of("达成方向：HIGHER_BETTER 越大越好 / LOWER_BETTER 越小越好；汇总方式：AUTO_SUM 自动汇总 / MANUAL 手工认定（仅可量化的 A 必填）"));
-        notes.add(List.of("层级：A / A+；A+ 必须填上级编号且上级 A 可量化；编号可留空由系统生成（A01 / A01-1）"));
+        notes.add(List.of("层级仅支持 A；编号可留空由系统生成（A01），学院 B 在分工矩阵中直接分配"));
         notes.add(List.of("不可量化 A 的计量类型、统计口径、单位、达成方向、汇总方式、基线值、五年目标和年度目标均须留空"));
         notes.add(List.of("导入的 A 均为未归属 S 的草稿，S 归属由 ADMIN 在系统管理中另行配置"));
         notes.add(List.of("增量累计型：各年度目标之和必须等于五年目标；是否型：在计划完成年份的目标列填「是」，其余留空"));
-        notes.add(List.of("增长率型 / 存量时点型：必须填基线值；负责人账号须为平台已存在的登录名（A+ 留空则沿用上级 A）"));
+        notes.add(List.of("增长率型 / 存量时点型：必须填基线值；负责人账号须为平台已存在的登录名"));
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (ExcelWriter writer = EasyExcel.write(out).build()) {
             WriteSheet dataSheet = EasyExcel.writerSheet(0, "指标体系").head(head(plan)).build();
-            writer.write(List.of(exampleA, exampleAp), dataSheet);
+            writer.write(List.of(exampleA), dataSheet);
             WriteSheet noteSheet = EasyExcel.writerSheet(1, "填写说明").head(List.of(List.of("填写说明"))).build();
             writer.write(notes, noteSheet);
         }
@@ -131,7 +126,6 @@ public class IndicatorExcelService {
     public IndicatorDtos.ImportPreviewResponse preview(Long planId, MultipartFile file) {
         Plan plan = planService.requirePlan(planId);
         planService.requireNotArchived(plan);
-        planService.requireNotFinalized(plan);
         String filename = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
         if (!filename.endsWith(".xlsx")) {
             throw new BizException(ErrorCode.FILE_TYPE_UNSUPPORTED, "仅支持 .xlsx 文件");
@@ -221,6 +215,9 @@ public class IndicatorExcelService {
         if (rows.isEmpty()) {
             throw new BizException(ErrorCode.EXCEL_IMPORT_INVALID, "没有可导入的数据行");
         }
+        if (rows.stream().anyMatch(row -> "A_PLUS".equals(EnumAliases.parse(EnumAliases.LEVEL, row.level)))) {
+            throw new BizException(ErrorCode.LEVEL_INVALID, "新流程不再支持导入 A+，请仅导入 A 后直接分配 B");
+        }
         // 校验上下文
         ImportRowData.Context ctx = buildContext(plan, rows);
         // 逐行校验
@@ -246,7 +243,8 @@ public class IndicatorExcelService {
                 draft.setHasInvalidRows(true);
             }
             results.add(new IndicatorDtos.ImportRowResult(row.rowNum,
-                    EnumAliases.parse(EnumAliases.LEVEL, row.level), row.code, row.name, valid, errors));
+                    EnumAliases.parse(EnumAliases.LEVEL, row.level), row.code, row.parentCode, row.name,
+                    ImportValidator.parseDecimal(row.totalTarget), valid, errors));
         }
         String importId = importPreviewStore.save(draft);
         return new IndicatorDtos.ImportPreviewResponse(importId, rows.size(), validRows,
@@ -334,9 +332,11 @@ public class IndicatorExcelService {
         if (draft.isHasInvalidRows()) {
             throw new BizException(ErrorCode.EXCEL_IMPORT_INVALID, "存在校验失败的行，请修正后重新上传");
         }
+        if (draft.getRows().stream().anyMatch(row -> "A_PLUS".equals(row.getLevel()))) {
+            throw new BizException(ErrorCode.LEVEL_INVALID, "新流程不再支持导入 A+，请仅导入 A 后直接分配 B");
+        }
         Plan plan = planService.requirePlan(planId);
         planService.requireNotArchived(plan);
-        planService.requireNotFinalized(plan);
 
         Long userId = SecurityUtils.getUserId();
         Map<String, SysUser> userByUsername = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
@@ -374,6 +374,7 @@ public class IndicatorExcelService {
                         "上级编号不存在：" + row.getParentCode());
             }
             IndicatorRules.requireAPlusAttachable(parent.getLevel(), parent.getIsQuantifiable());
+            indicatorService.requireSubtreeEditable(parent);
             String code = row.getCode() == null
                     ? IndicatorRules.nextAPlusCode(parent.getCode(), codes) : row.getCode();
             Indicator ap = buildIndicator(planId, parent.getDirectionId(), parent.getId(), row, code,

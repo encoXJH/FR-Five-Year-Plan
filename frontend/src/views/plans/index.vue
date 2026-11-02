@@ -12,17 +12,15 @@ import { getTodos, listNotifications, markNotificationRead } from '@/api/todo'
 import { useUserStore } from '@/stores/user'
 import { enumLabel } from '@/utils/enumLabels'
 import {
-  formatDate,
   formatDateTime,
   formatPercent,
   formatRelativeTime,
-  timeProgressOfYear,
   EMPTY_DISPLAY,
 } from '@/utils/format'
-import { resolveTodoLink, todoGroupLabel } from '@/utils/todo'
-import { getCurrentPlan, setCurrentPlan } from '@/utils/currentPlan'
+import { resolveNotificationLink, resolveTodoLink, todoGroupLabel } from '@/utils/todo'
+import { clearCurrentPlan, getCurrentPlan, setCurrentPlan } from '@/utils/currentPlan'
 import type { CreatePlanRequest, PlanCard, PlanTemplate } from '@/types/plan'
-import type { PlanSource, PlanStatus, Role } from '@/types/enums'
+import type { PlanSource, PlanStatus } from '@/types/enums'
 import type { TodoItem } from '@/types/todo'
 import type { NotificationItem } from '@/types/notification'
 
@@ -37,24 +35,6 @@ const currentPlanId = ref(getCurrentPlan()?.id ?? '')
 
 const canManage = computed(() => userStore.can('plan:manage'))
 
-// ---------- 欢迎条（UI 规范 P02） ----------
-const ROLE_PRIORITY: Role[] = ['ADMIN', 'LEADER', 'SCHOOL_OWNER', 'UNIT_OWNER']
-
-const now = new Date()
-const greeting = computed(() => {
-  const hour = now.getHours()
-  if (hour < 12) return '上午好'
-  if (hour < 18) return '下午好'
-  return '晚上好'
-})
-const primaryRoleLabel = computed(() => {
-  const primary = ROLE_PRIORITY.find((role) => userStore.roles.includes(role))
-  return primary ? enumLabel('Role', primary, userStore.enums) : ''
-})
-const currentYear = now.getFullYear()
-const yearTimeProgress = computed(() => formatPercent(timeProgressOfYear(currentYear, now)))
-const todayText = computed(() => formatDate(now))
-
 const visiblePlans = computed(() =>
   plans.value.filter((plan) => {
     if (statusFilter.value && plan.status !== statusFilter.value) return false
@@ -66,7 +46,13 @@ const visiblePlans = computed(() =>
 async function loadPlans(): Promise<void> {
   loading.value = true
   try {
-    plans.value = await listPlans()
+    const loadedPlans = await listPlans()
+    plans.value = loadedPlans
+    const cachedPlan = getCurrentPlan()
+    if (cachedPlan && !loadedPlans.some((plan) => plan.id === cachedPlan.id)) {
+      clearCurrentPlan()
+      currentPlanId.value = ''
+    }
   } finally {
     loading.value = false
   }
@@ -74,7 +60,7 @@ async function loadPlans(): Promise<void> {
 
 function goPlan(plan: PlanCard): void {
   setCurrentPlan(plan)
-  router.push(`/plans/${plan.id}`)
+  router.push(`/plans/${plan.id}/indicators`)
 }
 
 function setAsCurrent(plan: PlanCard): void {
@@ -265,7 +251,7 @@ async function submitCreate(): Promise<void> {
     ElMessage.success('计划创建成功')
     createVisible.value = false
     setCurrentPlan(plan)
-    router.push(`/plans/${plan.id}`)
+    router.push(form.source === 'TEMPLATE' ? `/plans/${plan.id}/indicators` : `/plans/${plan.id}`)
   } catch {
     // 拦截器已提示
   } finally {
@@ -309,6 +295,11 @@ async function loadNotifications(): Promise<void> {
 }
 
 async function openNotification(item: NotificationItem): Promise<void> {
+  const link = resolveNotificationLink(item)
+  if (!link) {
+    ElMessage.info('该通知暂无可跳转页面')
+    return
+  }
   if (!item.readAt) {
     try {
       const updated = await markNotificationRead(item.id)
@@ -317,17 +308,11 @@ async function openNotification(item: NotificationItem): Promise<void> {
       // 拦截器已提示
     }
   }
-  if (item.link) router.push(item.link)
+  router.push(link)
 }
 </script>
 
 <template>
-  <div class="welcome-bar">
-    {{ greeting }}，{{ userStore.userInfo?.name ?? ''
-    }}<template v-if="primaryRoleLabel">（{{ primaryRoleLabel }}）</template>
-    · 今天是 {{ todayText }} · {{ currentYear }} 年度时间进度 {{ yearTimeProgress }}
-  </div>
-
   <div class="page-header">
     <div>
       <h1 class="page-title">我的计划</h1>
@@ -411,7 +396,7 @@ async function openNotification(item: NotificationItem): Promise<void> {
         </el-progress>
         <div class="plan-stats">
           <div>整体完成率</div>
-          <div>A 类 {{ plan.indicatorCountA }} · A+ {{ plan.indicatorCountAPlus }} · B {{ plan.taskCountB }}</div>
+          <div>指标 {{ plan.indicatorCountA }} · 学院任务 {{ plan.taskCountB }}</div>
           <div>更新于 {{ formatDateTime(plan.updatedAt) }}</div>
         </div>
       </div>
@@ -518,7 +503,7 @@ async function openNotification(item: NotificationItem): Promise<void> {
           </el-select>
         </el-form-item>
         <el-form-item label=" ">
-          <el-checkbox v-model="form.copyAllocations">同时复制分解数据（B 任务）</el-checkbox>
+          <el-checkbox v-model="form.copyAllocations">同时复制分解数据（学院任务）</el-checkbox>
         </el-form-item>
       </template>
     </el-form>
@@ -558,17 +543,6 @@ async function openNotification(item: NotificationItem): Promise<void> {
 </template>
 
 <style scoped>
-.welcome-bar {
-  min-width: 0;
-  margin-bottom: var(--space-4);
-  padding: var(--space-3) var(--space-4);
-  background: var(--el-bg-color);
-  border-radius: var(--radius-card);
-  font-size: 14px;
-  color: var(--el-text-color-regular);
-  overflow-wrap: anywhere;
-}
-
 .page-header {
   display: flex;
   align-items: center;

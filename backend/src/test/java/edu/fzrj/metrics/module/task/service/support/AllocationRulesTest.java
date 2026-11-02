@@ -6,13 +6,11 @@ import edu.fzrj.metrics.module.task.dto.TaskDtos;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -63,7 +61,7 @@ class AllocationRulesTest {
     }
 
     @Test
-    void 合计diff_逐年给出差值且不平衡() {
+    void 合计diff_仅低于指标目标的年度不平衡() {
         Map<Integer, BigDecimal> indicator = Map.of(2026, bd("2"), 2027, bd("1"), 2028, bd("0"),
                 2029, bd("0"), 2030, bd("1"));
         Map<Integer, BigDecimal> allocated = Map.of(2026, bd("1"), 2027, bd("1"), 2028, bd("0"),
@@ -71,12 +69,22 @@ class AllocationRulesTest {
         List<TaskDtos.SummaryItem> summary = AllocationRules.buildSummary(YEARS, indicator, allocated);
         assertFalse(AllocationRules.isBalanced("INCREMENT", summary));
         List<FieldError> errors = AllocationRules.balanceErrors("A01-2", "INCREMENT", summary);
-        assertEquals(2, errors.size());
+        assertEquals(1, errors.size());
         assertEquals("A01-2.yearTargets[2026]", errors.get(0).getField());
         assertTrue(errors.get(0).getMessage().contains("A01-2 在 2026 年"));
         assertTrue(errors.get(0).getMessage().contains("各学院合计 1"));
-        assertTrue(errors.get(0).getMessage().contains("A+ 目标 2"));
-        assertEquals("A01-2.yearTargets[2030]", errors.get(1).getField());
+        assertTrue(errors.get(0).getMessage().contains("低于指标目标 2"));
+    }
+
+    @Test
+    void 合计diff_超额或等于指标目标均允许下发() {
+        Map<Integer, BigDecimal> indicator = Map.of(2026, bd("2"), 2027, bd("1"), 2028, bd("0"),
+                2029, bd("0"), 2030, bd("1"));
+        Map<Integer, BigDecimal> allocated = Map.of(2026, bd("3"), 2027, bd("1"), 2028, bd("0"),
+                2029, bd("0"), 2030, bd("2"));
+        List<TaskDtos.SummaryItem> summary = AllocationRules.buildSummary(YEARS, indicator, allocated);
+        assertTrue(AllocationRules.isBalanced("INCREMENT", summary));
+        assertTrue(AllocationRules.balanceErrors("A01-2", "INCREMENT", summary).isEmpty());
     }
 
     @Test
@@ -121,12 +129,6 @@ class AllocationRulesTest {
         assertTrue(AllocationRules.isBalanced("BOOLEAN", summary));
         List<FieldError> errors = AllocationRules.balanceErrors("A03", "BOOLEAN", summary);
         assertTrue(errors.isEmpty());
-    }
-
-    @Test
-    void 下发校验_未定稿抛50005已定稿通过() {
-        assertCode(50005, () -> AllocationRules.requireFinalized(null));
-        assertDoesNotThrow(() -> AllocationRules.requireFinalized(LocalDateTime.now()));
     }
 
     @Test

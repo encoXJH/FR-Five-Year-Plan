@@ -4,7 +4,7 @@ import ResponsiveRecordView from '@/components/ResponsiveRecordView.vue'
 import { formatTargetValue } from '@/utils/indicator'
 import type { StatCaliber } from '@/types/enums'
 
-/** 预览行：一条将生成的 B 任务（前端按矩阵组装） */
+/** 预览行：一条将生成的 学院任务（前端按矩阵组装） */
 export interface PreviewRow {
   code: string
   unitName: string
@@ -60,7 +60,7 @@ function yearDisplay(row: PreviewRow, year: number): string {
       type="info"
       :closable="false"
       class="preview-alert"
-      :title="`将把 ${indicatorCode} ${indicatorName} 正式交给学院，生成 ${rows.length} 条 B 任务并通知学院负责人；任务编号、负责人不可修改，目标调整需走延期 / 转移申请。`"
+      :title="`将把 ${indicatorCode} ${indicatorName} 正式交给学院，生成 ${rows.length} 条 学院任务并通知学院负责人；任务编号、负责人不可修改，目标调整需走延期 / 转移申请。`"
     />
     <ResponsiveRecordView>
       <template #table>
@@ -89,7 +89,7 @@ function yearDisplay(row: PreviewRow, year: number): string {
           <article v-for="row in rows" :key="row.code" class="responsive-card preview-card">
             <div class="responsive-card__header">
               <div class="responsive-card__title mono">{{ row.code }}</div>
-              <el-tag type="primary" effect="plain" size="small">B 任务</el-tag>
+              <el-tag type="primary" effect="plain" size="small">学院任务</el-tag>
             </div>
             <div class="preview-unit">{{ row.unitName }}</div>
             <div class="responsive-card__fields">
@@ -114,7 +114,7 @@ function yearDisplay(row: PreviewRow, year: number): string {
               </div>
             </div>
           </article>
-          <el-empty v-if="rows.length === 0" :image-size="80" description="暂无可下发的 B 任务" />
+          <el-empty v-if="rows.length === 0" :image-size="80" description="暂无可下发的 学院任务" />
         </div>
       </template>
     </ResponsiveRecordView>

@@ -54,6 +54,14 @@ app:
     signed-url-expire-minutes: ${FILE_SIGNED_URL_EXPIRE_MINUTES:10}
     sign-secret: ${FILE_SIGN_SECRET:please-change-me-file-sign-secret}
     kkfileview-url: ${KKFILEVIEW_URL:}
+    minio:
+      endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+      public-endpoint: ${MINIO_PUBLIC_ENDPOINT:}
+      region: ${MINIO_REGION:us-east-1}
+      access-key: ${MINIO_ACCESS_KEY:}
+      secret-key: ${MINIO_SECRET_KEY:}
+      bucket: ${MINIO_BUCKET:metrics-files}
+      path-style-access: ${MINIO_FORCE_PATH_STYLE:true}
   feishu:
     app-id: ${FEISHU_APP_ID:}
     app-secret: ${FEISHU_APP_SECRET:}

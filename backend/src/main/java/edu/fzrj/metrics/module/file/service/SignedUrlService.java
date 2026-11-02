@@ -1,5 +1,9 @@
 package edu.fzrj.metrics.module.file.service;
 
+import edu.fzrj.metrics.module.file.entity.FileInfo;
+import edu.fzrj.metrics.module.file.mapper.FileInfoMapper;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -11,30 +15,63 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 
 /**
- * 签名地址：HMAC-SHA256(fileId:expires, signSecret)，默认 10 分钟有效（API 约定 8.6）
+ * 签名地址：LOCAL 使用后端 HMAC raw 地址，MINIO 使用 S3 预签名 GET。
  */
 @Service
 public class SignedUrlService {
 
     private final String signSecret;
     private final long expireMinutes;
+    private final FileInfoMapper fileInfoMapper;
+    private final ObjectProvider<MinioStorageService> minioStorageProvider;
 
+    @Autowired
     public SignedUrlService(@Value("${app.file.sign-secret}") String signSecret,
-                            @Value("${app.file.signed-url-expire-minutes}") long expireMinutes) {
+                            @Value("${app.file.signed-url-expire-minutes}") long expireMinutes,
+                            FileInfoMapper fileInfoMapper,
+                            ObjectProvider<MinioStorageService> minioStorageProvider) {
         this.signSecret = signSecret;
         this.expireMinutes = expireMinutes;
+        this.fileInfoMapper = fileInfoMapper;
+        this.minioStorageProvider = minioStorageProvider;
     }
 
-    /** 生成签名地址（相对路径） */
+    public SignedUrlService(String signSecret, long expireMinutes) {
+        this(signSecret, expireMinutes, null, null);
+    }
+
+    /** 生成签名地址；导出等只有 fileId 的场景按文件实际存储类型选择。 */
     public SignedUrl sign(Long fileId) {
+        FileInfo fileInfo = fileInfoMapper == null ? null : fileInfoMapper.selectById(fileId);
+        return fileInfo == null ? signLocal(fileId, true) : sign(fileInfo, true);
+    }
+
+    public SignedUrl sign(FileInfo fileInfo) {
+        return sign(fileInfo, false);
+    }
+
+    public SignedUrl sign(FileInfo fileInfo, boolean download) {
+        if ("MINIO".equals(fileInfo.getStorageType()) && minioStorageProvider != null) {
+            MinioStorageService minio = minioStorageProvider.getIfAvailable();
+            if (minio != null) {
+                return download
+                        ? minio.presignGet(fileInfo.getStorageKey(), expireMinutes, fileInfo.getFileName(), true)
+                        : minio.presignGet(fileInfo.getStorageKey(), expireMinutes);
+            }
+        }
+        return signLocal(fileInfo.getId(), download);
+    }
+
+    private SignedUrl signLocal(Long fileId, boolean download) {
         long expires = Instant.now().plusSeconds(expireMinutes * 60).getEpochSecond();
         String signature = hmac(fileId + ":" + expires);
-        String url = "/api/v1/files/raw/" + fileId + "?e=" + expires + "&s=" + signature;
+        String url = "/api/v1/files/raw/" + fileId + "?e=" + expires + "&s=" + signature
+                + (download ? "&dl=1" : "");
         LocalDateTime expiresAt = LocalDateTime.ofEpochSecond(expires, 0, ZoneOffset.of("+08:00"));
         return new SignedUrl(url, expiresAt);
     }
 
-    /** 校验签名；过期或签名不符返回 false */
+    /** 校验 LOCAL 后端签名；过期或签名不符返回 false */
     public boolean verify(Long fileId, long expires, String signature) {
         if (expires < Instant.now().getEpochSecond()) {
             return false;
@@ -43,7 +80,6 @@ public class SignedUrlService {
             return false;
         }
         String expected = hmac(fileId + ":" + expires);
-        // 常量时间比较
         return MessageDigestUtils.isEqual(expected, signature);
     }
 

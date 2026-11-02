@@ -1,6 +1,7 @@
 package edu.fzrj.metrics.module.indicator.service;
 
 import edu.fzrj.metrics.common.audit.AuditLog;
+import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.common.idempotent.Idempotent;
 import edu.fzrj.metrics.module.indicator.controller.IndicatorController;
 import edu.fzrj.metrics.module.indicator.dto.IndicatorDtos;
@@ -52,61 +53,14 @@ class DecompositionServiceTest {
     private DecompositionService decompositionService;
 
     @Test
-    void 先创建APlus再用新建ID和版本保存矩阵() {
+    void 分解编排入口禁止新增A加并返回40006() {
         IndicatorDtos.DecompositionRequest request = request();
-        IndicatorDtos.Detail aPlus = aPlus();
-        TaskDtos.AllocationView expectedAllocation = new TaskDtos.AllocationView(
-                A_PLUS_ID, CREATED_VERSION + 1, true, List.of(), List.of());
-        when(indicatorService.create(PLAN_ID, request.getIndicator())).thenReturn(aPlus);
-        when(allocationService.putAllocation(eq(A_PLUS_ID), any(TaskDtos.AllocationPutRequest.class)))
-                .thenReturn(expectedAllocation);
 
-        IndicatorDtos.DecompositionResponse response = decompositionService.decompose(PLAN_ID, PARENT_ID, request);
-
-        assertSame(aPlus, response.aPlus());
-        assertSame(expectedAllocation, response.allocation());
-        assertEquals("A_PLUS", request.getIndicator().getLevel());
-        assertEquals(PARENT_ID, request.getIndicator().getParentId());
-
-        ArgumentCaptor<TaskDtos.AllocationPutRequest> allocationRequest =
-                ArgumentCaptor.forClass(TaskDtos.AllocationPutRequest.class);
-        InOrder calls = inOrder(indicatorService, allocationService);
-        calls.verify(indicatorService).create(PLAN_ID, request.getIndicator());
-        calls.verify(allocationService).putAllocation(eq(A_PLUS_ID), allocationRequest.capture());
-        assertEquals(CREATED_VERSION, allocationRequest.getValue().getVersion());
-        assertSame(request.getRows(), allocationRequest.getValue().getRows());
-        verifyNoMoreInteractions(indicatorService, allocationService);
-    }
-
-    @Test
-    void 矩阵保存失败时异常向上抛出且不调用其他服务方法() {
-        IndicatorDtos.DecompositionRequest request = request();
-        when(indicatorService.create(PLAN_ID, request.getIndicator())).thenReturn(aPlus());
-        IllegalStateException expected = new IllegalStateException("保存分解失败");
-        when(allocationService.putAllocation(eq(A_PLUS_ID), any(TaskDtos.AllocationPutRequest.class)))
-                .thenThrow(expected);
-
-        IllegalStateException actual = assertThrows(IllegalStateException.class,
+        BizException error = assertThrows(BizException.class,
                 () -> decompositionService.decompose(PLAN_ID, PARENT_ID, request));
 
-        assertSame(expected, actual);
-        InOrder calls = inOrder(indicatorService, allocationService);
-        calls.verify(indicatorService).create(PLAN_ID, request.getIndicator());
-        calls.verify(allocationService).putAllocation(eq(A_PLUS_ID), any(TaskDtos.AllocationPutRequest.class));
-        verifyNoMoreInteractions(indicatorService, allocationService);
-    }
-
-    @Test
-    void 创建失败时不保存矩阵() {
-        IndicatorDtos.DecompositionRequest request = request();
-        IllegalStateException expected = new IllegalStateException("父级不可量化");
-        when(indicatorService.create(PLAN_ID, request.getIndicator())).thenThrow(expected);
-
-        IllegalStateException actual = assertThrows(IllegalStateException.class,
-                () -> decompositionService.decompose(PLAN_ID, PARENT_ID, request));
-
-        assertSame(expected, actual);
-        verifyNoInteractions(allocationService);
+        assertEquals(40006, error.getErrorCode().getCode());
+        verifyNoInteractions(indicatorService, allocationService);
     }
 
     @Test

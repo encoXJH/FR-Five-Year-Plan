@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { FullScreen } from '@element-plus/icons-vue'
+import BackButton from '@/components/BackButton.vue'
 import { listPlans } from '@/api/plan'
 import { getScreenData } from '@/api/screen'
 import { getStatsTree } from '@/api/stats'
@@ -137,7 +138,7 @@ function renderIndicator(): void {
         if (!item) return ''
         const rate = item.completionRate == null ? '—' : `${(item.completionRate * 100).toFixed(1)}%`
         const cumRate = item.cumulativeRate == null ? '—' : `${(item.cumulativeRate * 100).toFixed(1)}%`
-        return `${item.name}<br/>目标 ${item.taskCount} · 完成 ${item.achievedCount} · 当年完成率 ${rate} · 五年累计 ${cumRate}<br/><span style="color:#8FA7D6">点击查看 A → A+ → B 下钻明细</span>`
+        return `${item.name}<br/>目标 ${item.taskCount} · 完成 ${item.achievedCount} · 当年完成率 ${rate} · 五年累计 ${cumRate}<br/><span style="color:#8FA7D6">点击查看指标与学院任务明细</span>`
       },
     },
     legend: { top: 0, itemWidth: 14, itemHeight: 8 },
@@ -383,10 +384,6 @@ function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape' && drillVisible.value) closeIndicatorDrill()
 }
 
-function goBack(): void {
-  router.push('/plans')
-}
-
 onMounted(async () => {
   window.addEventListener('resize', onResize)
   window.addEventListener('keydown', onKeydown)
@@ -430,7 +427,6 @@ const coreNumbers = computed(() => data.value?.coreNumbers ?? null)
 const adjustmentStats = computed(() => data.value?.adjustmentStats ?? null)
 
 const coreADisplay = useCountUp(computed(() => coreNumbers.value?.indicatorACount), formatLargeNumber)
-const coreAPlusDisplay = useCountUp(computed(() => coreNumbers.value?.indicatorAPlusCount), formatLargeNumber)
 const coreTaskDisplay = useCountUp(computed(() => coreNumbers.value?.taskCount), formatLargeNumber)
 const coreMaterialDisplay = useCountUp(computed(() => coreNumbers.value?.materialCount), formatLargeNumber)
 const coreApprovedDisplay = useCountUp(
@@ -463,7 +459,7 @@ const progressDeltaText = computed(() => {
   return `${d >= 0 ? '+' : '-'}${(Math.abs(d) * 100).toFixed(1)}`
 })
 
-// ---------- ⑤ A 级指标下钻 ----------
+// ---------- ⑤ 指标下钻 ----------
 interface DrillRow {
   node: StatsTreeNode
   depth: number
@@ -526,7 +522,7 @@ function achieveDotColor(node: StatsTreeNode): string {
 }
 
 function levelLabel(level: StatsTreeNode['level']): string {
-  return level === 'A' ? 'A' : level === 'A_PLUS' ? 'A+' : 'B'
+  return level === 'A' ? 'A' : 'B'
 }
 
 /** 节点数值摘要：数值型显示「实际 / 目标」，是否型显示计划完成 */
@@ -563,8 +559,10 @@ function activityText(a: ScreenActivity): string {
     <div
       v-if="scale > 0"
       class="screen-canvas"
+      :class="{ 'has-back': !kiosk }"
       :style="{ transform: `translate(-50%, -50%) scale(${scale})` }"
     >
+      <BackButton v-if="!kiosk" dark previous class="screen-back" />
       <!-- 顶部标题栏 -->
       <header class="screen-header">
         <div class="header-left">
@@ -595,7 +593,6 @@ function activityText(a: ScreenActivity): string {
               <el-option label="五年累计" value="ALL" />
               <el-option v-for="y in yearOptions" :key="y" :label="`${y} 年`" :value="y" />
             </el-select>
-            <button class="header-btn" type="button" @click="goBack">返回</button>
           </template>
           <button class="header-btn" type="button" @click="toggleFullscreen">
             <el-icon :size="14"><FullScreen /></el-icon>
@@ -717,15 +714,11 @@ function activityText(a: ScreenActivity): string {
             <i class="panel-corner panel-corner-tr" /><i class="panel-corner panel-corner-bl" />
             <div class="core-item">
               <div class="num core-num">{{ coreADisplay }}</div>
-              <div class="core-label">A 类指标</div>
-            </div>
-            <div class="core-item">
-              <div class="num core-num">{{ coreAPlusDisplay }}</div>
-              <div class="core-label">A+ 类指标</div>
+              <div class="core-label">指标</div>
             </div>
             <div class="core-item">
               <div class="num core-num">{{ coreTaskDisplay }}</div>
-              <div class="core-label">B 任务</div>
+              <div class="core-label">学院任务</div>
             </div>
             <div class="core-item">
               <div class="num core-num">{{ coreMaterialDisplay }}</div>
@@ -739,7 +732,7 @@ function activityText(a: ScreenActivity): string {
 
           <div class="panel panel-indicator">
             <i class="panel-corner panel-corner-tr" /><i class="panel-corner panel-corner-bl" />
-            <div class="panel-title">A 级指标完成情况</div>
+            <div class="panel-title">指标完成情况</div>
             <div v-if="data.byIndicator.length === 0" class="panel-empty">暂无数据</div>
             <div v-show="data.byIndicator.length > 0" :ref="indicatorChart.container" class="panel-chart" />
           </div>
@@ -803,7 +796,7 @@ function activityText(a: ScreenActivity): string {
         </section>
       </main>
 
-      <!-- ⑤ A 级指标下钻抽屉（点击指标条形触发，ESC / 遮罩 / 按钮关闭） -->
+      <!-- ⑤ 指标下钻抽屉（点击指标条形触发，ESC / 遮罩 / 按钮关闭） -->
       <div v-if="drillVisible" class="drill-overlay" @click.self="closeIndicatorDrill">
         <aside class="drill-drawer">
           <header class="drill-head">
@@ -881,6 +874,8 @@ function activityText(a: ScreenActivity): string {
 }
 
 /* ---------- 顶部标题栏 ---------- */
+.screen-back { height: 48px; margin: 0; padding: 6px 24px 0; box-sizing: border-box; }
+.has-back .screen-main { height: calc(1080px - 144px); }
 .screen-header {
   position: relative;
   height: 96px;
@@ -1419,7 +1414,7 @@ function activityText(a: ScreenActivity): string {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------- ⑤ A 级指标下钻抽屉 ---------- */
+/* ---------- ⑤ 指标下钻抽屉 ---------- */
 .drill-overlay {
   position: absolute;
   inset: 0;

@@ -22,9 +22,17 @@ export function getStatsByIndicator(planId: string, year?: number): Promise<Indi
   return http.get(`/plans/${planId}/stats/by-indicator`, { year })
 }
 
-/** A → A+ → B 逐级下钻 */
+/** 旧统计树中的历史中间节点不单独展示，其 B 子任务提升到所属 A。 */
+export function normalizeStatsTree(nodes: StatsTreeNode[]): StatsTreeNode[] {
+  return nodes.flatMap((node) => {
+    if (node.level === 'A_PLUS') return normalizeStatsTree(node.children ?? [])
+    return [{ ...node, children: normalizeStatsTree(node.children ?? []) }]
+  })
+}
+
+/** A → B 逐级下钻，兼容旧统计响应。 */
 export function getStatsTree(planId: string, year?: number): Promise<StatsTreeNode[]> {
-  return http.get(`/plans/${planId}/stats/tree`, { year })
+  return http.get<StatsTreeNode[]>(`/plans/${planId}/stats/tree`, { year }).then(normalizeStatsTree)
 }
 
 /** 指标各年度目标与实际趋势 */

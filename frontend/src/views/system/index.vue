@@ -23,7 +23,7 @@ const canManageDirections = computed(() => isAdmin.value && userStore.can('syste
     <el-card shadow="never">
       <el-tabs v-model="activeTab">
         <el-tab-pane label="执行单元" name="orgUnits" lazy><OrgUnitPanel /></el-tab-pane>
-        <el-tab-pane v-if="canManageDirections" label="S 级任务" name="directions" lazy><DirectionPanel /></el-tab-pane>
+        <el-tab-pane v-if="canManageDirections" label="主要建设方向" name="directions" lazy><DirectionPanel /></el-tab-pane>
         <el-tab-pane label="专业群" name="majorGroups" lazy><MajorGroupPanel /></el-tab-pane>
         <el-tab-pane label="用户与角色" name="users" lazy><UserPanel /></el-tab-pane>
         <el-tab-pane label="字典" name="dicts" lazy><DictPanel /></el-tab-pane>

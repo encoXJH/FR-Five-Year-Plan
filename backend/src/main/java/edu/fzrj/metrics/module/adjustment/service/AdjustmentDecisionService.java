@@ -187,6 +187,10 @@ public class AdjustmentDecisionService {
         Task fromTask = taskService.requireCurrentTask(adjustment.getTaskId());
         Indicator indicator = indicatorService.requireIndicator(adjustment.getIndicatorId());
         String caliber = indicator.getStatCaliber();
+        if (AdjustmentRules.isTransfer(adjustment.getType()) && "A".equals(indicator.getLevel())
+                && indicatorService.hasLegacyAPlus(indicator)) {
+            throw new BizException(ErrorCode.LEVEL_INVALID, "不能在 legacy A+ 与 A 直承 B 之间转移");
+        }
         boolean isBoolean = "BOOLEAN".equals(caliber);
 
         // 接收任务：转移类且接收单元原无该 A+ 的 B 时自动新建

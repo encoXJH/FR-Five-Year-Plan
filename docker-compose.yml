@@ -23,5 +23,44 @@ services:
       timeout: 3s
       retries: 20
 
+  minio:
+    image: minio/minio:latest
+    container_name: metrics-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      TZ: Asia/Shanghai
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    image: amazon/aws-cli:latest
+    container_name: metrics-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      AWS_DEFAULT_REGION: ${MINIO_REGION:-us-east-1}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        aws --endpoint-url http://minio:9000 s3api create-bucket --bucket ${MINIO_BUCKET:-metrics-files} >/dev/null 2>&1 || true;
+        aws --endpoint-url http://minio:9000 s3api put-bucket-cors --bucket ${MINIO_BUCKET:-metrics-files}
+        --cors-configuration '{"CORSRules":[{"AllowedOrigins":["${MINIO_CORS_ALLOWED_ORIGINS:-http://localhost:5173}"],"AllowedMethods":["GET","PUT","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3600}]}'
+    restart: "no"
+
 volumes:
   mysql-data:
+  minio-data:

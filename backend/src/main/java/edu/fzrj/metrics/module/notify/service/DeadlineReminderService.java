@@ -98,6 +98,7 @@ public class DeadlineReminderService {
             List<PlanYear> activeYears = planYearMapper.selectList(new LambdaQueryWrapper<PlanYear>()
                     .eq(PlanYear::getPlanId, plan.getId())
                     .eq(PlanYear::getStatus, "ACTIVE")
+                    .eq(PlanYear::getYear, today.getYear())
                     .eq(PlanYear::getDeleted, 0L));
             for (PlanYear planYear : activeYears) {
                 LocalDate deadline = ReminderRules.deadlineOf(planYear.getYear(), plan.getSettleDeadline());

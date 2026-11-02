@@ -8,10 +8,12 @@ export interface Milestone {
   /** 关联 B 任务 */
   taskId?: string | null
   name: string
-  /** 关联的年度目标 */
+  /** 关联的年度目标（后端字段为 relatedYear，year 仅兼容旧数据） */
+  relatedYear?: number | null
   year?: number | null
   /** 计划完成时间（YYYY-MM-DD 或 ISO 8601） */
   dueDate: string | null
+  completedAt?: string | null
   /** 交付物要求 */
   deliverable?: string | null
   status: MilestoneStatus
@@ -41,6 +43,7 @@ export interface CreateMilestoneRequest {
 export interface UpdateMilestoneRequest {
   name?: string
   year?: number | null
+  relatedYear?: number | null
   dueDate?: string | null
   deliverable?: string | null
   status?: MilestoneStatus

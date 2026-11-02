@@ -68,7 +68,7 @@ public final class IndicatorRules {
         boolean ok = LEVEL_A.equals(level) ? isACode(code) : isAPlusCode(code);
         if (!ok) {
             throw new BizException(ErrorCode.PARAM_INVALID,
-                    LEVEL_A.equals(level) ? "A 类编号格式应为 A01 形式" : "A+ 类编号格式应为 A01-1 形式");
+                    LEVEL_A.equals(level) ? "指标编号格式应为 A01 形式" : "历史量化记录编号格式应为 A01-1 形式");
         }
     }
 
@@ -174,7 +174,7 @@ public final class IndicatorRules {
             return;
         }
         if (aTotal == null) {
-            throw new BizException(ErrorCode.A_PLUS_SUM_INVALID, "自动汇总的 A 类指标必须设置五年目标总量");
+            throw new BizException(ErrorCode.A_PLUS_SUM_INVALID, "自动汇总的 指标必须设置五年目标总量");
         }
         BigDecimal sum = aPlusTotals.stream()
                 .filter(java.util.Objects::nonNull)

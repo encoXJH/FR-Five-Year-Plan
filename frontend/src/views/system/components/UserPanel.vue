@@ -246,7 +246,8 @@ onMounted(() => {
         <el-option v-for="u in units" :key="u.id" :label="`${u.code} ${u.name}`" :value="u.id" />
       </el-select>
       <el-button type="primary" @click="search">查询</el-button>
-      <div class="toolbar-spacer" />
+    </div>
+    <div class="app-action-row panel-actions">
       <el-button type="primary" @click="openCreate">新增用户</el-button>
     </div>
 
@@ -283,21 +284,21 @@ onMounted(() => {
       <el-table-column label="最近登录" width="150">
         <template #default="{ row }">{{ formatDateTime(row.lastLoginAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="240" fixed="right">
+      <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
           <el-button link type="primary" size="small" @click="openSetRoles(row)">设置角色</el-button>
-          <el-button link type="warning" size="small" @click="handleResetPassword(row)">
-            重置密码
-          </el-button>
-          <el-button
-            link
-            :type="row.isEnabled ? 'danger' : 'success'"
-            size="small"
-            @click="toggleEnabled(row)"
-          >
-            {{ row.isEnabled ? '停用' : '启用' }}
-          </el-button>
+          <el-dropdown trigger="click" class="more-dropdown">
+            <el-button link type="primary" size="small">更多</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item @click="handleResetPassword(row)">重置密码</el-dropdown-item>
+                <el-dropdown-item @click="toggleEnabled(row)">
+                  {{ row.isEnabled ? '停用' : '启用' }}
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </template>
       </el-table-column>
     </el-table>
@@ -395,12 +396,41 @@ onMounted(() => {
 <style scoped>
 .panel-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-3);
   margin-bottom: var(--space-4);
 }
 
-.toolbar-spacer {
-  flex: 1;
+.panel-actions {
+  margin-bottom: var(--space-4);
+}
+
+.more-dropdown {
+  margin-left: 12px;
+}
+
+@media (max-width: 768px) {
+  .panel-toolbar :deep(.el-button),
+  .panel-actions :deep(.el-button),
+  :deep(.el-table .el-button) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 600px) {
+  .panel-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .panel-toolbar :deep(.el-input),
+  .panel-toolbar :deep(.el-select),
+  .panel-toolbar :deep(.el-button) {
+    width: 100% !important;
+    margin-left: 0;
+  }
 }
 
 .role-tag {

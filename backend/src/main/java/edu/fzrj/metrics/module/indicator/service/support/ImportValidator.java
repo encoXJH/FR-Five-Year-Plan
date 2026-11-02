@@ -7,7 +7,7 @@ import java.util.Map;
 
 /**
  * Excel 导入行校验（纯逻辑，40001 逐行错误明细）。
- * 只做行级与文件内一致性校验；A → A+ 守恒（40003）在定稿时强制，导入不拦截。
+ * 只做行级与文件内一致性校验；A → A+ 守恒（40003）在下发前强制，导入不拦截。
  */
 public final class ImportValidator {
 
@@ -27,7 +27,7 @@ public final class ImportValidator {
             boolean formatOk = "A".equals(level)
                     ? IndicatorRules.isACode(row.code) : IndicatorRules.isAPlusCode(row.code);
             if (!formatOk) {
-                errors.add("编号格式不正确（A 类为 A01 形式，A+ 为 A01-1 形式）");
+                errors.add("编号格式不正确（指标为 A01 形式，历史量化记录为 A01-1 形式）");
             }
             if (ctx.existingCodes.contains(row.code)) {
                 errors.add("编号已存在：" + row.code);

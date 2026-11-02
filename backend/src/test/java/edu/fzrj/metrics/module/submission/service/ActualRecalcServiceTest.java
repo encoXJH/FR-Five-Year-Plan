@@ -17,6 +17,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -28,6 +30,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -116,6 +120,118 @@ class ActualRecalcServiceTest {
         assertDecimalEquals("5", currentYear.getActualValue());
         assertDecimalEquals("5", aPlusCache.getActualValue());
         assertDecimalEquals("8", aCache.getActualValue());
+    }
+
+    @Test
+    void 直承A任务重算时也合并legacyA加缓存() {
+        TaskYear currentYear = new TaskYear();
+        currentYear.setId(101L);
+        currentYear.setTaskId(201L);
+        currentYear.setIndicatorId(302L);
+        currentYear.setYear(2026);
+        currentYear.setTarget(new BigDecimal("10"));
+        currentYear.setYearStatus("IN_PROGRESS");
+        currentYear.setDeleted(0L);
+
+        Task currentTask = new Task();
+        currentTask.setId(201L);
+        currentTask.setIndicatorId(302L);
+        currentTask.setPlanId(401L);
+
+        Indicator a = indicator(302L, null);
+        a.setRollupMode("AUTO_SUM");
+        Indicator aPlus = indicator(301L, 302L);
+        Plan plan = new Plan();
+        plan.setId(401L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2030);
+        Submission approved = new Submission();
+        approved.setApprovedAmount(new BigDecimal("5"));
+
+        IndicatorYearTarget aPlusCache = cache(501L, 301L);
+        aPlusCache.setActualValue(new BigDecimal("3"));
+        IndicatorYearTarget aCache = cache(502L, 302L);
+
+        when(taskYearMapper.selectById(101L)).thenReturn(currentYear);
+        when(taskMapper.selectOne(any())).thenReturn(currentTask);
+        when(indicatorMapper.selectOne(any())).thenReturn(a);
+        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(submissionMapper.selectList(any())).thenReturn(List.of(approved));
+        when(submissionMapper.selectCount(any())).thenReturn(0L);
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(currentYear));
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(aPlus));
+        when(yearTargetMapper.selectOne(any())).thenReturn(aPlusCache, aCache);
+
+        actualRecalcService.recalcTaskYear(101L);
+
+        assertDecimalEquals("5", currentYear.getActualValue());
+        assertDecimalEquals("8", aCache.getActualValue());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"STOCK", "GROWTH"})
+    void 补审往年后按规划期连续重算后续年度(String caliber) {
+        TaskYear year2026 = taskYear(101L, 2026);
+        TaskYear year2027 = taskYear(102L, 2027);
+        year2027.setActualValue(new BigDecimal("999"));
+        Task task = new Task();
+        task.setId(201L);
+        task.setIndicatorId(301L);
+        task.setPlanId(401L);
+        Indicator indicator = indicator(301L, null);
+        indicator.setStatCaliber(caliber);
+        indicator.setRollupMode("AUTO_SUM");
+        indicator.setBaselineValue(new BigDecimal("100"));
+        Plan plan = new Plan();
+        plan.setId(401L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2030);
+        Submission approved2026 = new Submission();
+        approved2026.setApprovedTotal(new BigDecimal("110"));
+        Submission approved2027 = new Submission();
+        approved2027.setApprovedTotal(new BigDecimal("132"));
+        IndicatorYearTarget cache2026 = cache(501L, 301L);
+        IndicatorYearTarget cache2027 = cache(502L, 301L);
+        cache2027.setYear(2027);
+
+        when(taskYearMapper.selectById(101L)).thenReturn(year2026);
+        when(taskMapper.selectOne(any())).thenReturn(task);
+        when(indicatorMapper.selectOne(any())).thenReturn(indicator);
+        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(submissionMapper.selectList(any())).thenReturn(List.of(approved2026), List.of(approved2027));
+        when(submissionMapper.selectCount(any())).thenReturn(0L);
+        when(taskYearMapper.selectList(any())).thenReturn(
+                List.of(year2026, year2027), List.of(year2026), List.of(year2027));
+        when(taskYearMapper.selectOne(any())).thenReturn(year2026);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of());
+        when(yearTargetMapper.selectOne(any())).thenReturn(cache2026, cache2026, cache2027);
+
+        actualRecalcService.recalcTaskYear(101L);
+
+        assertDecimalEquals("110", year2026.getActualTotal());
+        assertDecimalEquals("132", year2027.getActualTotal());
+        if ("GROWTH".equals(caliber)) {
+            assertDecimalEquals("0.1", year2026.getActualValue());
+            assertDecimalEquals("0.2", year2027.getActualValue());
+            assertDecimalEquals("0.2", cache2027.getActualValue());
+        } else {
+            assertDecimalEquals("110", year2026.getActualValue());
+            assertDecimalEquals("132", year2027.getActualValue());
+            assertDecimalEquals("132", cache2027.getActualValue());
+        }
+        verify(taskYearMapper, times(2)).updateById(any(TaskYear.class));
+    }
+
+    private TaskYear taskYear(Long id, Integer year) {
+        TaskYear taskYear = new TaskYear();
+        taskYear.setId(id);
+        taskYear.setTaskId(201L);
+        taskYear.setIndicatorId(301L);
+        taskYear.setYear(year);
+        taskYear.setTarget(new BigDecimal("200"));
+        taskYear.setYearStatus("IN_PROGRESS");
+        taskYear.setDeleted(0L);
+        return taskYear;
     }
 
     private Indicator indicator(Long id, Long parentId) {

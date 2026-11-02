@@ -1,41 +1,22 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import ProgressWithTimeLine from '@/components/ProgressWithTimeLine.vue'
+import BackButton from '@/components/BackButton.vue'
 import ReasonDialog from '@/components/ReasonDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import MilestonePanel from './components/MilestonePanel.vue'
-import {
-  activatePlan,
-  activatePlanYear,
-  archivePlan,
-  getPlan,
-  savePlanAsTemplate,
-} from '@/api/plan'
-import { getStatsByIndicator, getStatsByUnit, getStatsOverview } from '@/api/stats'
+import { activatePlan, archivePlan, getPlan } from '@/api/plan'
 import { finalSettle, getYearSettlement, settleYear, unlockYear } from '@/api/settlement'
-import { getTodos, listNotifications, markNotificationRead } from '@/api/todo'
+import { completeMakeup, listTaskMakeups } from '@/api/makeup'
 import { useUserStore } from '@/stores/user'
 import { newIdempotencyKey } from '@/utils/idempotency'
-import { enumLabel } from '@/utils/enumLabels'
-import { formatPercent, formatRelativeTime } from '@/utils/format'
-import { progressPercentage } from '@/utils/task'
-import { resolveTodoLink, todoGroupLabel } from '@/utils/todo'
+import { formatPercent } from '@/utils/format'
 import { setCurrentPlan } from '@/utils/currentPlan'
 import type { PlanDetail, PlanYear } from '@/types/plan'
-import type {
-  IndicatorStat,
-  StatsOverview,
-  UnitStatItem,
-  WarningItem,
-  YearSettlement,
-} from '@/types/stats'
-import type { TodoItem, TodosResult } from '@/types/todo'
-import type { NotificationItem } from '@/types/notification'
+import type { SettlementItem, YearSettlement } from '@/types/stats'
 
 const route = useRoute()
-const router = useRouter()
 const userStore = useUserStore()
 
 const planId = computed(() => route.params.planId as string)
@@ -47,7 +28,6 @@ const canSettle = computed(() => userStore.can('settlement:manage'))
 const isArchived = computed(() => plan.value?.status === 'ARCHIVED')
 
 const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
-const descriptionColumns = computed(() => (viewportWidth.value <= 768 ? 1 : viewportWidth.value <= 1280 ? 2 : 4))
 const stepDirection = computed<'horizontal' | 'vertical'>(() =>
   viewportWidth.value <= 768 ? 'vertical' : 'horizontal',
 )
@@ -69,11 +49,6 @@ const planYears = computed<number[]>(() => {
   return list
 })
 
-/** 当前激活年度（统计 KPI 的年度口径；无激活年度时为五年累计） */
-const activeYear = computed<number | null>(
-  () => plan.value?.years.find((y) => y.status === 'ACTIVE')?.year ?? null,
-)
-
 async function loadPlan(): Promise<void> {
   loading.value = true
   try {
@@ -92,24 +67,6 @@ async function handleActivate(): Promise<void> {
   if (!plan.value) return
   plan.value = await activatePlan(planId.value, plan.value.version)
   ElMessage.success('计划已启动')
-}
-
-const activatingYear = ref<number | null>(null)
-
-async function handleActivateYear(year: PlanYear): Promise<void> {
-  await ElMessageBox.confirm(
-    `激活 ${year.year} 年度后，各学院即可填报该年度数据。确认激活？`,
-    '激活年度',
-    { confirmButtonText: '确认激活', cancelButtonText: '取消' },
-  )
-  if (!plan.value) return
-  activatingYear.value = year.year
-  try {
-    plan.value = await activatePlanYear(planId.value, year.year, plan.value.version, newIdempotencyKey())
-    ElMessage.success(`${year.year} 年度已激活`)
-  } finally {
-    activatingYear.value = null
-  }
 }
 
 // ---------- 年度核算 / 解锁 / 五年核算（settlement:manage） ----------
@@ -131,7 +88,6 @@ async function handleSettleYear(year: PlanYear): Promise<void> {
     await loadPlan()
     settlementYear.value = year.year
     await loadSettlement()
-    await loadStats()
   } finally {
     settlingYear.value = null
   }
@@ -159,7 +115,6 @@ async function submitUnlock(reason: string): Promise<void> {
     ElMessage.success(`${unlockTargetYear.value} 年度已解锁`)
     unlockDialogVisible.value = false
     await loadPlan()
-    await loadStats()
   } finally {
     unlockingYear.value = null
   }
@@ -187,7 +142,6 @@ async function handleFinalSettle(): Promise<void> {
       { confirmButtonText: '知道了' },
     )
     await loadPlan()
-    await loadStats()
   } finally {
     finalSettling.value = false
   }
@@ -228,93 +182,37 @@ const settlementSummary = computed(() => {
   }
 })
 
-// ---------- 统计 KPI（stats 接口未就绪时保持占位，不影响主流程） ----------
-const overview = ref<StatsOverview | null>(null)
-const overviewAll = ref<StatsOverview | null>(null)
-const byIndicator = ref<IndicatorStat[]>([])
-const byUnit = ref<UnitStatItem[]>([])
+const completingMakeupId = ref<string | null>(null)
+const canCompleteMakeup = computed(() => userStore.can('submission:submit'))
 
-/** 学院视角只显示本单元名次与完成率（UI 规范 P03 Q12） */
-const isUnitView = computed(
-  () => userStore.roles.includes('UNIT_OWNER') && !userStore.can('settlement:manage'),
-)
-
-const rankRows = computed(() => {
-  const sorted = [...byUnit.value].sort((a, b) => (b.completionRate ?? -1) - (a.completionRate ?? -1))
-  if (!isUnitView.value) return sorted
-  const myUnitId = userStore.userInfo?.unit?.id
-  return sorted.filter((item) => item.unit?.id === myUnitId)
-})
-
-async function loadStats(): Promise<void> {
+async function handleCompleteMakeup(row: SettlementItem): Promise<void> {
+  if (!row.makeupId || row.makeupStatus !== 'PENDING') return
   try {
-    const y = activeYear.value ?? undefined
-    const [oAll, o, i, u] = await Promise.all([
-      getStatsOverview(planId.value),
-      getStatsOverview(planId.value, y),
-      getStatsByIndicator(planId.value, y),
-      getStatsByUnit(planId.value, y),
-    ])
-    overviewAll.value = oAll
-    overview.value = o
-    byIndicator.value = i
-    byUnit.value = u
+    await ElMessageBox.confirm(
+      `确认 ${row.taskCode} 的补做工作已完成？来源年度将同步标记为「已补做」。`,
+      '确认补做完成',
+      { confirmButtonText: '确认完成', cancelButtonText: '取消' },
+    )
   } catch {
-    overviewAll.value = null
-    overview.value = null
-    byIndicator.value = []
-    byUnit.value = []
+    return
   }
-}
-
-/** 预警指标（前 5 条）：滞后差值 ≥ 20 个百分点标红，否则橙色 */
-const topWarnings = computed<WarningItem[]>(() => (overview.value?.warnings ?? []).slice(0, 5))
-
-function warningLevel(item: WarningItem): 'danger' | 'warning' {
-  return (item.lagGap ?? 0) >= 0.2 ? 'danger' : 'warning'
-}
-
-// ---------- 我的待办 / 最近动态（各前 5 条） ----------
-const todosResult = ref<TodosResult | null>(null)
-const topTodos = computed<TodoItem[]>(() => (todosResult.value?.items ?? []).slice(0, 5))
-const reviewPendingCount = computed(() => Number(todosResult.value?.summary?.REVIEW ?? 0))
-const approvalPendingCount = computed(() => Number(todosResult.value?.summary?.APPROVAL ?? 0))
-
-async function loadTodos(): Promise<void> {
+  completingMakeupId.value = row.makeupId
   try {
-    todosResult.value = await getTodos()
-  } catch {
-    todosResult.value = null
-  }
-}
-
-function goTodo(todo: TodoItem): void {
-  const link = resolveTodoLink(todo)
-  if (link) router.push(link)
-  else ElMessage.info('该待办暂无可跳转页面')
-}
-
-const topNotifications = ref<NotificationItem[]>([])
-
-async function loadNotifications(): Promise<void> {
-  try {
-    const result = await listNotifications({ page: 1, pageSize: 5 })
-    topNotifications.value = result.items
-  } catch {
-    topNotifications.value = []
-  }
-}
-
-async function openNotification(item: NotificationItem): Promise<void> {
-  if (!item.readAt) {
-    try {
-      const updated = await markNotificationRead(item.id)
-      item.readAt = updated.readAt
-    } catch {
-      // 拦截器已提示
+    const records = await listTaskMakeups(row.taskId)
+    const makeup = records.find((item) => item.id === row.makeupId && item.status === 'PENDING')
+    if (!makeup) {
+      ElMessage.warning('补做记录状态已变化，请刷新后重试')
+      await loadSettlement()
+      return
     }
+    await completeMakeup(makeup.id, makeup.version, newIdempotencyKey())
+    ElMessage.success('已标记为已补做')
+    await loadSettlement()
+  } catch {
+    // 请求异常由拦截器统一提示。
+  } finally {
+    completingMakeupId.value = null
   }
-  if (item.link) router.push(item.link)
 }
 
 async function handleArchive(): Promise<void> {
@@ -328,47 +226,18 @@ async function handleArchive(): Promise<void> {
   ElMessage.success('计划已归档')
 }
 
-const templateName = ref('')
-const templateDialogVisible = ref(false)
-const savingTemplate = ref(false)
-
-function openSaveAsTemplate(): void {
-  templateName.value = `${plan.value?.name ?? ''} 模板`
-  templateDialogVisible.value = true
-}
-
-async function submitSaveAsTemplate(): Promise<void> {
-  if (!templateName.value.trim()) {
-    ElMessage.warning('请填写模板名称')
-    return
-  }
-  savingTemplate.value = true
-  try {
-    await savePlanAsTemplate(planId.value, { name: templateName.value.trim() })
-    ElMessage.success('已另存为模板')
-    templateDialogVisible.value = false
-  } catch {
-    // 拦截器已提示
-  } finally {
-    savingTemplate.value = false
-  }
-}
-
-function goIndicators(): void {
-  router.push(`/plans/${planId.value}/indicators`)
-}
-
 // planId 驱动加载：顶栏切换计划时组件复用不触发 onMounted，用 watch 保证切换即刷新
 watch(planId, async (id) => {
   if (!id) return
   await loadPlan()
   settlementYear.value = lockedYears.value[0] ?? null
-  await Promise.all([loadStats(), loadSettlement(), loadTodos(), loadNotifications()])
+  await loadSettlement()
 }, { immediate: true })
 </script>
 
 <template>
   <div v-loading="loading" class="overview-page">
+    <BackButton />
     <template v-if="plan">
       <el-alert
         v-if="isArchived"
@@ -389,35 +258,18 @@ watch(planId, async (id) => {
             <template v-if="plan.settleDeadline"> · 核算截止 {{ plan.settleDeadline }}</template>
           </p>
         </div>
-        <div class="header-actions">
-          <el-button type="primary" @click="goIndicators">进入指标总表</el-button>
-          <template v-if="canManage && !isArchived">
-            <el-button v-if="plan.status === 'DRAFT'" type="primary" @click="handleActivate">
-              启动执行
-            </el-button>
-            <el-button @click="openSaveAsTemplate">另存为模板</el-button>
-            <el-button type="danger" plain @click="handleArchive">归档</el-button>
-          </template>
-        </div>
       </div>
-
-      <el-card shadow="never" class="info-card">
-        <el-descriptions :column="descriptionColumns" border>
-          <el-descriptions-item label="计划周期">
-            {{ plan.startYear }}–{{ plan.endYear }}（共 {{ plan.endYear - plan.startYear + 1 }} 年）
-          </el-descriptions-item>
-          <el-descriptions-item label="基线年">{{ plan.baselineYear }}</el-descriptions-item>
-          <el-descriptions-item label="核算截止日">{{ plan.settleDeadline ?? '—' }}</el-descriptions-item>
-          <el-descriptions-item label="指标体系">
-            {{ plan.indicatorsFinalized ? '已定稿' : '未定稿' }}
-          </el-descriptions-item>
-        </el-descriptions>
-      </el-card>
+      <div v-if="canManage && !isArchived" class="app-action-row header-actions">
+        <el-button v-if="plan.status === 'DRAFT'" type="primary" @click="handleActivate">
+          启动执行
+        </el-button>
+        <el-button type="danger" plain @click="handleArchive">归档</el-button>
+      </div>
 
       <el-card v-if="plan.years && plan.years.length > 0" shadow="never" class="info-card">
         <template #header>
           <div class="card-header">
-            <span class="card-title">年度进度</span>
+            <span class="card-title">年度核算管理</span>
             <el-tooltip
               v-if="canSettle && !isArchived && !allYearsLocked"
               content="全部年度核算锁定后开放"
@@ -452,16 +304,6 @@ watch(planId, async (id) => {
               </div>
               <div v-if="canSettle && !isArchived" class="year-actions">
                 <el-button
-                  v-if="year.status === 'NOT_ACTIVATED'"
-                  type="primary"
-                  size="small"
-                  plain
-                  :loading="activatingYear === year.year"
-                  @click="handleActivateYear(year)"
-                >
-                  激活
-                </el-button>
-                <el-button
                   v-if="year.status === 'ACTIVE'"
                   type="warning"
                   size="small"
@@ -485,165 +327,6 @@ watch(planId, async (id) => {
           </el-step>
         </el-steps>
       </el-card>
-
-      <div class="kpi-row">
-        <el-card shadow="never" class="kpi-card">
-          <div class="kpi-value">{{ formatPercent(overviewAll?.cumulativeCompletionRate) }}</div>
-          <div class="kpi-label">
-            五年总完成率
-            <el-tooltip content="五年累计口径：各指标「累计完成 ÷ 五年总量目标」的平均；五年目标即 100%" placement="top">
-              <span class="kpi-tip">ⓘ</span>
-            </el-tooltip>
-          </div>
-        </el-card>
-        <el-card shadow="never" class="kpi-card">
-          <div class="kpi-value">
-            {{ activeYear ? formatPercent(overview?.overallCompletionRate) : '—' }}
-          </div>
-          <ProgressWithTimeLine
-            v-if="activeYear"
-            class="kpi-progress"
-            :rate="overview?.overallCompletionRate"
-          />
-          <div class="kpi-label">
-            {{ activeYear ?? new Date().getFullYear() }} 年度完成率
-            <el-tooltip content="当年完成率（计数制）" placement="top">
-              <span class="kpi-tip">ⓘ</span>
-            </el-tooltip>
-          </div>
-        </el-card>
-        <el-card shadow="never" class="kpi-card">
-          <div class="kpi-value">
-            <span class="text-danger">{{ overview?.constraintAchieved ?? '—' }}</span>
-            <span class="kpi-total"> / {{ overview?.constraintTotal ?? '—' }}</span>
-          </div>
-          <div class="kpi-label">
-            约束性达标
-            <el-tooltip content="约束性指标：已达标任务数 / 任务总数" placement="top">
-              <span class="kpi-tip">ⓘ</span>
-            </el-tooltip>
-          </div>
-        </el-card>
-        <el-card shadow="never" class="kpi-card">
-          <div class="kpi-value">
-            <span class="text-teal">{{ overview?.developmentAchieved ?? '—' }}</span>
-            <span class="kpi-total"> / {{ overview?.developmentTotal ?? '—' }}</span>
-          </div>
-          <div class="kpi-label">
-            发展性达标
-            <el-tooltip content="发展性指标：已达标任务数 / 任务总数" placement="top">
-              <span class="kpi-tip">ⓘ</span>
-            </el-tooltip>
-          </div>
-        </el-card>
-        <el-card shadow="never" class="kpi-card">
-          <div class="kpi-value">{{ reviewPendingCount }}</div>
-          <div class="kpi-label">
-            待审核
-            <el-tooltip content="待我审核的填报条数（来自待办汇总）" placement="top">
-              <span class="kpi-tip">ⓘ</span>
-            </el-tooltip>
-          </div>
-        </el-card>
-        <el-card shadow="never" class="kpi-card">
-          <div class="kpi-value">{{ approvalPendingCount }}</div>
-          <div class="kpi-label">
-            调整审批中
-            <el-tooltip content="待我处理的调整审批条数（来自待办汇总）" placement="top">
-              <span class="kpi-tip">ⓘ</span>
-            </el-tooltip>
-          </div>
-        </el-card>
-      </div>
-
-      <div class="stat-row">
-        <el-card shadow="never" class="stat-card">
-          <template #header><span class="card-title">A 级指标完成情况</span></template>
-          <el-empty
-            v-if="byIndicator.length === 0"
-            description="暂无 A 级指标统计数据"
-            :image-size="60"
-          />
-          <div v-for="item in byIndicator" :key="item.indicatorId" class="progress-row">
-            <span class="progress-name" :title="`${item.code} ${item.name}`">{{ item.code }} {{ item.name }}</span>
-            <el-progress
-              :percentage="progressPercentage(item.completionRate)"
-              :stroke-width="10"
-              class="progress-bar"
-            />
-          </div>
-        </el-card>
-        <el-card shadow="never" class="stat-card">
-          <template #header>
-            <span class="card-title">执行单元完成率排名</span>
-            <span v-if="isUnitView" class="card-tip">（仅本单元）</span>
-          </template>
-          <el-empty v-if="rankRows.length === 0" description="暂无单元统计数据" :image-size="60" />
-          <div v-for="item in rankRows" :key="item.unit?.id" class="rank-row">
-            <span class="rank-no" :class="{ 'is-top': item.rank <= 3 }">
-              {{ item.rank }}
-            </span>
-            <span class="rank-name" :title="item.unit?.name">{{ item.unit?.name }}</span>
-            <el-progress
-              :percentage="progressPercentage(item.completionRate)"
-              :stroke-width="10"
-              class="progress-bar"
-            />
-          </div>
-        </el-card>
-      </div>
-
-      <div class="triple-row">
-        <el-card shadow="never" class="triple-card">
-          <template #header><span class="card-title">我的待办</span></template>
-          <el-empty v-if="topTodos.length === 0" description="暂无待办" :image-size="60" />
-          <div
-            v-for="todo in topTodos"
-            :key="`${todo.type}-${todo.bizId}`"
-            class="mini-item"
-            @click="goTodo(todo)"
-          >
-            <el-tag size="small" effect="light" class="mini-tag">{{ todoGroupLabel(todo.type) }}</el-tag>
-            <span class="mini-title" :title="todo.detail ?? todo.bizCode ?? ''">
-              {{ todo.detail ?? todo.bizCode ?? '—' }}
-            </span>
-            <span class="mini-time">{{ formatRelativeTime(todo.todoSince) }}</span>
-          </div>
-        </el-card>
-        <el-card shadow="never" class="triple-card">
-          <template #header><span class="card-title">预警指标</span></template>
-          <el-empty v-if="topWarnings.length === 0" description="暂无预警" :image-size="60" />
-          <div v-for="w in topWarnings" :key="w.taskId" class="mini-item">
-            <span
-              class="warning-code"
-              :class="warningLevel(w) === 'danger' ? 'text-danger' : 'text-warning'"
-            >
-              {{ w.taskCode }}
-            </span>
-            <span class="mini-title" :title="w.indicatorName">{{ w.indicatorName }}</span>
-            <el-tag :type="warningLevel(w)" size="small" effect="light" class="mini-tag">
-              {{ formatPercent(w.completionRate) }} / {{ formatPercent(w.timeProgress) }}
-            </el-tag>
-          </div>
-        </el-card>
-        <el-card shadow="never" class="triple-card">
-          <template #header><span class="card-title">最近动态</span></template>
-          <el-empty v-if="topNotifications.length === 0" description="暂无消息" :image-size="60" />
-          <div
-            v-for="item in topNotifications"
-            :key="item.id"
-            class="mini-item"
-            @click="openNotification(item)"
-          >
-            <span class="unread-dot" :class="{ 'is-unread': !item.readAt }" />
-            <el-tag size="small" effect="light" class="mini-tag">
-              {{ enumLabel('NotificationType', item.type, userStore.enums) }}
-            </el-tag>
-            <span class="mini-title" :title="item.title">{{ item.title }}</span>
-            <span class="mini-time">{{ formatRelativeTime(item.createdAt) }}</span>
-          </div>
-        </el-card>
-      </div>
 
       <el-card v-if="lockedYears.length > 0 || settlement" shadow="never" class="info-card">
         <template #header>
@@ -689,6 +372,22 @@ watch(planId, async (id) => {
                   <StatusTag kind="TaskYearStatus" :value="row.yearStatus" />
                 </template>
               </el-table-column>
+              <el-table-column label="补做" width="130" align="center">
+                <template #default="{ row }">
+                  <el-button
+                    v-if="row.makeupStatus === 'PENDING' && canCompleteMakeup"
+                    link
+                    type="primary"
+                    :loading="completingMakeupId === row.makeupId"
+                    @click="handleCompleteMakeup(row)"
+                  >
+                    确认补做完成
+                  </el-button>
+                  <span v-else-if="row.makeupStatus === 'PENDING'">待补做 {{ row.makeupGap ?? '—' }}</span>
+                  <span v-else-if="row.makeupStatus === 'DONE'">已补做</span>
+                  <span v-else>—</span>
+                </template>
+              </el-table-column>
             </el-table>
           </template>
           <el-empty v-else-if="!settlementLoading" description="选择已核算年度查看结果" :image-size="60" />
@@ -701,20 +400,6 @@ watch(planId, async (id) => {
       </el-card>
     </template>
   </div>
-
-  <el-dialog v-model="templateDialogVisible" title="另存为模板" width="min(480px, calc(100vw - 32px))">
-    <el-form label-width="90px">
-      <el-form-item label="模板名称" required>
-        <el-input v-model="templateName" maxlength="100" show-word-limit />
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="templateDialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="savingTemplate" @click="submitSaveAsTemplate">
-        保存模板
-      </el-button>
-    </template>
-  </el-dialog>
 
   <ReasonDialog
     v-model="unlockDialogVisible"
@@ -792,11 +477,6 @@ watch(planId, async (id) => {
   gap: var(--space-2);
 }
 
-.card-tip {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
 .year-steps {
   min-width: 0;
 }
@@ -815,117 +495,6 @@ watch(planId, async (id) => {
 
 .year-actions {
   margin-top: var(--space-2);
-}
-
-.kpi-row {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: var(--space-4);
-  margin-bottom: var(--space-4);
-}
-
-.kpi-card {
-  min-width: 0;
-  border-radius: var(--radius-card);
-  text-align: center;
-}
-
-.kpi-value {
-  font-family: var(--app-font-number);
-  font-size: 32px;
-  font-weight: 600;
-  line-height: 40px;
-  color: var(--el-text-color-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-.kpi-progress {
-  margin-top: var(--space-2);
-}
-
-.kpi-tip {
-  cursor: help;
-  color: var(--el-text-color-placeholder);
-}
-
-.kpi-total {
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-}
-
-.kpi-label {
-  margin-top: var(--space-1);
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.kpi-sub {
-  font-size: 12px;
-}
-
-.text-danger {
-  color: var(--el-color-danger);
-}
-
-.text-warning {
-  color: var(--el-color-warning);
-}
-
-.text-teal {
-  color: var(--app-color-teal);
-}
-
-.stat-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4);
-  margin-bottom: var(--space-4);
-}
-
-.stat-card {
-  min-width: 0;
-  border-radius: var(--radius-card);
-}
-
-.progress-row,
-.rank-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
-}
-
-.progress-name,
-.rank-name {
-  width: 140px;
-  flex-shrink: 0;
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rank-no {
-  width: 22px;
-  height: 22px;
-  line-height: 22px;
-  text-align: center;
-  border-radius: 50%;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  background: var(--el-fill-color-light);
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.rank-no.is-top {
-  color: #fff;
-  background: var(--el-color-primary);
-}
-
-.progress-bar {
-  flex: 1;
-  min-width: 0;
 }
 
 .settle-summary {
@@ -949,83 +518,6 @@ watch(planId, async (id) => {
   color: var(--el-text-color-secondary);
 }
 
-.triple-row {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-4);
-  margin-bottom: var(--space-4);
-}
-
-.triple-card {
-  min-width: 0;
-  border-radius: var(--radius-card);
-}
-
-.mini-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 8px 4px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  cursor: pointer;
-}
-
-.mini-item:last-child {
-  border-bottom: none;
-}
-
-.mini-item:hover {
-  background-color: var(--el-fill-color-light);
-}
-
-.mini-tag {
-  flex-shrink: 0;
-}
-
-.mini-title {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mini-time {
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.warning-code {
-  flex-shrink: 0;
-  font-size: 12px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.unread-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: transparent;
-  flex-shrink: 0;
-}
-
-.unread-dot.is-unread {
-  background-color: var(--el-color-danger);
-}
-
-@media (max-width: 1280px) {
-  .kpi-row {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .triple-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 @media (max-width: 768px) {
   .page-header {
     align-items: stretch;
@@ -1041,53 +533,8 @@ watch(planId, async (id) => {
     margin-left: 0;
   }
 
-  .kpi-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-2);
-  }
-
-  .kpi-value {
-    font-size: 24px;
-    line-height: 32px;
-  }
-
-  .stat-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .year-steps :deep(.el-step__description) {
     padding-right: 0;
-  }
-
-  .progress-row,
-  .rank-row,
-  .mini-item {
-    flex-wrap: wrap;
-  }
-
-  .progress-name,
-  .rank-name {
-    flex: 1 1 180px;
-    width: auto;
-    overflow: visible;
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-
-  .progress-bar {
-    flex: 1 1 160px;
-    min-width: 140px;
-  }
-
-  .mini-title {
-    flex: 1 1 160px;
-    overflow: visible;
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-
-  .mini-time {
-    margin-left: auto;
   }
 
   .settle-total {
@@ -1096,13 +543,4 @@ watch(planId, async (id) => {
   }
 }
 
-@media (max-width: 600px) {
-  .kpi-card :deep(.el-card__body) {
-    padding: var(--space-3) var(--space-2);
-  }
-
-  .kpi-label {
-    overflow-wrap: anywhere;
-  }
-}
 </style>

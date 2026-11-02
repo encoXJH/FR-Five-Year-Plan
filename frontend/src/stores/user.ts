@@ -4,6 +4,7 @@ import * as dictApi from '@/api/dict'
 import type { CurrentUser, DataScope, LoginRequest } from '@/types/auth'
 import type { EnumDict, Role } from '@/types/enums'
 import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from '@/utils/request'
+import { clearCurrentPlan } from '@/utils/currentPlan'
 import type { ClientEnv } from '@/utils/feishu'
 
 interface UserState {
@@ -28,6 +29,11 @@ export const useUserStore = defineStore('user', {
   }),
   getters: {
     isLoggedIn: (state) => state.accessToken !== null,
+    isUnitOwnerOnly: (state) => state.roles.length > 0
+      && state.roles.every((role) => role === 'UNIT_OWNER'),
+    homePath(): string {
+      return this.isUnitOwnerOnly ? '/workbench' : '/plans'
+    },
     /** 任一权限码命中即视为有权限（菜单、按钮过滤用） */
     can: (state) => {
       return (...codes: string[]) => codes.some((code) => state.permissions.includes(code))
@@ -63,6 +69,7 @@ export const useUserStore = defineStore('user', {
         // 服务端注销失败不阻塞本地退出
       }
       clearTokens()
+      clearCurrentPlan()
       this.$reset()
     },
     async fetchMe() {

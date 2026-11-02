@@ -54,18 +54,35 @@ public class ActualRecalcService {
         this.planMapper = planMapper;
     }
 
-    /** 重算某 B 年度的完成值缓存与年度状态，并逐级向上刷新 A+、A 缓存 */
+    /** 重算某 B 年度并向上刷新；STOCK / GROWTH 补审往年时连续重算至规划末年。 */
     public void recalcTaskYear(Long taskYearId) {
-        TaskYear taskYear = taskYearMapper.selectById(taskYearId);
-        if (taskYear == null || taskYear.getDeleted() != 0L) {
+        TaskYear requestedYear = taskYearMapper.selectById(taskYearId);
+        if (requestedYear == null || requestedYear.getDeleted() != 0L) {
             throw new BizException(ErrorCode.NOT_FOUND, "任务年度不存在");
         }
-        Task task = requireTask(taskYear.getTaskId());
+        Task task = requireTask(requestedYear.getTaskId());
         Indicator indicator = requireIndicator(task.getIndicatorId());
         Plan plan = requirePlan(task.getPlanId());
         String caliber = indicator.getStatCaliber();
         Long userId = SecurityUtils.getUserId();
 
+        boolean recalcFollowingYears = "STOCK".equals(caliber) || "GROWTH".equals(caliber);
+        List<TaskYear> taskYears = recalcFollowingYears
+                ? taskYearMapper.selectList(new LambdaQueryWrapper<TaskYear>()
+                        .eq(TaskYear::getTaskId, task.getId())
+                        .ge(TaskYear::getYear, requestedYear.getYear())
+                        .le(TaskYear::getYear, plan.getEndYear())
+                        .eq(TaskYear::getDeleted, 0L)
+                        .orderByAsc(TaskYear::getYear))
+                : List.of(requestedYear);
+        for (TaskYear taskYear : taskYears) {
+            recalcOneTaskYear(taskYear, task, indicator, plan, caliber, userId);
+            recalcIndicatorYear(indicator, taskYear.getYear(), plan, userId);
+        }
+    }
+
+    private void recalcOneTaskYear(TaskYear taskYear, Task task, Indicator indicator, Plan plan,
+                                   String caliber, Long userId) {
         List<Submission> approved = submissionMapper.selectList(new LambdaQueryWrapper<Submission>()
                 .eq(Submission::getTaskYearId, taskYear.getId())
                 .eq(Submission::getStatus, "APPROVED")
@@ -95,38 +112,33 @@ public class ActualRecalcService {
         }
         taskYear.setUpdatedBy(userId);
         taskYearMapper.updateById(taskYear);
-
-        recalcIndicatorYear(indicator, taskYear.getYear(), plan, userId);
     }
 
     // ---------------- 逐级汇总 ----------------
 
-    /** 刷新某指标（A+ 或不可下分 A）某年的缓存，并在需要时继续向上刷新所属 A */
+    /** 刷新 A+ 或直接承载 B 的 A；A 统一合并直承 B 与 legacy A+ 缓存。 */
     private void recalcIndicatorYear(Indicator indicator, Integer year, Plan plan, Long userId) {
-        if (indicator.getParentId() == null && "MANUAL".equals(indicator.getRollupMode())) {
-            // MANUAL 的 A（含不可下分 A）由校级项目负责人手工认定，不自动汇总
+        if (indicator.getParentId() == null) {
+            recalcAIndicatorYear(indicator, year, plan, userId);
             return;
         }
         MetricCalculator.YearResult result = rollupFromTaskYears(indicator, year, plan);
         upsertIndicatorCache(indicator, year, result, userId);
-        if (indicator.getParentId() == null) {
+        recalcAIndicatorYear(requireIndicator(indicator.getParentId()), year, plan, userId);
+    }
+
+    private void recalcAIndicatorYear(Indicator a, Integer year, Plan plan, Long userId) {
+        if (!"AUTO_SUM".equals(a.getRollupMode())) {
             return;
         }
-        Indicator parent = requireIndicator(indicator.getParentId());
-        if (!"AUTO_SUM".equals(parent.getRollupMode())) {
-            // MANUAL：A 的完成值由校级项目负责人手工认定，不自动汇总
-            return;
-        }
-        List<Indicator> siblings = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
-                .eq(Indicator::getParentId, parent.getId())
+        List<Indicator> children = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
+                .eq(Indicator::getParentId, a.getId())
                 .eq(Indicator::getDeleted, 0L));
-        List<MetricCalculator.YearResult> sources = new ArrayList<>(taskYearResults(parent, year));
-        siblings.stream()
-                .map(child -> cacheOfCurrentYear(child, year))
-                .forEach(sources::add);
-        MetricCalculator.YearResult parentResult = MetricCalculator.rollup(
-                parent.getStatCaliber(), sources, prevIndicatorTotal(parent, year, plan));
-        upsertIndicatorCache(parent, year, parentResult, userId);
+        List<MetricCalculator.YearResult> sources = new ArrayList<>(taskYearResults(a, year));
+        children.stream().map(child -> cacheOfCurrentYear(child, year)).forEach(sources::add);
+        MetricCalculator.YearResult result = MetricCalculator.rollup(
+                a.getStatCaliber(), sources, prevIndicatorTotal(a, year, plan));
+        upsertIndicatorCache(a, year, result, userId);
     }
 
     /** 本级指标某年缓存 = 其全部 B 任务该年 task_year 缓存的汇总 */

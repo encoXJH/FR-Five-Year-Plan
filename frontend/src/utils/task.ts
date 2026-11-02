@@ -1,4 +1,12 @@
 import { EMPTY_DISPLAY, formatDate } from './format'
+import type { TaskIndicatorRef, TaskListItem } from '@/types/task'
+
+/** B 的主指标统一展示所属 A；旧数据缺少 topIndicator 时回退到原关联指标。 */
+export function primaryTaskIndicator(
+  task: Pick<TaskListItem, 'indicator' | 'topIndicator'> | null | undefined,
+): TaskIndicatorRef | null {
+  return task?.topIndicator ?? task?.indicator ?? null
+}
 
 /** 历史任务只允许查看，所有执行写入口统一使用此守卫 */
 export function canWriteTask(task: { isHistorical?: boolean | null } | null | undefined): boolean {

@@ -1,4 +1,4 @@
-# 生产编排：mysql 8 + backend + frontend
+# 生产编排：mysql 8 + minio + backend + frontend
 # 用法：
 #   1. 复制 .env.example 为 .env 并填写（DB_PASSWORD / JWT_SECRET / FILE_SIGN_SECRET 必须更换；飞书按需）
 #   2. docker compose -f docker-compose.prod.yml --env-file .env up -d --build
@@ -29,6 +29,47 @@ services:
     networks:
       - metrics
 
+  minio:
+    image: minio/minio:latest
+    container_name: metrics-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      TZ: Asia/Shanghai
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks:
+      - metrics
+
+  minio-init:
+    image: amazon/aws-cli:latest
+    container_name: metrics-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      AWS_DEFAULT_REGION: ${MINIO_REGION:-us-east-1}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        aws --endpoint-url http://minio:9000 s3api create-bucket --bucket ${MINIO_BUCKET:-metrics-files} >/dev/null 2>&1 || true;
+        aws --endpoint-url http://minio:9000 s3api put-bucket-cors --bucket ${MINIO_BUCKET:-metrics-files}
+        --cors-configuration '{"CORSRules":[{"AllowedOrigins":["${MINIO_CORS_ALLOWED_ORIGINS:-http://localhost}"],"AllowedMethods":["GET","PUT","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3600}]}'
+    restart: "no"
+    networks:
+      - metrics
+
   backend:
     build: ./backend
     image: metrics-backend:latest
@@ -37,6 +78,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       SERVER_PORT: 8080
       DB_HOST: mysql
@@ -51,6 +94,13 @@ services:
       FILE_STORAGE_DIR: /app/data/files
       FILE_SIGNED_URL_EXPIRE_MINUTES: ${FILE_SIGNED_URL_EXPIRE_MINUTES:-10}
       FILE_SIGN_SECRET: ${FILE_SIGN_SECRET:?请在 .env 中设置 FILE_SIGN_SECRET}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://localhost:9000}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-metrics-files}
+      MINIO_FORCE_PATH_STYLE: ${MINIO_FORCE_PATH_STYLE:-true}
       KKFILEVIEW_URL: ${KKFILEVIEW_URL:-}
       # 生产关闭接口文档（API 约定第 14 章）
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
@@ -97,3 +147,4 @@ networks:
 volumes:
   mysql-data:
   metrics-files:
+  minio-data:

@@ -27,7 +27,7 @@ public final class AllocationRules {
 
     /**
      * 目标需要逐年求和校验的口径（比率类和是否型不做求和校验）。
-     * INCREMENT / STOCK 需要：Σ各 B 年度目标 = A+ 当年目标。
+     * INCREMENT / STOCK 需要：Σ各 B 年度目标 ≥ 指标当年目标。
      */
     public static boolean requiresAllocationSum(String statCaliber) {
         return "INCREMENT".equals(statCaliber) || "STOCK".equals(statCaliber);
@@ -54,12 +54,12 @@ public final class AllocationRules {
         return summary;
     }
 
-    /** 矩阵是否平衡：求和口径要求每年 diff 全为 0；比率类口径不做求和校验，视为平衡 */
+    /** 矩阵是否平衡：允许超额，求和口径仅拦截合计低于指标目标的年度 */
     public static boolean isBalanced(String statCaliber, List<TaskDtos.SummaryItem> summary) {
         if (!requiresAllocationSum(statCaliber)) {
             return true;
         }
-        return summary.stream().allMatch(s -> s.diff().compareTo(BigDecimal.ZERO) == 0);
+        return summary.stream().allMatch(s -> s.diff().compareTo(BigDecimal.ZERO) >= 0);
     }
 
     /**
@@ -72,22 +72,15 @@ public final class AllocationRules {
             return errors;
         }
         for (TaskDtos.SummaryItem item : summary) {
-            if (item.diff().compareTo(BigDecimal.ZERO) != 0) {
+            if (item.diff().compareTo(BigDecimal.ZERO) < 0) {
                 errors.add(new FieldError(
                         indicatorCode + ".yearTargets[" + item.year() + "]",
                         indicatorCode + " 在 " + item.year() + " 年：各学院合计 "
                                 + orZero(item.allocatedTarget()).stripTrailingZeros().toPlainString()
-                                + "，A+ 目标 " + orZero(item.indicatorTarget()).stripTrailingZeros().toPlainString()));
+                                + "，低于指标目标 " + orZero(item.indicatorTarget()).stripTrailingZeros().toPlainString()));
             }
         }
         return errors;
-    }
-
-    /** 下发前置：指标体系必须已定稿（50005） */
-    public static void requireFinalized(java.time.LocalDateTime finalizedAt) {
-        if (finalizedAt == null) {
-            throw new BizException(ErrorCode.INDICATOR_NOT_FINALIZED);
-        }
     }
 
     /** 下发前置：每条 B 必须有学院项目负责人（50002），errors 逐条列出任务编号 */

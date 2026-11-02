@@ -1,12 +1,12 @@
 /**
  * 端到端冒烟脚本（Playwright 库 API，headless）
  *
- * 主流程：登录 admin → 新建五年计划 → 配置 S / 总负责人 → 录 A16/A16-1（逐年目标与 S 归属）→ 定稿
- *        → 分解下发到真实八院 C01–C08 → 启动计划 + 激活 2026 → c01 接收/填报（含 PDF 材料）
- *        → owner1 审核通过 → c01 对 A16-1-C01 发起延期 1 人 → owner1 初审 → leader 终审
- *        → c01 确认「已生效」→ admin 大屏断言 8 条 B 任务、1 条已生效调整
+ * 主流程：登录 admin → 新建五年计划 → 配置 S / 总负责人 → 录 A16（逐年目标与 S 归属）
+ *        → 复核未锁定可编辑并直接分解下发到真实八院 C01–C08 → 启动计划 + 激活 2026 → c01 接收/填报（含 PDF 材料）
+ *        → owner1 审核通过 → c01 对 A16-C01 发起延期 1 人 → owner1 初审 → leader 终审
+ *        → c01 确认「已生效」→ admin 大屏断言 8 条 学院任务、1 条已生效调整
  *
- * 编号夹具：新增/分解表单不开放编号字段，仅在本次创建请求中补 A16/A16-1；
+ * 编号夹具：新增/分解表单不开放编号字段，仅在本次创建请求中补 A16；
  * 其余字段及完整流程仍通过真实 UI 操作。
  *
  * 运行：npm run smoke（需后端 :8080 与前端 :5173 已启动）
@@ -22,21 +22,15 @@
  *  Bug#2 前端新建建设方向（指标抽屉 allow-create）未传 subjectType，
  *        后端 DirectionDtos.CreateRequest 要求 @NotBlank subjectType → 400「主体必填」（10001），
  *        UI 上没有任何入口可填主体，新增方向必然失败，进而无法创建 A 指标。
- *  Bug#3 前端 finalizeIndicators()（api/indicator.ts）POST 定稿不带 body，
- *        后端 FinalizeRequest 要求 version → 400「缺少 version（乐观锁版本号）」，定稿必然失败。
  *  Bug#4 前端 activatePlan()（api/plan.ts）POST 启动计划不带 version → 同上 400，启动必然失败。
  *  Bug#5 前端 acceptTask()（api/task.ts）POST 确认接收不带 version → 同上 400，接收必然失败。
- *  Bug#6 GET /tasks/{id}/submissions 返回分页结构 { items, total, ... }，
- *        前端 listSubmissions()（api/submission.ts）按 SubmissionListItem[] 使用，
- *        填报页 populate() 触发 submissions.filter 抛 TypeError → 页面显示「任务加载失败」。
  *  Bug#7 前端调整试算 buildRequest()（adjustment/apply.vue）不带 reason，
  *        后端 POST /adjustments/preview 要求 reason 必填 → 400（10001），试算必然失败，
  *        且失败仅闪现 toast、页面无错误 alert 残留，用户难以理解。
  *
  * SMOKE_PATCH_KNOWN_BUGS=1 时通过 Playwright page.route 在网络层修补上述
  * 已确认缺陷的载荷（login 响应按约定补 user；directions 请求补 subjectType=SCHOOL；
- * finalize/activate/accept 请求补当前资源 version；submissions 响应分页对象降级为 items 数组；
- * adjustments/preview 请求补 reason），
+ * activate/accept 请求补当前资源 version；adjustments/preview 请求补 reason），
  * 用于在缺陷修复前验证其余全链路。全程仍为真实 UI 操作，输出中打印醒目警告。
  */
 import { chromium } from 'playwright'
@@ -66,13 +60,12 @@ const DIRECTION_NAME = '打造“匹配需求、要素集聚”的金专业'
 const INDICATOR_NAME =
   '整校订单式人才培养人数。订单式人才培养包含订单班、冠名班、现代学徒制、现场工程师、企业新型学徒制、产业学院、工匠班、校企合作工作室、校企微专业等培养方式。逐年增长'
 const A_NAME = INDICATOR_NAME
-const AP_NAME = INDICATOR_NAME
 const DESCRIPTION = '来源：Excel 第16项（工作表行18）。'
 const EVIDENCE_REQUIREMENT = '须提供与成果对应的批文、证书、文件或可核验统计明细。'
 const YEARS = [2026, 2027, 2028, 2029, 2030]
 const TOTAL_TARGET = 16290
 const A_YEAR_TARGETS = [2458, 2858, 3258, 3658, 4058]
-const EXPECTED_TASK_CODE = 'A16-1-C01'
+const EXPECTED_TASK_CODE = 'A16-C01'
 // 权威 SQL task_year：C01–C08 各年之和依次为 2458/2858/3258/3658/4058
 const UNIT_ALLOCATIONS = [
   { code: 'C01', name: '智能产业学院', owner: 'c01', targets: [407, 457, 507, 557, 607] },
@@ -87,7 +80,7 @@ const UNIT_ALLOCATIONS = [
 for (let i = 0; i < YEARS.length; i += 1) {
   const allocated = UNIT_ALLOCATIONS.reduce((sum, unit) => sum + unit.targets[i], 0)
   if (allocated !== A_YEAR_TARGETS[i]) {
-    throw new Error(`${YEARS[i]} 年八院目标之和 ${allocated}，应等于 A+ 目标 ${A_YEAR_TARGETS[i]}`)
+    throw new Error(`${YEARS[i]} 年八院目标之和 ${allocated}，应等于 A 目标 ${A_YEAR_TARGETS[i]}`)
   }
 }
 
@@ -152,6 +145,11 @@ async function login(username) {
   await userInput.fill(username)
   await page.locator('input[placeholder="密码"]').fill(PASSWORD)
   await page.getByRole('button', { name: /登\s*录/ }).click()
+  if (username === 'c01') {
+    await page.waitForURL('**/workbench')
+    await page.locator('.workbench-page').waitFor()
+    return
+  }
   await page.waitForURL('**/plans')
   await page.locator('.page-title', { hasText: '我的计划' }).waitFor()
 }
@@ -184,7 +182,7 @@ async function currentPlanWorkbenchRecord(tabName, queryKey, queryValue) {
     .nth(index)
 }
 
-/** 表单无编号输入框，仅为本次 A16 权威夹具指定 A/A+ 编号。 */
+/** 表单无编号输入框，仅为本次 A16 权威夹具指定 A 编号。 */
 async function installA16FixtureCodes() {
   const patchCode = (pattern, codeOf) =>
     page.route(pattern, async (route) => {
@@ -203,9 +201,6 @@ async function installA16FixtureCodes() {
     })
   await patchCode('**/api/v1/plans/*/indicators', (data) =>
     data?.level === 'A' && data?.name === A_NAME ? { code: 'A16' } : null,
-  )
-  await patchCode('**/api/v1/plans/*/indicators/*/decomposition', (data) =>
-    data?.indicator?.name === AP_NAME ? { indicator: { ...data.indicator, code: 'A16-1' } } : null,
   )
 }
 
@@ -251,7 +246,7 @@ async function installKnownBugPatches() {
     }
     await route.continue()
   })
-  // Bug#3/4/5：finalize / activate / accept 请求补当前资源的 version（前端漏传）
+  // Bug#4：activate 请求补当前资源的 version（前端漏传）
   const versionPatch = (pattern, resourceOf, label) =>
     page.route(pattern, async (route) => {
       const request = route.request()
@@ -289,37 +284,10 @@ async function installKnownBugPatches() {
       await route.continue()
     })
   await versionPatch(
-    '**/api/v1/plans/*/indicators/finalize',
-    (url) => `/api/v1/plans/${url.match(/\/plans\/(\d+)\/indicators\/finalize/)?.[1]}`,
-    'Bug#3 finalize.version',
-  )
-  await versionPatch(
     '**/api/v1/plans/*/activate',
     (url) => `/api/v1/plans/${url.match(/\/plans\/(\d+)\/activate/)?.[1]}`,
     'Bug#4 activate.version',
   )
-  await versionPatch(
-    '**/api/v1/tasks/*/accept',
-    (url) => `/api/v1/tasks/${url.match(/\/tasks\/(\d+)\/accept/)?.[1]}`,
-    'Bug#5 accept.version',
-  )
-  // Bug#6：GET /tasks/{id}/submissions 分页结构降级为 items 数组（前端按数组使用）
-  await page.route('**/api/v1/tasks/*/submissions', async (route) => {
-    const request = route.request()
-    if (request.method() !== 'GET') {
-      await route.continue()
-      return
-    }
-    const response = await route.fetch()
-    const body = await response.json().catch(() => null)
-    if (body && body.code === 0 && body.data && !Array.isArray(body.data) && Array.isArray(body.data.items)) {
-      body.data = body.data.items
-      if (!patchedBugs.includes('Bug#6 submissions.array')) patchedBugs.push('Bug#6 submissions.array')
-      await route.fulfill({ response, json: body })
-      return
-    }
-    await route.fulfill({ response })
-  })
   // Bug#7：调整试算请求补 reason（前端未携带，后端 preview 必填）
   await page.route('**/api/v1/adjustments/preview', async (route) => {
     const request = route.request()
@@ -340,34 +308,28 @@ async function installKnownBugPatches() {
 }
 
 async function logout() {
-  if (process.env.SMOKE_FEISHU === '1') {
-    await page.evaluate(() => {
-      localStorage.clear()
-      sessionStorage.clear()
-    })
-    await page.goto(`${BASE}/login`)
-  } else {
-    await page.locator('.user-entry').click()
-    await page
-      .locator('.el-dropdown-menu__item:visible')
-      .filter({ hasText: '退出登录' })
-      .click()
-  }
+  // 多角色连续验收必须隔离会话，避免移动端顶栏菜单时序导致仍沿用上一角色
+  await page.evaluate(() => {
+    localStorage.clear()
+    sessionStorage.clear()
+  })
+  await page.goto(`${BASE}/login`)
   await page.locator('input[placeholder="工号"]').waitFor()
 }
 
-/** 指标详情页 → 年度目标 tab：按 A16 权威目标填写并保存 */
+/** 指标详情 → 编辑抽屉：按 A16 权威目标填写并随指标保存 */
 async function fillYearTargetsAndSave() {
-  await page.locator('.el-tabs__item', { hasText: '年度目标' }).click()
-  await page.locator('.year-grid').waitFor()
+  await page.getByRole('button', { name: '编辑', exact: true }).click()
+  const drawer = page.locator('.el-drawer:visible')
+  await drawer.locator('.year-target-grid').waitFor()
+  const fields = drawer.locator('.year-target-field')
   for (let i = 0; i < YEARS.length; i += 1) {
-    const cell = page.locator('.year-cell', { hasText: String(YEARS[i]) })
-    await fillNumber(cell, A_YEAR_TARGETS[i])
+    await fillNumber(fields.nth(i), A_YEAR_TARGETS[i])
   }
   // 守恒校验：各年度之和 16290 = 五年总量 16290
-  await page.locator('.sum-check.sum-ok').waitFor()
-  await page.getByRole('button', { name: '保存年度目标' }).click()
-  await waitToast('年度目标已保存')
+  await drawer.locator('.sum-ok').waitFor()
+  await drawer.getByRole('button', { name: '保存修改' }).click()
+  await waitToast('指标与年度目标已保存')
 }
 
 /** 在指标总表中点击某行的「详情」进入指标详情页 */
@@ -381,7 +343,7 @@ async function openIndicatorDetail(name, code) {
 /** 审批调整申请（当前登录用户）：/adjustments 待我处理 → 详情 → 同意 */
 async function approveAdjustment() {
   await page.goto(`${BASE}/adjustments`)
-  const row = page.locator('.el-table__row', { hasText: AP_NAME }).first()
+  const row = page.locator('.el-table__row', { hasText: A_NAME }).first()
   await row.waitFor()
   await row.click()
   const drawer = page.locator('.el-drawer:visible')
@@ -433,7 +395,7 @@ const steps = [
       await directionDialog.waitFor({ state: 'hidden' })
 
       await page.goto(`${BASE}/plans/${state.planId}/indicators`)
-      await page.getByRole('button', { name: '新增 A 类指标' }).first().click()
+      await page.getByRole('button', { name: '新增指标' }).first().click()
       const drawer = page.locator('.el-drawer:visible')
       await drawer.waitFor()
       await fi(drawer, '指标名称').locator('input').fill(A_NAME)
@@ -472,85 +434,64 @@ const steps = [
     },
   },
   {
-    name: '05 分两步：先分解 A+，再继续分工到学院',
+    name: '05 A 直接分解到八院并保存守恒草稿',
     fn: async () => {
-      // 第一步：A 行「分解任务」只创建 A+
       await page.goto(`${BASE}/plans/${state.planId}/indicators`)
       const row = indicatorRecord(A_NAME, 'A16')
       await row.waitFor()
       await row.getByRole('button', { name: '分解任务', exact: true }).click()
-      const drawer = page.locator('.el-drawer:visible')
-      await drawer.waitFor()
-      if (await drawer.locator('.section-heading', { hasText: '各学院完成多少' }).count() !== 0) {
-        throw new Error('分解任务向导不应出现学院分工区')
+      await page.waitForURL(/\/allocation\?indicatorId=\d+/)
+      await page.locator('.matrix-card').waitFor()
+      if ((await page.locator('body').innerText()).includes('A+')) {
+        throw new Error('A→B 分工页不应出现独立 A+ 层级或配置入口')
       }
-      await fi(drawer, 'A+ 指标名称').locator('input').fill(AP_NAME)
-      await fi(drawer, '指标性质').locator('.el-radio', { hasText: '发展性' }).click()
-      await fi(drawer, '计量单位').locator('input').fill('人')
-      await fillNumber(fi(drawer, '五年目标总量'), TOTAL_TARGET)
-      const indicatorTargets = drawer.locator('.target-field input')
-      for (let i = 0; i < YEARS.length; i += 1) {
-        await indicatorTargets.nth(i).click()
-        await indicatorTargets.nth(i).fill(String(A_YEAR_TARGETS[i]))
-        await indicatorTargets.nth(i).press('Enter')
-      }
-      await fi(drawer, '填写说明').locator('textarea').fill(DESCRIPTION)
-      await fi(drawer, '佐证材料要求').locator('textarea').fill(EVIDENCE_REQUIREMENT)
-      await drawer.getByRole('button', { name: '保存 A+', exact: true }).click()
-      await waitToast('A+ 已创建')
-      await drawer.waitFor({ state: 'hidden' })
-      await indicatorRecord(AP_NAME, 'A16-1').waitFor()
 
-      // 第二步：A+ 行「继续分工」分配学院 B 级任务
-      const aPlusRow = indicatorRecord(AP_NAME, 'A16-1')
-      await aPlusRow.getByRole('button', { name: '继续分工', exact: true }).click()
-      const allocateDrawer = page.locator('.el-drawer:visible')
-      await allocateDrawer.waitFor()
-      await allocateDrawer.locator('.readonly-descriptions').waitFor()
-      const addBar = allocateDrawer.locator('.add-row-bar')
+      const addBar = page.locator('.add-row-bar')
       for (const unit of UNIT_ALLOCATIONS) {
         await addBar.locator('.el-select__wrapper').click()
         await page.keyboard.type(unit.code)
         await pickOption(`${unit.code} ${unit.name}`)
-        await addBar.getByRole('button', { name: '添加学院' }).click()
-        const allocationRow = allocateDrawer.locator('.allocation-row', { hasText: unit.code }).first()
-        await allocationRow.locator('.row-owner .el-select__wrapper').click()
+        await addBar.getByRole('button', { name: '添加行', exact: true }).click()
+        const allocationRow = page
+          .locator(VIEWPORT_WIDTH <= 768 ? '.allocation-mobile-card' : '.matrix-card .el-table__row', { hasText: unit.code })
+          .first()
+        await allocationRow.locator('.el-select__wrapper').first().click()
         await page.keyboard.type(unit.owner)
         await pickOption(`（${unit.owner}）`)
-        const cells = allocationRow.locator('.row-target-grid input')
+        const cells = allocationRow.locator(VIEWPORT_WIDTH <= 768 ? '.mobile-cell-input input' : '.cell-input input')
         for (let i = 0; i < YEARS.length; i += 1) {
           await cells.nth(i).click()
           await cells.nth(i).fill(String(unit.targets[i]))
           await cells.nth(i).press('Enter')
         }
       }
-      await allocateDrawer.locator('.balance-panel.is-balanced').waitFor()
-      await allocateDrawer.getByRole('button', { name: '保存分工', exact: true }).click()
-      await waitToast('分工已保存')
-      await allocateDrawer.waitFor({ state: 'hidden' })
-      const duplicateCount = await page
-        .locator(VIEWPORT_WIDTH <= 768 ? '.indicator-card' : '.el-table__row', { hasText: AP_NAME })
-        .filter({ hasText: 'A16-1' })
-        .count()
-      if (duplicateCount !== 1) throw new Error('继续分工重复创建了 A+')
+      await page.locator('.el-alert--success', { hasText: '各年度合计不低于指标目标' }).waitFor()
+      await page.getByRole('button', { name: '存草稿', exact: true }).click()
+      await waitToast('已保存，各年度合计不低于指标目标')
+
+      await page.goto(`${BASE}/plans/${state.planId}/indicators`)
+      await indicatorRecord(A_NAME, 'A16')
+        .getByRole('button', { name: '分工管理', exact: true })
+        .waitFor()
     },
   },
   {
-    name: '06 指标体系定稿',
+    name: '06 未定稿指标仍可编辑且不存在定稿入口',
     fn: async () => {
       await page.goto(`${BASE}/plans/${state.planId}/indicators`)
-      await page.getByRole('button', { name: '全部展开', exact: true }).click()
-      await indicatorRecord(AP_NAME, 'A16-1').waitFor()
-      await page.getByRole('button', { name: '全部指标设置完成（定稿）', exact: true }).click()
-      await confirmBox('确认定稿')
-      await waitToast('指标体系已定稿', 30000)
+      await indicatorRecord(A_NAME, 'A16').waitFor()
+      if (await page.getByRole('button', { name: /定稿/ }).count()) {
+        throw new Error('指标总表不应再出现定稿入口')
+      }
+      await openIndicatorDetail(A_NAME, 'A16')
+      await fillYearTargetsAndSave()
     },
   },
   {
-    name: '07 分解矩阵保留向导数据且守恒',
+    name: '07 分工矩阵保留 A→B 草稿且守恒',
     fn: async () => {
       await page.goto(`${BASE}/plans/${state.planId}/allocation`)
-      const item = page.locator('.indicator-item', { hasText: AP_NAME }).first()
+      const item = page.locator('.indicator-item', { hasText: A_NAME }).first()
       await item.waitFor()
       await item.click()
       await page.locator('.matrix-panel').waitFor()
@@ -561,14 +502,14 @@ const steps = [
           .waitFor()
       }
       await page
-        .locator('.el-alert--success', { hasText: '各年度合计与指标目标一致' })
+        .locator('.el-alert--success', { hasText: '各年度合计不低于指标目标' })
         .waitFor()
     },
   },
   {
-    name: '08 正式交给学院（生成八院 B 任务）',
+    name: '08 正式交给学院（生成八院 学院任务）',
     fn: async () => {
-      await page.locator('.sticky-bar').getByRole('button', { name: '正式交给学院', exact: true }).click()
+      await page.getByRole('button', { name: '正式交给学院', exact: true }).first().click()
       const dialog = page.locator('.el-dialog:visible')
       await dialog.locator('text=正式交给学院').first().waitFor()
       await dialog.getByRole('button', { name: '确认交给学院' }).click()
@@ -589,28 +530,28 @@ const steps = [
     },
   },
   {
-    name: '10 c01 确认接收任务并填报 2026（附 PDF 材料）',
+    name: '10 c01 无需接收直接填报 2026（附 PDF 材料）',
     fn: async () => {
       await logout()
       await login('c01')
       await page.goto(`${BASE}/workbench`)
-      // 预置库存在同名同编号的 A16-1-C01，按本 run 的计划 ID 定位，避免接收错任务
-      let row = await currentPlanWorkbenchRecord('待确认接收', 'status', 'DISTRIBUTED')
-      await row.waitFor()
-      if (state.taskCode !== EXPECTED_TASK_CODE) throw new Error(`任务编号=${state.taskCode}，期望 ${EXPECTED_TASK_CODE}`)
-      await row.getByRole('button', { name: '确认接收' }).click()
-      await confirmBox('确认接收')
-      await waitToast('已接收')
-      // 接收后继续按当前计划定位「待填报」任务
-      row = await currentPlanWorkbenchRecord('待填报', 'yearStatus', 'IN_PROGRESS')
+      assert.equal(await page.getByRole('button', { name: '确认接收' }).count(), 0)
+      assert.equal(await page.getByRole('button', { name: '调整', exact: true }).count(), 0)
+      assert.equal(await page.getByRole('tab', { name: '待确认接收' }).count(), 0)
+      const row = await currentPlanWorkbenchRecord('待填报', 'yearStatus', 'IN_PROGRESS')
       await row.waitFor()
       await row.getByRole('button', { name: '填报' }).click()
       await page.waitForURL(/\/tasks\/\d+\/submit/)
       if (page.url().match(/\/tasks\/(\d+)\/submit/)?.[1] !== state.taskId) {
-        throw new Error('填报页任务与当前计划的 A16-1-C01 不一致')
+        throw new Error('填报页任务与当前计划的 A16-C01 不一致')
       }
-      // 本次新增数量 = 1
       const form = page.locator('.metric-form')
+      // 先验证年度上限：C01 年目标 407，填 408 必须前后端拦截，随后改回合法值 1
+      await fillNumber(fi(form, '本次新增数量'), 408)
+      await page.locator('.el-alert--warning', { hasText: '60007' }).waitFor()
+      await page.locator('.sticky-bar').getByRole('button', { name: '提交审核' }).click()
+      await confirmBox('确认提交')
+      await page.locator('.el-alert--error', { hasText: '60007' }).waitFor()
       await fillNumber(fi(form, '本次新增数量'), 1)
       // 佐证材料：上传临时生成的 PDF
       const pdfPath = path.join(ARTIFACTS, `evidence-${ts}.pdf`)
@@ -638,10 +579,10 @@ const steps = [
       await logout()
       await login('owner1')
       await page.goto(`${BASE}/reviews`)
-      // 预置库与本 run 均为 A16-1-C01，先选本 run 的计划，再选 A16-1 过滤
+      // 预置库与本 run 均为 A16-C01，先选本 run 的计划，再选 A16 过滤
       const filterCard = page.locator('.filter-card')
       await selectInFormItem(filterCard, '计划', PLAN_NAME)
-      await selectInFormItem(filterCard, '指标', `A16-1 ${AP_NAME}`, { type: 'A16-1', exact: true })
+      await selectInFormItem(filterCard, '指标', `A16 ${A_NAME}`, { type: 'A16', exact: true })
       const item = page.locator('.pending-item', { hasText: state.taskCode }).first()
       await item.waitFor()
       await item.click()
@@ -654,10 +595,10 @@ const steps = [
     },
   },
   {
-    name: '12 c01 发起延期申请（2026 → 2027，数量 1）并提交',
+    name: '12 admin 发起延期申请（2026 → 2027，数量 1）并提交',
     fn: async () => {
       await logout()
-      await login('c01')
+      await login('admin')
       // 用填报阶段捕获的任务 ID 预选，避免选中预置库的同名同编号任务
       await page.goto(`${BASE}/adjustments/apply?taskId=${encodeURIComponent(state.taskId)}`)
       const formCard = page.locator('.form-card')
@@ -702,14 +643,14 @@ const steps = [
     },
   },
   {
-    name: '15 c01 调整列表可见「已生效」',
+    name: '15 admin 调整列表可见「已生效」',
     fn: async () => {
       await logout()
-      await login('c01')
+      await login('admin')
       await page.goto(`${BASE}/adjustments`)
       await page.locator('.el-tabs__item', { hasText: '我发起的' }).click()
       await page
-        .locator('.el-table__row', { hasText: AP_NAME })
+        .locator('.el-table__row', { hasText: A_NAME })
         .filter({ hasText: '已生效' })
         .first()
         .waitFor()
@@ -727,7 +668,7 @@ const steps = [
       // 核心数字有 800ms 滚动动画（规范 9.2），等动画结束再断言
       await page.waitForFunction(() => {
         const item = [...document.querySelectorAll('.panel-core .core-item')].find((i) =>
-          i.textContent?.includes('B 任务'),
+          i.textContent?.includes('学院任务'),
         )
         return item?.querySelector('.core-num')?.textContent?.trim() === '8'
       }, null, { timeout: 10000 })
@@ -737,6 +678,34 @@ const steps = [
         )
         return item?.querySelector('.adjust-num')?.textContent?.trim() === '1'
       }, null, { timeout: 10000 })
+    },
+  },
+  {
+    name: '17 admin 年度核算生成待补做记录',
+    fn: async () => {
+      await page.goto(`${BASE}/plans/${state.planId}`)
+      const step2026 = page.locator('.el-step', { hasText: '2026 年' })
+      await step2026.getByRole('button', { name: '年度核算' }).click()
+      await confirmBox('确认核算')
+      await waitToast('2026 年度核算完成')
+      const resultRow = page.locator('.el-table__row', { hasText: state.taskCode }).first()
+      await resultRow.waitFor()
+      await resultRow.getByText('待补做', { exact: false }).first().waitFor()
+    },
+  },
+  {
+    name: '18 c01 确认补做完成并同步年度状态',
+    fn: async () => {
+      await logout()
+      await login('c01')
+      await page.goto(`${BASE}/plans/${state.planId}`)
+      const resultRow = page.locator('.el-table__row', { hasText: state.taskCode }).first()
+      await resultRow.waitFor()
+      await resultRow.getByRole('button', { name: '确认补做完成' }).click()
+      await confirmBox('确认完成')
+      await waitToast('已标记为已补做')
+      await page.locator('.el-table__row', { hasText: state.taskCode })
+        .getByText('已补做', { exact: false }).first().waitFor()
     },
   },
 ]

@@ -31,7 +31,11 @@ onMounted(async () => {
   }
   try {
     await userStore.loginFeishu(query.code, detectClientEnv(window.navigator.userAgent))
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
+    const redirect = userStore.isUnitOwnerOnly
+      ? userStore.homePath
+      : userStore.roles.includes('ADMIN')
+        ? '/plans'
+        : typeof route.query.redirect === 'string' ? route.query.redirect : '/'
     router.replace(redirect)
   } catch (error) {
     if (error instanceof ApiError && error.code === 20007) {

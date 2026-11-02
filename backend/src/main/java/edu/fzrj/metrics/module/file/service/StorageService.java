@@ -12,6 +12,11 @@ public interface StorageService {
     /** 保存文件内容到指定存储键 */
     void save(InputStream in, String storageKey) throws IOException;
 
+    /** 已知内容长度时保存，对象存储可避免在内存中缓冲 */
+    default void save(InputStream in, String storageKey, long size) throws IOException {
+        save(in, storageKey);
+    }
+
     /** 读取文件内容 */
     InputStream read(String storageKey) throws IOException;
 

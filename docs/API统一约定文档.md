@@ -10,6 +10,8 @@
 > 本文档规定所有接口**共同遵守**的规则：地址、命名、数据类型、认证、请求和响应格式、错误码、文件、枚举、日志、安全、版本等。第 15 章是按需求模块整理的接口资源清单草案，字段细节以开发阶段生成的 OpenAPI 文档为准。
 >
 > 用词说明：**必须** = 强制；**应** = 强烈建议，不遵守要有理由；**可** = 可选。
+>
+> **2026-10-29 现行分解契约**：`GET/PUT /indicators/{indicatorId}/allocation` 的 `indicatorId` 新流程传可量化 A，B 直接关联 A；`POST /plans/{planId}/distribute` 可直接下发 A 的学院任务。新 B 编号为 `{A编号}-{单元编码}`，`task.indicatorId=task.topIndicatorId=A.id`，`task_year.indicatorId` 同步为 A。纯 A→B 仅执行 `40002` 与 `50001` 守恒，`40003` 仅用于历史 A/A+。创建、decomposition、导入和模板不再新增 A_PLUS，违规返回 `40006`；旧 A+ 读接口、旧编号和既有执行记录保持兼容。统计树统一返回 A→B。
 
 ---
 
@@ -96,7 +98,6 @@
 
 | 动作 | 路径 |
 | --- | --- |
-| 指标体系定稿 | `POST /plans/{planId}/indicators/finalize` |
 | 下发 | `POST /plans/{planId}/distribute` |
 | 确认接收 | `POST /tasks/{taskId}/accept` |
 | 提交填报 | `POST /submissions/{submissionId}/submit` |
@@ -213,7 +214,7 @@
 | `DirectionDtos` | `leaderId` | string / null | S 总负责人 ID；新增、修改时传该字段，配置对象必须是启用且具有 `LEADER` 角色的用户。仅建立责任关联，不新增角色、数据范围或审批节点 |
 | `DirectionDtos` | `leader` | UserRef / null | S 列表和详情返回的总负责人精简引用，只读；未配置时为 `null`，与 `leaderId` 同时返回 |
 | `Indicator` | `isQuantifiable` | boolean | 仅 A 使用；`false` 时只保留 S 归属、名称、性质、说明和负责人，量化字段均为 `null`，不生成 A+ / B，不进入填报、审核、核算和完成率统计 |
-| `Indicator` | `directionId` | string / null | 草稿 A 可空，定稿必须归属 S；只能由 ADMIN 在系统管理中修改，普通指标表单、列表和详情不展示该字段或 S 信息 |
+| `Indicator` | `directionId` | string / null | A 可空且不作为下发门槛；只能由 ADMIN 在系统管理中修改，自身或下属已下发后锁定；普通指标表单、列表和详情不展示该字段或 S 信息 |
 | `OrgUnit` | `isBAssignable` | boolean | 与既有 `isEnabled` 共同决定能否承接新 B；分解预览、保存、下发和转移接收统一校验二者均为 `true`，不得按单元编码硬编码 |
 | `Task` | `isHistorical` | boolean | 列表和详情必须返回。`true` 时目标冻结、全部执行写操作禁止，详情和审计仍按数据范围可读 |
 | `IndicatorDtos` | `bSummaries` | array | 指标详情的下属 B 概要数组，空时返回 `[]`；数组项使用 `level=B` 和 `isHistorical` |
@@ -263,8 +264,9 @@ sequenceDiagram
 - **功能权限**：用户可能同时有多个角色（`ADMIN`、`LEADER`、`SCHOOL_OWNER`、`UNIT_OWNER`），服务端按所有角色的**并集**计算权限，前端不需要传当前角色。
 - **数据权限**：
   - 平台管理员、校领导：全校数据；
-  - 校级项目负责人：自己负责的 A / A+ 及其下属的 B；
-  - 学院项目负责人：本单元的 B 任务。
+  - 校级项目负责人：自己负责的 A / A+ 及其下属的 B，以及这些指标所属的计划；
+  - 学院项目负责人：本单元的 B 任务、这些任务关联的 A / A+ 及父 A，以及所属计划；无关兄弟指标和其他学院任务不可见。
+- 多角色的数据范围同样取并集。计划详情和指标树必须在服务端校验可见范围，不能只依赖前端过滤。
 - S 总负责人只是 `direction.leaderId` 的责任关联，不新增角色或数据范围，不改变 LEADER 全校可见规则及既有调整审批链；S 配置仅限 ADMIN 的 `system:manage`。
 - 前端通过 `GET /auth/me` 获取 `roles`、`permissions`（权限码）和 `dataScope`，用来控制菜单和按钮的显示；**服务端必须对每个请求重新校验**。
 - 访问超出数据范围的资源时，返回 `403` + `20005`。
@@ -414,11 +416,11 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 ```json
 {
   "code": 50001,
-  "message": "B 分解合计与 A+ 目标不一致，不能下发",
+  "message": "B 分解合计低于指标目标，不能下发",
   "data": null,
   "requestId": "...",
   "errors": [
-    { "field": "indicators[0].yearTargets[2026]", "message": "A01-2 在 2026 年：各学院合计 0，A+ 目标 1" }
+    { "field": "indicators[0].yearTargets[2026]", "message": "A01-2 在 2026 年：各学院合计 0，低于指标目标 1" }
   ]
 }
 ```
@@ -489,15 +491,15 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | 40002 | 422 | 各年度目标之和不等于五年总量 |
 | 40003 | 422 | A+ 目标之和不等于 A 目标（汇总方式为自动汇总时） |
 | 40004 | 409 | 指标已下发，不能删除 |
-| 40005 | 409 | 指标体系已定稿，修改目标需要发起目标调整 |
+| 40005 | 409 | 历史保留错误码：指标体系已定稿；新流程不再主动抛出 |
 | 40006 | 422 | 层级或量化性质不合法（A+ 必须挂在可量化 A 下；A+ 不能再拆；只有 A+ 可生成新 B；不可量化 A 不设置量化字段） |
 | 40007 | 422 | 计量类型与统计口径不匹配（仅适用于可量化指标） |
 | 40008 | 409 | 存在下级数据，不能删除（S 下有 A、A 下有 A+） |
-| 50001 | 422 | 历史 B 冻结目标加非历史 B 目标与 A+ 目标不一致 |
+| 50001 | 422 | 历史 B 冻结目标加非历史 B 目标低于指标年度目标；等于或超过目标均允许 |
 | 50002 | 422 | B 任务没有指定学院项目负责人 |
 | 50003 | 409 | 任务已下发 |
 | 50004 | 409 | 该年度尚未激活，不能填报 |
-| 50005 | 409 | 指标体系尚未定稿，不能下发 |
+| 50005 | 409 | 历史保留错误码：原未定稿不能下发；新流程不再主动抛出 |
 | 50006 | 409 | 历史 B 任务只读（`TASK_HISTORICAL_READ_ONLY`），禁止确认接收、填报、审核、调整、补做及其他写操作 |
 | 60001 | 409 | 当前状态不允许此操作（提交、撤回、审核） |
 | 60002 | 422 | 缺少必须上传的佐证材料 |
@@ -505,6 +507,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | 60004 | 422 | 驳回时必须填写审核意见 |
 | 60005 | 422 | 认定值不能大于填报值 |
 | 60006 | 422 | 填报值与统计口径不匹配（见 3.5） |
+| 60007 | 422 | 提交或审核后年度完成值将超过年度目标；仅适用于 HIGHER_BETTER 的非 BOOLEAN 指标 |
 | 70001 | 422 | 调整数量超过尚未完成的量 |
 | 70002 | 422 | 违反守恒规则 |
 | 70003 | 422 | 目标年份超出规划期，或早于原年份 |
@@ -533,10 +536,11 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 
 ### 8.2 分片上传流程
 
-1. `POST /files/multipart/init`，请求体为 `{ fileName, size, mimeType, sha256, bizType }`，返回 `{ uploadId, partSize, partCount }`。如果服务器上已有相同 `sha256` 的文件，直接返回 `fileInfo`（秒传）。
-2. `PUT /files/multipart/{uploadId}/parts/{partNumber}`：上传分片，分片编号从 1 开始，分片默认 5 MB。
-3. `GET /files/multipart/{uploadId}`：查询已上传的分片，用于断点续传。
-4. `POST /files/multipart/{uploadId}/complete`：合并分片并校验 `sha256`，返回 `fileInfo`。
+1. `POST /files/multipart/init`，请求体为 `{ fileName, size, mimeType, sha256, bizType }`，返回 `{ uploadId, partSize, partCount, directUpload }`。如果服务器上已有相同 `sha256` 的文件，直接返回 `fileInfo`（秒传）。
+2. LOCAL：`PUT /files/multipart/{uploadId}/parts/{partNumber}` 上传分片，分片编号从 1 开始，分片默认 5 MB。
+3. MINIO：当 `directUpload=true` 时，逐片调用 `GET /files/multipart/{uploadId}/parts/{partNumber}/upload-url` 获取 `{ url, expiresAt }`，再以 `application/octet-stream` PUT 到该 S3 预签名地址；预签名请求不携带平台 Authorization。
+4. `GET /files/multipart/{uploadId}`：返回 `{ uploadedParts, directUpload }` 等会话信息用于断点续传；MINIO 的分片状态以对象存储 `listParts` 为准。
+5. `POST /files/multipart/{uploadId}/complete`：合并分片并校验实际大小、魔数和整文件 `sha256`，通过后返回 `fileInfo`；校验失败不写文件元数据。
 
 ### 8.3 文件对象 `FileInfo`
 
@@ -573,14 +577,30 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 
 服务端必须**同时**校验扩展名和文件头（魔数），不能只看扩展名。
 
-### 8.6 预览与下载
+### 8.6 材料库（跨学院材料统一管理）
+
+材料库把填报、调整、里程碑的材料按所属 A 类指标统一归集，并支持直接上传材料绑定指标（`file_ref.biz_type = INDICATOR`，`file_info.biz_type = INDICATOR_ATTACHMENT`）。
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /files/materials/indicators?planId=` | 当前用户可关联的关键产出指标（管理员、校领导全部；校级负责人为本人的 A；学院负责人为本单元承接任务所属 A）。返回 `{ id, code, name, directionName }`，`directionName` 为所属主要建设方向名称（无方向时为 `null`），用于下拉分组展示 |
+| `GET /files/materials?planId=&indicatorId=&unitId=&category=&keyword=&page=&pageSize=` | 跨学院材料分页检索，返回材料名、所属 A 指标、所属学院、类型、大小、上传人、上传时间 |
+| `POST /files/materials/bind` | 请求体 `{ indicatorId, fileIds[] }`，把已上传的 `TEMP` 材料绑定到指标并置为 `BOUND` |
+
+- 数据范围：管理员、校领导可查看全校材料；校级负责人仅本人负责 A 的材料；学院负责人仅本单元材料；越权返回 `20005`。
+- 非本人上传的材料不允许绑定（管理员除外），指标必须存在且在当前用户可关联范围内。
+- 检索结果中的 `indicator` 一律归集到 A 类层级，历史 A+ 材料也会归并展示。
+- 检索由数据库联表完成筛选、数据范围判断、排序和分页，只读取当前页；不得在应用内存加载全量 `file_ref` 后分页。
+
+### 8.7 预览与下载
 
 | 接口 | 返回 |
 | --- | --- |
 | `GET /files/{fileId}/preview` | `{ previewType, url, expiresAt }`。`previewType` 为 `IMAGE` / `PDF` / `OFFICE` / `VIDEO` / `UNSUPPORTED` |
 | `GET /files/{fileId}/download-url` | `{ url, expiresAt }` |
 
-- `url` 是**签名地址**，有效期 10 分钟，只能在有效期内使用。
+- `url` 是**签名地址**，有效期 10 分钟，只能在有效期内使用；LOCAL 返回后端 HMAC raw 地址，MINIO 返回 S3 预签名 GET。切换存储实现后按 `file_info.storage_type` 读取，历史 LOCAL 文件不受影响。
+- 下载接口生成的 LOCAL 地址带 `dl=1`，raw 响应使用 `Content-Disposition: attachment`；预览地址不带该参数并保持 `inline`。MINIO 下载预签名通过 `response-content-disposition=attachment` 返回附件。
 - 获取预览或下载地址时，服务端都要按业务数据的权限做校验；下载操作写入审计日志。
 - 视频文件转码完成前，`transcodeStatus` 为 `PROCESSING`，此时预览接口返回原始文件地址或提示稍后再试。
 
@@ -621,7 +641,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | `AuditAction` 日志动作 | `LOGIN` / `CREATE` / `UPDATE` / `DELETE` / `IMPORT` / `EXPORT` / `FINALIZE` / `DISTRIBUTE` / `ACCEPT` / `SUBMIT` / `WITHDRAW` / `REVIEW` / `ADJUST_APPLY` / `ADJUST_DECIDE` / `SETTLE` / `UNLOCK` / `PERMISSION_CHANGE` / `FILE_DOWNLOAD` / `FILE_PREVIEW` / `SYNC_ORG` | — |
 | `ClientType` 客户端 | `WEB` / `FEISHU_PC` / `FEISHU_MOBILE` / `SCREEN` | — |
 | `PlanYearStatus` 计划年度状态 | `NOT_ACTIVATED` / `ACTIVE` / `LOCKED` | 未激活 / 已激活 / 已核算锁定 |
-| `IndicatorStatus` 指标状态 | `DRAFT` / `FINALIZED` / `DISTRIBUTED` | 草稿 / 已定稿 / 已下发 |
+| `IndicatorStatus` 指标状态 | `DRAFT` / `FINALIZED` / `DISTRIBUTED` | 草稿 / 历史已定稿（仅兼容，按未下发处理）/ 已下发；新流程不再写入 FINALIZED |
 | `MakeupStatus` 补做状态 | `PENDING` / `DONE` / `CANCELLED` | 待补做 / 已补做 / 已取消 |
 | `FileStatus` 文件状态 | `TEMP` / `BOUND` | 临时 / 已绑定 |
 | `StorageType` 存储类型 | `LOCAL` / `MINIO` | 本地 / 对象存储 |
@@ -672,10 +692,10 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 - 日志字段：`id`、`occurredAt`、`operator`（UserRef）、`roles`、`unit`、`action`（AuditAction）、`resourceType`、`resourceId`、`resourceCode`、`before`（JSON）、`after`（JSON）、`stakeholders`（相关干系人 UserRef 数组）、`reason`、`clientType`、`ip`、`requestId`。
 - 以下**敏感操作**的请求体中必须带 `reason`（原因，≤ 500 字），否则返回 `10001`：
   - 年度数据解锁；
-  - 管理员代填或代审；
+  - 管理员代填；
   - 目标调整（`TARGET_CHANGE`）；
-  - 删除已定稿的数据；
   - 修改用户角色。
+- 管理员代审的 `reason` 为选填，未填写不阻断审核；填写时仍按原规则写入审计日志。
 - 日志只能追加，不提供修改和删除接口。
 - 日志中**不得**记录密码、Token、验证码；手机号等个人信息需要脱敏。
 
@@ -761,15 +781,17 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | POST | `/templates/{templateId}/copy` | 复制模板 | `plan:manage` |
 | POST | `/templates/{templateId}/disable` / `enable` | 停用 / 启用 | `plan:manage` |
 
+> `GET /plans` 只返回当前用户可见计划。卡片项包含 `completionRate`、`indicatorCountA`、`indicatorCountAPlus`、`taskCountB`、`createdAt`、`updatedAt`；数量与完成率仅统计当前用户可见范围，`updatedAt` 为空时回退 `createdAt`，无有效完成率基数时 `completionRate=null`。跨范围直访 `GET /plans/{planId}` 返回 `403` + `20005`。
+>
 > 模板后台快照必须保留 S 及 A 归属，供另存、复制计划和复制模板使用；模板结构、原始 JSON 预览及普通业务导出不得暴露 S 名称、`directionId` 或方向树。S 数据只由后台复制逻辑携带，不提供对外方向维度。
 
 ### 15.3 指标体系（M2）
 
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
-| GET | `/plans/{planId}/indicators` | 指标列表；`view=tree` 返回 A → A+ 树；可按 `level`、`isQuantifiable`、`ownerId`、`keyword` 过滤，不支持 S/方向过滤，响应不含 S 信息 | 已登录（按数据范围） |
+| GET | `/plans/{planId}/indicators` | 指标列表；`view=tree` 返回 A → A+ 树；可按 `level`、`isQuantifiable`、`ownerId`、`keyword` 过滤，不支持 S/方向过滤；节点携带 `directionId`、`directionName` 仅供指标总表按主要建设方向分组展示，不用于方向统计 | 已登录（按数据范围） |
 | POST | `/plans/{planId}/indicators` | 新增 A（带 `isQuantifiable`），或在可量化 A 下新增 A+（必须带 `parentId`）；不可量化 A 只校验基础字段 | `indicator:edit` |
-| POST ⚡ | `/plans/{planId}/indicators/{parentId}/decomposition` | 一页式分解：请求 `{ indicator, rows }`，在一个事务中新建 A+、保存年度目标和 B 草稿，响应 `{ aPlus, allocation }`；任一步失败整体回滚，不定稿、不下发、不通知学院 | `indicator:edit` + `allocation:edit` + 负责人数据范围 |
+| POST ⚡ | `/plans/{planId}/indicators/{parentId}/decomposition` | 一页式分解：请求 `{ indicator, rows }`，在一个事务中新建 A+、保存年度目标和 B 草稿，响应 `{ aPlus, allocation }`；任一步失败整体回滚，不下发、不通知学院 | `indicator:edit` + `allocation:edit` + 负责人数据范围 |
 | GET | `/indicators/{indicatorId}` | 指标详情（含量化指标的年度目标、下属 A+，以及 `bSummaries`）；不返回 S 信息 | 按数据范围 |
 | PATCH | `/indicators/{indicatorId}` | 修改指标（带 `version`）；不可量化 A 仅可修改名称、性质、说明、负责人，S 归属须走系统管理接口 | `indicator:edit` |
 | DELETE | `/indicators/{indicatorId}` | 删除（未下发时才可以） | `indicator:edit` |
@@ -778,21 +800,20 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | GET | `/plans/{planId}/indicators/import-template` | 下载 Excel 导入模板（含 `isQuantifiable`，不含 S 展示列；S 归属由系统管理维护） | `indicator:edit` |
 | POST | `/plans/{planId}/indicators/import-preview` | 上传 Excel，返回 `importId`、逐行解析结果和错误 | `indicator:edit` |
 | POST ⚡ | `/plans/{planId}/indicators/import-confirm` | 确认导入 `{ importId }` | `indicator:edit` |
-| POST ⚡ | `/plans/{planId}/indicators/finalize` | 定稿：S 归属可选，不作为普通用户定稿门槛；可量化 A/A+ 校验量化字段及数量型拆分守恒，不可量化 A 跳过量化校验，BOOLEAN 不做数量求和 | `plan:manage` |
 
-> 非量化 A 的 `measureType`、`statCaliber`、`unit`、`targetDirection`、`rollupMode`、`baselineValue`、`totalTarget`、`yearTargets`、材料要求等量化字段均返回 `null`（数组按 3.2 返回 `[]`），不得用于分解、下发、填报、审核、核算或完成率计算。S 结构与 A 归属定稿后锁定，S 总负责人可在执行期更换。
+> 非量化 A 的 `measureType`、`statCaliber`、`unit`、`targetDirection`、`rollupMode`、`baselineValue`、`totalTarget`、`yearTargets`、材料要求等量化字段均返回 `null`（数组按 3.2 返回 `[]`），不得用于分解、下发、填报、审核、核算或完成率计算。系统不设定稿接口；DRAFT 与历史 FINALIZED 的未下发指标均可维护。S 结构与 A 归属在自身或下属已下发后锁定，S 总负责人可在执行期更换。
 
 ### 15.4 分解与下发（M3）
 
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
 | GET | `/indicators/{indicatorId}/allocation` | 仅获取 A+ 的分解矩阵：合格执行单元 × 年度、历史冻结目标及合计校验结果；其他层级返回 40006 | `allocation:edit` |
-| PUT | `/indicators/{indicatorId}/allocation` | 保存非历史 B 草稿，允许合计不一致；仅接受启用且 `isBAssignable=true` 的单元，不得修改历史冻结目标 | `allocation:edit` |
-| POST ⚡ | `/plans/{planId}/distribute` | 仅下发 A+ 下的非历史 B；`indicatorIds` 为空时处理全部可下发 A+，数量型强制校验“历史冻结目标 + 非历史目标 = A+ 目标”（BOOLEAN 与比率类不求和），并再次校验单元资格 | `task:distribute` |
-| POST ⚡ | `/plans/{planId}/years/{year}/activate` | 激活非历史任务年度，激活后才能填报；历史任务跳过且不生成待办或提醒 | `settlement:manage` |
+| PUT | `/indicators/{indicatorId}/allocation` | 保存非历史 B 草稿，允许合计不足或超额；已下发指标可追加合格学院，新增行须启用且 `isBAssignable=true`；历史及已生效任务必须原样保留，不得改负责人、改目标或删除 | `allocation:edit` |
+| POST ⚡ | `/plans/{planId}/distribute` | DRAFT 与历史 FINALIZED 均可直接下发；`indicatorIds` 为空时处理全部可下发 A+。下发前依次复核完整性（10001）、年度目标五年守恒（40002）、A/A+ 拆分守恒（40003）、B 分解平衡（50001）及学院负责人（50002），并再次校验单元资格；已下发指标存在追加的待下发 B 时仅处理新任务，无待办对象幂等跳过 | `task:distribute` |
+| POST ⚡ | `/plans/{planId}/years/{year}/activate` | 历史兼容接口；现行规则为计划启动后全部年度默认激活，前端不再提供手动激活入口。填报仅允许当前自然年份且年度未锁定；历史任务跳过且不生成待办或提醒 | `settlement:manage` |
 | GET | `/tasks` | B 任务列表（可按 `unitId`、`indicatorId`、`year`、`status`、`yearStatus`、`isHistorical` 过滤），每项返回 `isHistorical` | 按数据范围 |
 | GET | `/tasks/{taskId}` | B 任务详情（各年度目标、完成值、状态、`isHistorical`）；历史任务及既有记录只读可见 | 按数据范围 |
-| POST ⚡ | `/tasks/{taskId}/accept` | 学院确认接收非历史任务；历史任务禁止写入 | `task:accept` |
+| POST ⚡ | `/tasks/{taskId}/accept` | 历史兼容接口；现行学院角色不再分配此权限，下发后无需接收即可按年度状态填报 | `task:accept` |
 
 > 分解预览、草稿保存、下发和转移接收必须共用同一套 `isEnabled && isBAssignable` 校验，初始仅 C01–C08 合格，但接口不得按编码硬编码。历史 B 不出现在可编辑矩阵行中，其目标作为只读冻结基数参与守恒；历史任务详情、目标、已审核完成值、快照和审计不删除、不重编号。
 >
@@ -809,6 +830,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | DELETE | `/submissions/{submissionId}` | 删除非历史任务的草稿；历史任务禁止 | `submission:submit` |
 | POST ⚡ | `/submissions/{submissionId}/submit` | 提交非历史任务审核；历史任务禁止 | `submission:submit` |
 | POST ⚡ | `/submissions/{submissionId}/withdraw` | 撤回非历史任务的待审核填报（审核前才可以）；历史任务禁止 | `submission:submit` |
+| GET | `/plans/{planId}/submissions/uploads?year=` | 当年已上传指标清单：已提交审核（待审核/已通过/已驳回）的填报记录，返回指标名称、所属学院、上传人、上传时间、审核状态；历史 A+ 归一到所属 A 展示 | 按数据范围 |
 | GET | `/reviews/pending` | 待审核列表，只包含非历史任务，不包含迁移时已终止记录 | `submission:review` |
 | POST ⚡ | `/submissions/{submissionId}/review` | 审核非历史任务：`{ result, comment, approvedValue? }`，`approvedValue` 用于核减；历史任务禁止 | `submission:review` |
 | POST ⚡ | `/submissions/batch-review` | 批量审核通过；仅接受非历史任务，混入历史或已终止记录时不得写入 | `submission:review` |
@@ -851,7 +873,10 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | GET | `/plans/{planId}/stats/by-unit?year=` | 按执行单元统计 | 同上 |
 | GET | `/plans/{planId}/stats/by-indicator?year=` | 按可量化 A 级指标统计，返回 `IndicatorStat[]`；不提供 S/方向筛选或图表数据 | 同上 |
 | GET | `/plans/{planId}/stats/tree?year=` | 可量化指标按 A → A+ → B 逐级下钻；节点不返回 `directionId`，B 叶节点返回 `level=B` 和 `isHistorical`；不接受方向参数、不返回 S 层 | 同上 |
-| GET | `/indicators/{indicatorId}/trend` | 可量化指标各年度目标和实际的趋势；不可量化 A 无趋势数据 | 同上 |
+| GET | `/indicators/{indicatorId}/trend` | 可量化指标各年度目标和实际的趋势；不可量化 A 无趋势数据；RATIO 年度含 `actualNumerator/actualDenominator` | 同上 |
+| GET | `/plans/{planId}/gantt?indicatorId=` | 全计划或单 A 的 A→B 全年度甘特读模型，含进度、里程碑、FS 依赖和关键路径；按数据范围裁剪并归集历史 A+ | 已登录（按数据范围） |
+| POST ⚡ | `/plans/{planId}/task-dependencies` | 创建同计划 B 的 FS 依赖；拒绝自依赖、重复、跨计划、历史任务和成环 | `allocation:edit` |
+| DELETE | `/task-dependencies/{dependencyId}?version=` | 逻辑删除依赖，必须携带当前版本 | `allocation:edit`（按数据范围） |
 | POST ⚡ | `/plans/{planId}/years/{year}/settle` | 年度核算并锁定；跳过历史任务的批处理写入和补做生成，历史已审核值仍保留用于历史统计 | `settlement:manage` |
 | GET | `/plans/{planId}/years/{year}/settlement` | 年度核算结果查询（含逐任务明细与待补做关联；未核算时 items 为空） | 已登录（按数据范围） |
 | POST ⚡ | `/plans/{planId}/years/{year}/unlock` | 解锁年度数据（必须带 `reason`） | `settlement:manage` |
@@ -860,6 +885,8 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | GET | `/screens/{planId}?year=` | 大屏聚合数据（可缓存 1–5 分钟）；A 级指标面板字段为 `byIndicator: IndicatorStat[]`，并提供 A → A+ → B 下钻，不含 S、方向筛选或方向下钻 | `screen:view` |
 | POST ⚡ | `/exports` | 创建异步导出任务：`{ type: ExportType, params }`，返回 `exportId` | 视导出类型而定 |
 | GET | `/exports/{exportId}` | 查询导出任务状态；成功时返回签名下载地址 | 任务创建人 |
+
+甘特图 `data` 固定包含 `plan/years/nodes/milestones/dependencies/criticalPath/graph`。节点以 `kind=indicator/task` 和 `parentId` 组成 A→B，`years[]` 包含目标、审核完成值、完成率、状态和版本；里程碑保留真实 `dueDate/relatedYear`。`criticalPath.status` 为 `EMPTY/OK/NO_DEPENDENCIES/UNSCHEDULED/CYCLE_DETECTED/YEAR_CONFLICT`，关键任务和边以字符串 ID 数组返回。依赖请求体为 `{ predecessorTaskId, successorTaskId, type: "FS" }`；创建必须携带 `Idempotency-Key`。依赖只表达计划关系，不自动修改目标或阻塞填报。
 
 `GET /plans/{planId}/stats/by-indicator?year=` 的统一响应 `data` 为 `IndicatorStat[]`，无数据时返回 `[]`。`GET /screens/{planId}?year=` 的 `byIndicator` 使用同一数组项结构，不保留方向维度字段。
 
@@ -887,6 +914,9 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 > - `GET /plans/{planId}/stats/by-unit` 与 `by-indicator` 新增 `cumulativeRate`（范围内可量化 B 任务累计完成率按既定口径汇总）；
 > - `GET /indicators/{indicatorId}/trend` 新增 `cumulativeActual` / `cumulativeRate`（MANUAL 汇总的 A 优先取人工认定值）；
 > - `GET /tasks` 列表项与 `GET /tasks/{taskId}` 详情新增 `cumulativeActual` / `cumulativeRate`。
+> - `GET /tasks` 列表项新增 `yearTargets`（全规划期年度目标数组），供指标总表展开 B 后直接展示全部年度，避免逐任务查询详情。
+> - `GET /reviews/pending` 新增 `keyword`、`submittedAtFrom`、`submittedAtTo` 查询参数；关键字匹配任务编号、指标编号或名称，时间采用 ISO 8601。
+> - `POST /plans` 的 COPY 请求使用 `copyAllocations` 选择是否复制 B 分工结构；复制后的任务与年度均为待下发/未激活状态，不复制接收、填报、审核或调整执行数据。
 > 均为新增字段，旧客户端不受影响。
 >
 > 统计统一口径：不可量化 A 不进入统计树、A 级完成率或完成率分母，也不计入大屏核心数字的 A / A+ 数量；历史任务的已审核完成值继续在历史统计及相应完成值汇总中保留，不得简单过滤删除。当前待办、预警、提醒和可执行数量（含 `coreNumbers.taskCount`）必须排除历史任务，年度批处理不得为其生成新记录。统计、大屏和普通业务导出均不包含 S/方向维度。
@@ -896,13 +926,14 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
 | GET | `/audit-logs` | 查询日志（时间范围、单元、指标、动作、操作人） | `audit-log:view` |
-| GET | `/todos` | 我的待办：待填报、待审核、待确认接收、待审批；列表和计数均排除历史任务及迁移已终止记录 | 已登录 |
+| GET | `/todos` | 我的待办：待填报、待审核、待审批；不再生成待确认接收；可选 `planId/year` 过滤，items 与 summary 同口径；列表和计数均排除历史任务及迁移已终止记录 | 已登录 |
 | GET | `/notifications` | 站内消息 | 已登录 |
 | POST | `/notifications/{notificationId}/read` | 标记已读 | 已登录 |
 | POST | `/notifications/read-all` | 全部标记为已读 | 已登录 |
 
 > 说明（阶段 7 补录）：
-> - `GET /todos` 不分页，响应 `{ items, summary }`：`items[] = { type, bizId, bizCode, detail, todoSince }`，`type ∈ { FILL 待填报, REVIEW 待审核, ACCEPT 待确认接收, APPROVAL 待审批 }`；`bizId` 语义：FILL / ACCEPT = B 任务 id，REVIEW = 填报 id，APPROVAL = 调整申请 id；`summary` 为各类型计数。聚合口径：FILL = 本单元非历史任务进行中 / 待补做 / 年度已激活未惰性激活的任务年度；REVIEW 与 `/reviews/pending` 同口径；ACCEPT = 本单元已下发未确认接收的非历史任务；APPROVAL = 非历史且未终止调整申请当前环节的期望处理人。所有类型和 `summary` 数量均排除历史任务、迁移已终止记录，不得再为其生成提醒。
+> - `GET /todos` 不分页，响应 `{ items, summary }`：`items[] = { type, bizId, planId, year, bizCode, detail, todoSince, deadline }`，`type ∈ { FILL 待填报, REVIEW 待审核, ACCEPT 待确认接收, APPROVAL 待审批 }`；`bizId` 语义：FILL / ACCEPT = B 任务 id，REVIEW = 填报 id，APPROVAL = 调整申请 id；`summary` 为各类型计数。聚合口径：FILL = 本单元非历史任务进行中 / 待补做 / 年度已激活未惰性激活的任务年度；REVIEW 与 `/reviews/pending` 同口径；ACCEPT = 本单元已下发未确认接收的非历史任务；APPROVAL = 非历史且未终止调整申请当前环节的期望处理人。所有类型和 `summary` 数量均排除历史任务、迁移已终止记录，不得再为其生成提醒。
+> - `GET /todos` 的 `items[]` 新增 `planId/year`，用于计划隔离与对象深链；`bizId` 语义不变。FILL 链接携带任务年度，REVIEW 携带 `submissionId`，ACCEPT 携带 `taskId/year`，APPROVAL 携带 `adjustmentId`。
 > - `GET /notifications` 分页响应在标准结构上增加 `unreadCount`（未读总数，用于角标）；`unreadOnly=true` 只查未读；`type` 按 NotificationType 过滤。`read` / `read-all` 仅本人消息，无需幂等键（天然幂等）；`read-all` 返回 `{ readCount }`。
 > - `GET /audit-logs` 过滤参数：`occurredAtFrom` / `occurredAtTo`（ISO 8601，两端都包含）、`unitId`、`action`（英文逗号多值）、`operatorId`、`resourceType`、`resourceId`；默认 `occurredAt` 倒序。审计日志导出走统一异步导出（`POST /exports`，`type=AUDIT_LOGS`，权限 `audit-log:export`，`params` 与查询同形、无需 planId，见 16.6）。
 
@@ -911,8 +942,8 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
 | GET / POST | `/plans/{planId}/directions` | 系统管理“S 级任务”面板的 S 列表 / 新增；列表和详情 DTO 同时返回 `leaderId` 与 `leader`（UserRef / null），新增时传 `leaderId` | `system:manage`（仅 ADMIN） |
-| PATCH / DELETE | `/directions/{directionId}` | 修改 S 名称、排序、`leaderId` / 删除 S；负责人须具有 LEADER 角色，定稿后仅可更换总负责人 | `system:manage`（仅 ADMIN） |
-| PUT | `/indicators/{indicatorId}/direction` | 设置草稿 A 的 S 归属 `{ directionId, version }`；定稿后禁止，A+ 沿用所属 A | `system:manage`（仅 ADMIN） |
+| PATCH / DELETE | `/directions/{directionId}` | 修改 S 名称、排序、`leaderId` / 删除 S；负责人须具有 LEADER 角色；关联指标已下发后仅可更换总负责人 | `system:manage`（仅 ADMIN） |
+| PUT | `/indicators/{indicatorId}/direction` | 设置未下发 A 的 S 归属 `{ directionId, version }`；自身或下属已下发后禁止，A+ 沿用所属 A | `system:manage`（仅 ADMIN） |
 | GET / POST | `/org-units` | 执行单元列表 / 新增；资源包含 `isEnabled`、`isBAssignable` | 已登录 / `system:manage` |
 | PATCH | `/org-units/{unitId}` | 修改、停用或配置“可承接新 B”（`isBAssignable`）；既有历史任务不受影响 | `system:manage` |
 | GET / POST | `/major-groups` | 专业群列表 / 新增 | 已登录 / `system:manage` |
@@ -927,7 +958,8 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | GET / PATCH | `/settings` | 系统参数 | `system:manage` |
 | POST | `/files` | 直接上传 | 已登录 |
 | POST | `/files/multipart/init` | 初始化分片上传 | 已登录 |
-| PUT | `/files/multipart/{uploadId}/parts/{partNumber}` | 上传分片 | 上传人 |
+| PUT | `/files/multipart/{uploadId}/parts/{partNumber}` | LOCAL 上传分片 | 上传人 |
+| GET | `/files/multipart/{uploadId}/parts/{partNumber}/upload-url` | MINIO 分片预签名直传地址 | 上传人 |
 | GET | `/files/multipart/{uploadId}` | 查询已上传的分片 | 上传人 |
 | POST | `/files/multipart/{uploadId}/complete` | 完成分片上传 | 上传人 |
 | GET | `/files/{fileId}` | 文件信息 | 按业务权限 |
@@ -1061,7 +1093,7 @@ PUT /api/v1/indicators/1849000000000000101/allocation
 }
 ```
 
-> 请求 `rows` 只能包含启用且可承接新 B 的单元及非历史任务。响应的 `allocatedTarget` 按“历史冻结目标 + 非历史 B 目标”计算；本例历史冻结基数为 0。`isBalanced = false` 时仍可保存非历史草稿，但下发会返回 `50001`（见 6.3 示例）；历史目标不可通过本接口修改。
+> 请求 `rows` 只能包含启用且可承接新 B 的单元及非历史任务。响应的 `allocatedTarget` 按“历史冻结目标 + 非历史 B 目标”计算；本例历史冻结基数为 0。数量型各年 `allocatedTarget ≥ indicatorTarget` 时 `isBalanced=true`，允许等于或超额；仅合计不足时 `isBalanced=false`，仍可保存非历史草稿，但下发返回 `50001`（见 6.3 示例）。历史目标不可通过本接口修改。
 
 ### 16.4 填报并提交（占比型）
 

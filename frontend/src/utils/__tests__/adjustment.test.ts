@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   adjustmentTypeOptions,
+  buildConservationLines,
   canApplyForTask,
   canWithdraw,
   checkTargetYear,
@@ -157,6 +158,54 @@ describe('groupSnapshot / groupTotal / diffCell', () => {
     expect(diffCell(null, undefined)).toEqual({ changed: false, increased: false, decreased: false })
     expect(diffCell(null, 1).changed).toBe(true)
     expect(diffCell(true, null).changed).toBe(true)
+  })
+})
+
+describe('buildConservationLines 调整守恒', () => {
+  const before: AdjustmentSnapshotRow[] = [
+    { taskCode: 'A01-C01', year: 2026, target: 2 },
+    { taskCode: 'A01-C01', year: 2027, target: 1 },
+  ]
+  const transferred: AdjustmentSnapshotRow[] = [
+    { taskCode: 'A01-C01', year: 2026, target: 1 },
+    { taskCode: 'A01-C01', year: 2027, target: 1 },
+    { taskCode: 'A01-C03', year: 2026, target: 1 },
+  ]
+
+  it('转移按同一指标转出与接收合计判断，不逐任务误报 70002', () => {
+    const lines = buildConservationLines(groupSnapshot(before, transferred), 'TRANSFER')
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatchObject({
+      taskCode: 'A01',
+      before: 3,
+      after: 3,
+      balanced: true,
+      combined: true,
+    })
+    expect(buildConservationLines(groupSnapshot(before, transferred))[0].balanced).toBe(true)
+  })
+
+  it('转出与接收合计确实不等时仍提示不守恒', () => {
+    const invalid = transferred.map((row) =>
+      row.taskCode === 'A01-C03' ? { ...row, target: 2 } : row,
+    )
+    const lines = buildConservationLines(groupSnapshot(before, invalid), 'POSTPONE_TRANSFER')
+    expect(lines[0].before).toBe(3)
+    expect(lines[0].after).toBe(4)
+    expect(lines[0].balanced).toBe(false)
+  })
+
+  it('延期仍按单任务判断；目标调整不做前后总量相等校验', () => {
+    const postponed = before.map((row) => ({ ...row, year: row.year! + 1 }))
+    const lines = buildConservationLines(groupSnapshot(before, postponed), 'POSTPONE')
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatchObject({ before: 3, after: 3, balanced: true, combined: false })
+    expect(buildConservationLines(groupSnapshot(before, transferred), 'TARGET_CHANGE')).toEqual([])
+    const targetGroups = groupSnapshot(
+      [{ indicatorCode: 'A01', year: null, target: 3 }],
+      [{ indicatorCode: 'A01', year: null, target: 4 }],
+    )
+    expect(buildConservationLines(targetGroups)).toEqual([])
   })
 })
 

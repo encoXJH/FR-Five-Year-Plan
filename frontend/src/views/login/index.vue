@@ -43,6 +43,8 @@ const autoLoginPending = ref(clientEnv !== 'WEB')
 const feishuLoginLoading = ref(false)
 
 function redirectTarget(): string {
+  if (userStore.isUnitOwnerOnly) return userStore.homePath
+  if (userStore.roles.includes('ADMIN')) return '/plans'
   return typeof route.query.redirect === 'string' ? route.query.redirect : '/'
 }
 
@@ -247,8 +249,8 @@ async function quickLogin(username: string): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #ffffff;
-  background: linear-gradient(135deg, var(--el-color-primary-dark-2) 0%, var(--el-color-primary) 60%, var(--el-color-primary-light-3) 100%);
+  color: var(--el-color-primary-dark-2);
+  background: var(--el-color-primary-light-9);
 }
 
 .brand-content {

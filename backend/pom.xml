@@ -20,6 +20,7 @@
 		<jjwt.version>0.12.6</jjwt.version>
 		<springdoc.version>2.8.13</springdoc.version>
 		<easyexcel.version>4.0.3</easyexcel.version>
+		<awssdk.version>2.31.11</awssdk.version>
 	</properties>
 
 	<dependencies>
@@ -83,6 +84,13 @@
 			<artifactId>jjwt-jackson</artifactId>
 			<version>${jjwt.version}</version>
 			<scope>runtime</scope>
+		</dependency>
+
+		<!-- MinIO / S3 对象存储与预签名直传 -->
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>s3</artifactId>
+			<version>${awssdk.version}</version>
 		</dependency>
 
 		<!-- 接口文档 -->

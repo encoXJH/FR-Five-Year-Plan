@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getFileDownloadUrl, getFilePreview } from '@/api/file'
+import { downloadFile, getFilePreview } from '@/api/file'
 import { useUserStore } from '@/stores/user'
 import { ApiError } from '@/utils/request'
 import { formatDate, formatDateTime } from '@/utils/format'
@@ -134,8 +134,7 @@ async function loadPreview(): Promise<void> {
 async function download(): Promise<void> {
   if (!props.file) return
   try {
-    const { url } = await getFileDownloadUrl(props.file.id)
-    window.open(url, '_blank')
+    await downloadFile(props.file.id, props.file.fileName, props.file.size)
   } catch {
     ElMessage.error('获取下载地址失败，请重试')
   }

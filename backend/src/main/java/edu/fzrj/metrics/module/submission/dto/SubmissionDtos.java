@@ -9,6 +9,7 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.springframework.format.annotation.DateTimeFormat;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -60,12 +61,15 @@ public final class SubmissionDtos {
         @NotNull(message = "审核结果必填")
         private String result;
 
+        @NotNull(message = "version 必填")
+        private Integer version;
+
         private String comment;
 
         @Valid
         private MetricValue approvedValue;
 
-        /** 管理员代审原因（敏感操作必填） */
+        /** 管理员代审原因（选填，填写后写入审计日志） */
         private String reason;
     }
 
@@ -77,7 +81,7 @@ public final class SubmissionDtos {
 
         private String comment;
 
-        /** 管理员代审原因（敏感操作必填） */
+        /** 管理员代审原因（选填，填写后写入审计日志） */
         private String reason;
     }
 
@@ -110,6 +114,12 @@ public final class SubmissionDtos {
         @JsonSerialize(using = ToStringSerializer.class)
         private Long indicatorId;
         private Integer year;
+        /** 任务编号 / 指标编号或名称模糊检索 */
+        private String keyword;
+        @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+        private LocalDateTime submittedAtFrom;
+        @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+        private LocalDateTime submittedAtTo;
     }
 
     public record FileView(

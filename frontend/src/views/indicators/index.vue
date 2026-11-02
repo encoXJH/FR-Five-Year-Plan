@@ -1,98 +1,142 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { ArrowDown } from '@element-plus/icons-vue'
 import StatusTag from '@/components/StatusTag.vue'
 import ResponsiveRecordView from '@/components/ResponsiveRecordView.vue'
 import IndicatorEditDrawer from './components/IndicatorEditDrawer.vue'
-import DecompositionWizardDrawer from './components/DecompositionWizardDrawer.vue'
+import IndicatorTaskPanel from './components/IndicatorTaskPanel.vue'
 import ImportDialog from './components/ImportDialog.vue'
 import RollupBadge from './components/RollupBadge.vue'
+import TaskDetailDrawer from '@/views/workbench/components/TaskDetailDrawer.vue'
+import TaskAllocationModal from '@/views/allocation/TaskAllocationModal.vue'
 import { getPlan, listPlans } from '@/api/plan'
-import { deleteIndicator, finalizeIndicators, listIndicators } from '@/api/indicator'
+import { createDirection, listDirections } from '@/api/direction'
+import { deleteIndicator, listIndicators } from '@/api/indicator'
+import { listAllTasks } from '@/api/task'
 import { createExport, pollExport } from '@/api/export'
+import { getStatsTree } from '@/api/stats'
 import { getUserOptions } from '@/api/user'
 import { useUserStore } from '@/stores/user'
-import { ApiError } from '@/utils/request'
 import { enumLabel } from '@/utils/enumLabels'
 import { newIdempotencyKey } from '@/utils/idempotency'
-import { booleanPlanYear, formatTargetValue, hasQuantitativeFields, yearTargetMap } from '@/utils/indicator'
-import { formatDateTime } from '@/utils/format'
-import type { PlanDetail } from '@/types/plan'
+import {
+  booleanPlanYear,
+  formatTargetValue,
+  hasQuantitativeFields,
+  indexStatsTree,
+  parseExpandedIndicatorIds,
+  serializeExpandedIndicatorIds,
+  yearTargetMap,
+} from '@/utils/indicator'
+import { formatPercent } from '@/utils/format'
+import { triggerFileDownload } from '@/utils/file'
+import type { Direction, PlanDetail } from '@/types/plan'
 import type { Indicator, IndicatorTreeNode } from '@/types/indicator'
-import type { IndicatorLevel, IndicatorNature, SubjectType } from '@/types/enums'
+import type { StatsTreeNode } from '@/types/stats'
+import type { IndicatorNature } from '@/types/enums'
+import type { TaskListItem } from '@/types/task'
 import type { UserOption } from '@/types/user'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
-
 const planId = computed(() => (route.params.planId as string) || (route.query.planId as string) || '')
 
 const loading = ref(false)
 const plan = ref<PlanDetail | null>(null)
 const tree = ref<IndicatorTreeNode[]>([])
+const statsTree = ref<StatsTreeNode[]>([])
+const directionList = ref<Direction[]>([])
 const userOptions = ref<UserOption[]>([])
+const selectedDirectionId = ref('')
+let planRequestId = 0
+let treeRequestId = 0
+let statsRequestId = 0
+let directionRequestId = 0
+let expandAllRequestId = 0
+const EXPAND_ALL_CONCURRENCY = 6
 
-/** 校级负责人默认勾选「只看我负责的」（P04） */
 const defaultOnlyMine = (): boolean => userStore.roles.includes('SCHOOL_OWNER')
-
 const filters = reactive({
-  level: '' as IndicatorLevel | '',
-  subjectType: '' as SubjectType | '',
   nature: '' as IndicatorNature | '',
   ownerId: '',
+  quantStatus: '' as '' | 'QUANTIFIABLE' | 'NON_QUANTIFIABLE',
   onlyMine: defaultOnlyMine(),
   keyword: '',
 })
 
 const canEdit = computed(() => userStore.can('indicator:edit'))
 const canAllocate = computed(() => userStore.can('allocation:edit'))
-const canFinalize = computed(() => userStore.can('plan:manage'))
-const finalized = computed(() => plan.value?.indicatorsFinalized ?? false)
+const isAdmin = computed(() => userStore.roles.includes('ADMIN'))
 const isArchived = computed(() => plan.value?.status === 'ARCHIVED')
-const readOnly = computed(() => finalized.value || isArchived.value)
-
+const readOnly = computed(() => isArchived.value)
 const years = computed<number[]>(() => {
   if (!plan.value) return []
   const list: number[] = []
-  for (let year = plan.value.startYear; year <= plan.value.endYear; year += 1) {
-    list.push(year)
-  }
+  for (let year = plan.value.startYear; year <= plan.value.endYear; year += 1) list.push(year)
   return list
 })
-
 const currentYear = new Date().getFullYear()
-
-/** 仅可量化 A 可拆出 A+ */
-const parentOptions = computed(() =>
-  tree.value
-    .filter((node) => node.level === 'A' && node.isQuantifiable)
-    .map((node) => ({ id: node.id, code: node.code, name: node.name })),
-)
-
-async function loadAll(): Promise<void> {
-  if (!planId.value) return
-  loading.value = true
+async function loadStatsTree(): Promise<void> {
+  const requestedPlanId = planId.value
+  if (!requestedPlanId) return
+  const requestId = ++statsRequestId
   try {
-    const [detail] = await Promise.all([getPlan(planId.value), loadTree()])
-    plan.value = detail
-  } finally {
-    loading.value = false
+    const result = await getStatsTree(requestedPlanId)
+    if (requestId === statsRequestId && requestedPlanId === planId.value) statsTree.value = result
+  } catch {
+    if (requestId === statsRequestId && requestedPlanId === planId.value) statsTree.value = []
+  }
+}
+
+async function loadDirections(): Promise<void> {
+  const requestedPlanId = planId.value
+  const requestId = ++directionRequestId
+  if (!requestedPlanId || !isAdmin.value) {
+    if (requestId === directionRequestId) directionList.value = []
+    return
+  }
+  try {
+    const result = await listDirections(requestedPlanId)
+    if (requestId === directionRequestId && requestedPlanId === planId.value) directionList.value = result
+  } catch {
+    if (requestId === directionRequestId && requestedPlanId === planId.value) directionList.value = []
   }
 }
 
 async function loadTree(): Promise<void> {
-  if (!planId.value) return
+  const requestedPlanId = planId.value
+  if (!requestedPlanId) return
+  const requestId = ++treeRequestId
   const ownerId = filters.onlyMine ? (userStore.userInfo?.id ?? '') : filters.ownerId
-  tree.value = await listIndicators(planId.value, {
+  const result = await listIndicators(requestedPlanId, {
     view: 'tree',
-    level: filters.level || undefined,
     ownerId: ownerId || undefined,
     keyword: filters.keyword || undefined,
   })
+  if (requestId !== treeRequestId || requestedPlanId !== planId.value) return
+  tree.value = result
   await syncExpandedNodes()
+}
+
+async function loadAll(): Promise<void> {
+  const requestedPlanId = planId.value
+  if (!requestedPlanId) return
+  const requestId = ++planRequestId
+  loading.value = true
+  try {
+    const [detail] = await Promise.all([
+      getPlan(requestedPlanId),
+      loadTree(),
+      loadStatsTree(),
+      loadDirections(),
+    ])
+    if (requestId === planRequestId && requestedPlanId === planId.value) plan.value = detail
+  } finally {
+    if (requestId === planRequestId) loading.value = false
+  }
 }
 
 function applyFilters(): void {
@@ -102,9 +146,7 @@ function applyFilters(): void {
   })
 }
 
-/** 关键字输入防抖自动检索（无需点击查询按钮） */
 let keywordTimer: ReturnType<typeof setTimeout> | null = null
-
 function onKeywordInput(): void {
   if (keywordTimer !== null) clearTimeout(keywordTimer)
   keywordTimer = setTimeout(() => {
@@ -118,21 +160,24 @@ function resetFilters(): void {
     clearTimeout(keywordTimer)
     keywordTimer = null
   }
-  filters.level = ''
-  filters.subjectType = ''
   filters.nature = ''
   filters.ownerId = ''
+  filters.quantStatus = ''
   filters.onlyMine = defaultOnlyMine()
   filters.keyword = ''
+  selectedDirectionId.value = ''
   applyFilters()
 }
 
-/** 前端按主体 / 性质过滤（接口不支持 subjectType、nature 参数，本地过滤树） */
 const visibleTree = computed<IndicatorTreeNode[]>(() => {
   let nodes = tree.value
-  if (filters.subjectType) {
-    nodes = nodes.filter((node) => node.subjectType === filters.subjectType)
+  if (selectedDirectionId.value === '__UNASSIGNED__') {
+    nodes = nodes.filter((node) => !node.directionId)
+  } else if (selectedDirectionId.value) {
+    nodes = nodes.filter((node) => node.directionId === selectedDirectionId.value)
   }
+  if (filters.quantStatus === 'QUANTIFIABLE') nodes = nodes.filter((node) => node.isQuantifiable)
+  if (filters.quantStatus === 'NON_QUANTIFIABLE') nodes = nodes.filter((node) => !node.isQuantifiable)
   if (filters.nature) {
     nodes = nodes
       .map((node) => ({
@@ -144,99 +189,253 @@ const visibleTree = computed<IndicatorTreeNode[]>(() => {
   return nodes
 })
 
-type LazyIndicatorNode = Omit<IndicatorTreeNode, 'children'> & {
-  children: IndicatorTreeNode[]
+const directionOptions = computed(() => {
+  const options = new Map<string, { id: string; name: string }>()
+  for (const direction of directionList.value) options.set(direction.id, { id: direction.id, name: direction.name })
+  for (const indicator of tree.value) {
+    if (indicator.directionId && !options.has(indicator.directionId)) {
+      options.set(indicator.directionId, {
+        id: indicator.directionId,
+        name: indicator.directionName ?? '未命名建设方向',
+      })
+    }
+  }
+  return [...options.values()]
+})
+
+const directionNavItems = computed(() => {
+  const items = directionOptions.value.map((direction) => ({
+    ...direction,
+    count: tree.value.filter((indicator) => indicator.directionId === direction.id).length,
+  }))
+  const unassignedCount = tree.value.filter((indicator) => !indicator.directionId).length
+  if (unassignedCount > 0) {
+    items.push({ id: '__UNASSIGNED__', name: '未分配建设方向', count: unassignedCount })
+  }
+  return items
+})
+
+function selectDirection(id: string): void {
+  selectedDirectionId.value = id
+}
+
+async function addDirection(): Promise<void> {
+  if (!isAdmin.value || readOnly.value) return
+  try {
+    const name = await ElMessageBox.prompt('请输入主要建设方向名称', '添加主要建设方向', {
+      confirmButtonText: '添加',
+      cancelButtonText: '取消',
+      inputPlaceholder: '例如：落实立德树人根本任务',
+      inputValidator: (value: string) => value.trim().length > 0 || '方向名称不能为空',
+    })
+    const nextSort = Math.max(0, ...directionList.value.map((item) => item.sort ?? 0)) + 1
+    await createDirection(planId.value, { name: name.value.trim(), sort: nextSort, leaderId: null })
+    ElMessage.success('主要建设方向已添加')
+    await loadDirections()
+  } catch {
+    // 取消或接口异常分别由弹窗和全局拦截器处理。
+  }
+}
+
+interface ATableRow {
+  kind: 'indicator'
+  id: string
+  indicator: IndicatorTreeNode
   hasChildren: boolean
 }
 
-type IndicatorTable = {
-  toggleRowExpansion: (row: LazyIndicatorNode, expanded?: boolean) => void
-  updateKeyChildren: (id: string, children: IndicatorTreeNode[]) => void
+function toIndicatorRow(indicator: IndicatorTreeNode): ATableRow {
+  return {
+    kind: 'indicator',
+    id: indicator.id,
+    indicator,
+    hasChildren: hasQuantitativeFields(indicator.level, indicator.isQuantifiable),
+  }
 }
 
-const tableRef = ref<IndicatorTable | null>(null)
+const lazyTree = computed<ATableRow[]>(() => visibleTree.value.map(toIndicatorRow))
+const expandedRowKeys = computed(() => [...expandedIds])
 const expandAll = ref(false)
+const expandAllLoading = ref(false)
 const expandedIds = reactive(new Set<string>())
+const tasksByIndicator = reactive<Record<string, TaskListItem[]>>({})
+const taskLoadingIds = reactive(new Set<string>())
+const taskErrorIds = reactive(new Set<string>())
+const taskRequests = new Map<string, Promise<TaskListItem[]>>()
+const taskRequestGenerations = new Map<string, number>()
+const expandTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
-const childrenById = computed<Record<string, IndicatorTreeNode[]>>(() =>
-  Object.fromEntries(visibleTree.value.map((node) => [node.id, node.children])),
-)
-
-const lazyTree = computed<LazyIndicatorNode[]>(() =>
-  visibleTree.value.map(({ children, ...node }) => ({
-    ...node,
-    children: [],
-    hasChildren: children.length > 0,
-  })),
-)
-
-function loadChildren(
-  row: LazyIndicatorNode,
-  _node: unknown,
-  resolve: (children: IndicatorTreeNode[]) => void,
-): void {
-  resolve(childrenById.value[row.id] ?? [])
+function expansionStorageKey(): string {
+  return `fzsu.indicatorExpanded.${planId.value}`
 }
 
-function indicatorRowClass({ row }: { row: IndicatorTreeNode }): string {
-  return row.level === 'A_PLUS' ? 'indicator-row-a-plus' : 'indicator-row-a-collapsed'
+function restoreExpandedState(): void {
+  expandedIds.clear()
+  if (!planId.value) return
+  try {
+    for (const id of parseExpandedIndicatorIds(localStorage.getItem(expansionStorageKey()))) expandedIds.add(id)
+  } catch {
+    // 存储不可用时仍允许当前会话展开。
+  }
+}
+
+function persistExpandedState(): void {
+  if (!planId.value) return
+  try {
+    localStorage.setItem(expansionStorageKey(), serializeExpandedIndicatorIds(expandedIds))
+  } catch {
+    // 存储不可用时退化为当前会话内记忆。
+  }
+}
+
+function hasLoadedTasks(indicatorId: string): boolean {
+  return Object.prototype.hasOwnProperty.call(tasksByIndicator, indicatorId)
+}
+
+async function ensureIndicatorTasks(indicatorId: string): Promise<TaskListItem[]> {
+  if (hasLoadedTasks(indicatorId)) return tasksByIndicator[indicatorId]
+  const pending = taskRequests.get(indicatorId)
+  if (pending) return pending
+  const requestedPlanId = planId.value
+  const generation = taskRequestGenerations.get(indicatorId) ?? 0
+  const isCurrent = (): boolean => requestedPlanId === planId.value
+    && generation === (taskRequestGenerations.get(indicatorId) ?? 0)
+  taskLoadingIds.add(indicatorId)
+  taskErrorIds.delete(indicatorId)
+  const request = listAllTasks({ indicatorId })
+    .then((tasks) => {
+      if (isCurrent()) tasksByIndicator[indicatorId] = tasks
+      return tasks
+    })
+    .catch((error: unknown) => {
+      if (isCurrent()) taskErrorIds.add(indicatorId)
+      throw error
+    })
+    .finally(() => {
+      if (isCurrent()) taskLoadingIds.delete(indicatorId)
+      if (taskRequests.get(indicatorId) === request) taskRequests.delete(indicatorId)
+    })
+  taskRequests.set(indicatorId, request)
+  return request
+}
+
+function invalidateIndicatorTasks(indicatorId: string): void {
+  taskRequestGenerations.set(indicatorId, (taskRequestGenerations.get(indicatorId) ?? 0) + 1)
+  taskRequests.delete(indicatorId)
+  taskLoadingIds.delete(indicatorId)
+  taskErrorIds.delete(indicatorId)
+  delete tasksByIndicator[indicatorId]
+}
+
+function updateExpandAllState(): void {
+  expandAll.value = lazyTree.value.length > 0
+    && lazyTree.value.every((node) => !node.hasChildren || expandedIds.has(node.id))
 }
 
 function handleExpandChange(row: { id: string }, expanded: boolean): void {
   if (expanded) expandedIds.add(row.id)
   else expandedIds.delete(row.id)
-  expandAll.value = lazyTree.value.length > 0 && lazyTree.value.every((node) => !node.hasChildren || expandedIds.has(node.id))
+  updateExpandAllState()
+  persistExpandedState()
+}
+
+async function preloadIndicatorTasks(rows: ATableRow[]): Promise<boolean[]> {
+  const loaded = new Array<boolean>(rows.length).fill(false)
+  let nextIndex = 0
+  const worker = async (): Promise<void> => {
+    while (nextIndex < rows.length) {
+      const index = nextIndex
+      nextIndex += 1
+      const row = rows[index]
+      if (!row) continue
+      try {
+        await ensureIndicatorTasks(row.id)
+        loaded[index] = true
+      } catch {
+        loaded[index] = false
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(EXPAND_ALL_CONCURRENCY, rows.length) }, () => worker()))
+  return loaded
 }
 
 async function toggleExpandAll(): Promise<void> {
+  if (expandAllLoading.value) return
+  const requestId = ++expandAllRequestId
+  expandAllLoading.value = true
   const next = !expandAll.value
-  for (const row of lazyTree.value) {
-    if (!row.hasChildren) continue
-    tableRef.value?.toggleRowExpansion(row, next)
-    if (next) expandedIds.add(row.id)
-    else expandedIds.delete(row.id)
+  try {
+    if (next) {
+      const requestedPlanId = planId.value
+      const rows = lazyTree.value.filter((row) => row.hasChildren)
+      const loaded = await preloadIndicatorTasks(rows)
+      if (requestedPlanId !== planId.value) return
+      rows.forEach((row, index) => {
+        if (loaded[index]) expandedIds.add(row.id)
+      })
+    } else {
+      for (const row of lazyTree.value) expandedIds.delete(row.id)
+    }
+    updateExpandAllState()
+    persistExpandedState()
+    await nextTick()
+  } finally {
+    if (requestId === expandAllRequestId) expandAllLoading.value = false
   }
-  expandAll.value = next
-  await nextTick()
 }
 
 async function syncExpandedNodes(): Promise<void> {
   await nextTick()
-  for (const id of expandedIds) {
-    const children = childrenById.value[id]
-    if (children) tableRef.value?.updateKeyChildren(id, children)
-    else expandedIds.delete(id)
-  }
-  expandAll.value = lazyTree.value.length > 0 && lazyTree.value.every((node) => !node.hasChildren || expandedIds.has(node.id))
+  updateExpandAllState()
+  const requestedPlanId = planId.value
+  const expandedRows = lazyTree.value.filter((row) => row.hasChildren && expandedIds.has(row.id))
+  await preloadIndicatorTasks(expandedRows)
+  if (requestedPlanId === planId.value) updateExpandAllState()
 }
 
-const mobileRows = computed<Array<{ node: IndicatorTreeNode; depth: number }>>(() => {
-  const result: Array<{ node: IndicatorTreeNode; depth: number }> = []
-  for (const node of visibleTree.value) {
-    result.push({ node, depth: 0 })
-    if (!expandedIds.has(node.id)) continue
-    for (const child of node.children) result.push({ node: child, depth: 1 })
-  }
-  return result
-})
-
-function toggleMobileExpansion(row: IndicatorTreeNode): void {
+async function performToggleExpansion(row: ATableRow): Promise<void> {
   const expanded = !expandedIds.has(row.id)
-  const tableRow = lazyTree.value.find((node) => node.id === row.id)
-  if (tableRow) tableRef.value?.toggleRowExpansion(tableRow, expanded)
+  if (expanded) {
+    try {
+      await ensureIndicatorTasks(row.id)
+    } catch {
+      return
+    }
+  }
+  if (!lazyTree.value.some((item) => item.id === row.id)) return
   handleExpandChange(row, expanded)
 }
 
-/** 底部统计：A 类按性质计数 */
-const aRows = computed(() => tree.value.filter((node) => node.level === 'A'))
-const aPlusCount = computed(() => tree.value.reduce((sum, node) => sum + node.children.length, 0))
-const aConstraintCount = computed(
-  () => aRows.value.filter((node) => node.nature === 'CONSTRAINT').length,
-)
-const aDevelopmentCount = computed(
-  () => aRows.value.filter((node) => node.nature === 'DEVELOPMENT').length,
-)
+function toggleExpansion(row: ATableRow): void {
+  const pending = expandTimers.get(row.id)
+  if (pending) clearTimeout(pending)
+  expandTimers.set(row.id, setTimeout(() => {
+    expandTimers.delete(row.id)
+    void performToggleExpansion(row)
+  }, 200))
+}
 
+function handleTableExpandChange(row: ATableRow, expanded: boolean): void {
+  if (expanded !== expandedIds.has(row.id)) toggleExpansion(row)
+}
+
+async function retryTasks(indicatorId: string): Promise<void> {
+  invalidateIndicatorTasks(indicatorId)
+  const row = lazyTree.value.find((item) => item.id === indicatorId)
+  if (!row) return
+  try {
+    await ensureIndicatorTasks(indicatorId)
+  } catch {
+    // 面板保留错误状态和重试入口。
+  }
+  if (lazyTree.value.some((item) => item.id === indicatorId)) {
+    handleExpandChange(row, true)
+  }
+}
+
+const statsIndex = computed(() => indexStatsTree(statsTree.value))
+const statsByTask = computed(() => statsIndex.value.tasks)
 const targetMaps = computed(() => {
   const maps = new Map<string, Map<number, number | boolean | null>>()
   const walk = (nodes: IndicatorTreeNode[]): void => {
@@ -263,124 +462,106 @@ function totalTargetDisplay(row: Indicator): string {
   return formatTargetValue(row.totalTarget, row.statCaliber)
 }
 
-// ---------- 编辑抽屉 ----------
+function aStats(indicatorId: string): StatsTreeNode | undefined {
+  return statsIndex.value.indicators.get(indicatorId)
+}
+
+const aRows = computed(() => tree.value.filter((node) => node.level === 'A'))
+const aConstraintCount = computed(() => aRows.value.filter((node) => node.nature === 'CONSTRAINT').length)
+const aDevelopmentCount = computed(() => aRows.value.filter((node) => node.nature === 'DEVELOPMENT').length)
+
 const drawerVisible = ref(false)
 const editingIndicator = ref<Indicator | null>(null)
-const presetParentId = ref<string | null>(null)
-
 function openCreateA(): void {
   editingIndicator.value = null
-  presetParentId.value = null
   drawerVisible.value = true
 }
-
-const decompositionVisible = ref(false)
-const decompositionParent = ref<IndicatorTreeNode | null>(null)
-const decompositionAPlusId = ref<string | null>(null)
-const decompositionMode = ref<'create' | 'allocate'>('create')
-
-function openDecomposition(row: IndicatorTreeNode, mode: 'create' | 'allocate'): void {
-  if (row.level === 'A_PLUS') {
-    if (row.status !== 'DRAFT') {
-      goAllocation(row)
-      return
-    }
-    const parent = tree.value.find((node) => node.id === row.parentId)
-    if (!parent) return
-    decompositionParent.value = parent
-    decompositionAPlusId.value = row.id
-  } else if (row.level === 'A' && row.isQuantifiable) {
-    decompositionParent.value = row
-    decompositionAPlusId.value = null
-  } else {
-    return
-  }
-  decompositionMode.value = mode
-  decompositionVisible.value = true
+function hasDistributedScope(row: IndicatorTreeNode): boolean {
+  return row.status === 'DISTRIBUTED' || row.children.some((child) => child.status === 'DISTRIBUTED')
 }
-
-async function onDecompositionSaved(payload: { parentId: string }): Promise<void> {
-  await loadTree()
-  const parent = lazyTree.value.find((row) => row.id === payload.parentId)
-  if (parent) {
-    expandedIds.add(payload.parentId)
-    tableRef.value?.toggleRowExpansion(parent, true)
-    await nextTick()
-  }
+function canEditRow(row: IndicatorTreeNode): boolean {
+  return canEdit.value && !readOnly.value && !hasDistributedScope(row)
 }
-
 function openEdit(row: Indicator): void {
   editingIndicator.value = row
-  presetParentId.value = null
   drawerVisible.value = true
 }
-
 async function onSaved(): Promise<void> {
-  const createdParentId = presetParentId.value
-  await loadTree()
-  if (createdParentId) {
-    const parent = lazyTree.value.find((row) => row.id === createdParentId)
-    if (parent) {
-      expandedIds.add(createdParentId)
-      tableRef.value?.toggleRowExpansion(parent, true)
-      await nextTick()
-    }
+  const savedIndicatorId = editingIndicator.value?.id
+  if (savedIndicatorId) invalidateIndicatorTasks(savedIndicatorId)
+  const refreshes: Promise<unknown>[] = [loadTree(), loadStatsTree()]
+  if (savedIndicatorId && expandedIds.has(savedIndicatorId)) {
+    refreshes.push(ensureIndicatorTasks(savedIndicatorId).catch(() => undefined))
   }
+  await Promise.all(refreshes)
 }
 
-// ---------- 行操作 ----------
 const activeRowActionsId = ref<string | null>(null)
 const rowActionsDropdownRef = ref<{ handleOpen: () => void } | null>(null)
-
 async function openRowActions(id: string): Promise<void> {
   activeRowActionsId.value = id
   await nextTick()
   rowActionsDropdownRef.value?.handleOpen()
 }
-
 function handleRowActionsVisible(visible: boolean): void {
   if (!visible) activeRowActionsId.value = null
 }
-
 function goDetail(row: Indicator): void {
   router.push(`/indicators/${row.id}`)
 }
 
-/** 只有 A+ 可进入分解矩阵 */
-function allocatableRow(row: Indicator): boolean {
-  return row.level === 'A_PLUS'
+const taskDrawerVisible = ref(false)
+const taskDrawerId = ref<string | null>(null)
+function openTaskDrawer(task: TaskListItem): void {
+  taskDrawerId.value = task.id
+  taskDrawerVisible.value = true
 }
-
-function goAllocation(row: Indicator): void {
-  router.push({ path: `/plans/${planId.value}/allocation`, query: { indicatorId: row.id } })
+function canAllocateRow(row: IndicatorTreeNode): boolean {
+  return canAllocate.value && row.level === 'A' && row.isQuantifiable
 }
-
-function goYearTargets(row: Indicator): void {
-  if (!hasQuantitativeFields(row.level, row.isQuantifiable)) return
-  router.push({ path: `/indicators/${row.id}`, query: { tab: 'targets' } })
+const allocationButtonText = '任务分解'
+const allocationVisible = ref(false)
+const allocationIndicator = ref<IndicatorTreeNode | null>(null)
+const indicatorMainRef = ref<HTMLElement>()
+function goProgress(): void {
+  router.push(`/plans/${planId.value}/indicator-progress`)
 }
-
+function goAllocation(row: IndicatorTreeNode): void {
+  allocationIndicator.value = row
+  allocationVisible.value = true
+}
+async function onAllocationSaved(indicatorId: string): Promise<void> {
+  const scrollTop = indicatorMainRef.value?.scrollTop ?? 0
+  invalidateIndicatorTasks(indicatorId)
+  const refreshes: Promise<unknown>[] = [loadTree(), loadStatsTree()]
+  if (expandedIds.has(indicatorId)) {
+    refreshes.push(ensureIndicatorTasks(indicatorId).catch(() => undefined))
+  }
+  await Promise.all(refreshes)
+  await nextTick()
+  if (indicatorMainRef.value) indicatorMainRef.value.scrollTop = scrollTop
+}
 async function handleDelete(row: Indicator): Promise<void> {
-  await ElMessageBox.confirm(
-    `确认删除指标「${row.code} ${row.name}」？已下发的指标不能删除（40004）。`,
-    '删除指标',
-    { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' },
-  )
+  try {
+    await ElMessageBox.confirm(
+      `确认删除指标「${row.code} ${row.name}」？已下发的指标不能删除（40004）。`,
+      '确认删除',
+      { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
   try {
     await deleteIndicator(row.id)
     ElMessage.success('指标已删除')
     await loadTree()
   } catch {
-    // 拦截器已提示
+    // 拦截器已提示。
   }
 }
 
-// ---------- 导入 ----------
 const importVisible = ref(false)
-
-// ---------- 导出 ----------
 const exporting = ref(false)
-
 async function handleExport(): Promise<void> {
   exporting.value = true
   const notification = ElNotification({
@@ -397,20 +578,16 @@ async function handleExport(): Promise<void> {
     const job = await pollExport(exportId)
     notification.close()
     if (job.status === 'SUCCEEDED' && job.downloadUrl) {
-      window.open(job.downloadUrl, '_blank')
-      ElNotification({ title: '导出 Excel', message: '导出完成，已开始下载', type: 'success' })
+      triggerFileDownload(job.downloadUrl, '指标总表.xlsx')
+      ElNotification({ title: '导出成功', message: '导出完成，已开始下载', type: 'success' })
     } else {
-      ElNotification({
-        title: '导出失败',
-        message: job.errorMessage ?? '导出任务失败，请稍后重试',
-        type: 'error',
-      })
+      ElNotification({ title: '导出失败', message: job.errorMessage ?? '导出任务失败', type: 'error' })
     }
   } catch (error) {
     notification.close()
     ElNotification({
       title: '导出失败',
-      message: error instanceof Error ? error.message : '导出任务失败，请稍后重试',
+      message: error instanceof Error ? error.message : '导出任务失败',
       type: 'error',
     })
   } finally {
@@ -418,76 +595,53 @@ async function handleExport(): Promise<void> {
   }
 }
 
-// ---------- 定稿 ----------
-const finalizing = ref(false)
-
-/** 定稿校验清单（无独立预检接口，confirm 中列出将校验项目，失败时逐项展示 errors） */
-const FINALIZE_CHECKLIST = [
-  'A → A+ 拆分守恒：A+ 目标之和 = A 目标（40003）',
-  '增量型各年度目标之和 = 五年总量（40002）',
-  '必填字段完整（名称、口径、达成方向等）',
-  '负责人已指定',
-]
-
-async function handleFinalize(): Promise<void> {
-  await ElMessageBox.confirm(
-    `<p><strong>此操作会校验并锁定整个计划的全部指标，不只是当前这一条。</strong></p><p>定稿将逐项校验：</p><ul style="margin:4px 0 8px;padding-left:20px;">${FINALIZE_CHECKLIST.map(
-      (item) => `<li>${item}</li>`,
-    ).join('')}</ul><p>定稿后修改目标需发起「目标调整」。确认全部指标已设置完成？</p>`,
-    '全部指标设置完成（定稿）',
-    {
-      confirmButtonText: '确认定稿',
-      cancelButtonText: '取消',
-      dangerouslyUseHTMLString: true,
-    },
-  )
-  finalizing.value = true
-  try {
-    if (!plan.value) return
-    await finalizeIndicators(planId.value, plan.value.version, newIdempotencyKey())
-    ElMessage.success('指标体系已定稿')
-    await loadAll()
-  } catch (error) {
-    if (error instanceof ApiError && (error.code === 10001 || error.code === 40003 || error.code === 40002)) {
-      const details = error.fieldErrors.map((item) => item.message)
-      ElMessageBox.alert(
-        details.length > 0 ? details.join('\n') : error.message,
-        `定稿前还需完成（${error.code}）`,
-        { confirmButtonText: '我知道了', type: 'error' },
-      )
-    }
-  } finally {
-    finalizing.value = false
-  }
-}
-
-/** 无计划上下文（菜单直链 /indicators）时自动进入当前执行中的计划 */
 async function redirectToActivePlan(): Promise<void> {
   try {
     const plans = await listPlans()
-    const active = plans.find((p) => p.status === 'ACTIVE') ?? plans[0]
+    const active = plans.find((item) => item.status === 'ACTIVE') ?? plans[0]
     if (active) await router.replace(`/plans/${active.id}/indicators`)
   } catch {
-    // 拉取失败保持空状态引导
+    // 拉取失败保持空状态引导。
   }
 }
 
-filters.onlyMine = defaultOnlyMine()
-
-// planId 驱动加载：组件可能被复用（直链跳转后 onMounted 不再触发），用 watch 保证有上下文即加载
 watch(planId, (id) => {
-  if (id) loadAll()
+  planRequestId += 1
+  treeRequestId += 1
+  statsRequestId += 1
+  directionRequestId += 1
+  expandAllRequestId += 1
+  expandAllLoading.value = false
+  plan.value = null
+  tree.value = []
+  statsTree.value = []
+  directionList.value = []
+  selectedDirectionId.value = ''
+  for (const key of Object.keys(tasksByIndicator)) delete tasksByIndicator[key]
+  taskRequests.clear()
+  taskRequestGenerations.clear()
+  taskLoadingIds.clear()
+  taskErrorIds.clear()
+  for (const timer of expandTimers.values()) clearTimeout(timer)
+  expandTimers.clear()
+  restoreExpandedState()
+  if (id) void loadAll()
+  else loading.value = false
 }, { immediate: true })
 
+watch(visibleTree, () => updateExpandAllState())
+
 onMounted(() => {
-  if (!planId.value) {
-    redirectToActivePlan()
-  }
-  getUserOptions()
-    .then((list) => {
-      userOptions.value = list
-    })
-    .catch(() => undefined)
+  if (!planId.value) void redirectToActivePlan()
+  getUserOptions().then((list) => {
+    userOptions.value = list
+  }).catch(() => undefined)
+})
+
+onBeforeUnmount(() => {
+  if (keywordTimer !== null) clearTimeout(keywordTimer)
+  for (const timer of expandTimers.values()) clearTimeout(timer)
+  expandTimers.clear()
 })
 </script>
 
@@ -496,756 +650,580 @@ onMounted(() => {
     <el-button type="primary" @click="router.push('/plans')">返回计划列表</el-button>
   </el-empty>
 
-  <div v-else v-loading="loading">
-    <el-alert
-      v-if="isArchived"
-      type="info"
-      :closable="false"
-      title="该计划已归档，只能查看"
-      class="page-alert"
-    />
-    <el-alert
-      v-else-if="finalized"
-      type="info"
-      :closable="false"
-      class="page-alert"
-      :title="`指标体系已于 ${plan?.finalizedAt ? formatDateTime(plan.finalizedAt) : '—'} 定稿，修改目标需发起「目标调整」（40005）`"
-    />
-
+  <div v-else v-loading="loading" class="indicator-page">
     <div class="page-header">
-      <div>
+      <div class="page-heading-copy">
+        <span class="page-eyebrow">五年规划 · 指标体系</span>
         <h1 class="page-title">指标总表</h1>
-        <p class="page-subtitle">{{ plan?.name ?? '' }}</p>
-      </div>
-      <div class="header-actions">
-        <template v-if="canEdit && !readOnly">
-          <el-button type="primary" @click="openCreateA">新增 A 类指标</el-button>
-          <el-button @click="importVisible = true">导入 Excel</el-button>
-        </template>
-        <el-button :loading="exporting" @click="handleExport">导出 Excel</el-button>
-        <el-tooltip
-          v-if="canFinalize"
-          :disabled="!readOnly"
-          content="指标体系已定稿或计划已归档"
-          placement="top"
-        >
-          <span>
-            <el-button
-              type="warning"
-              :disabled="readOnly"
-              :loading="finalizing"
-              @click="handleFinalize"
-            >
-              全部指标设置完成（定稿）
-            </el-button>
-          </span>
-        </el-tooltip>
+        <p class="page-subtitle">{{ plan?.name ?? '' }}<span aria-hidden="true"> / </span>共 {{ aRows.length }} 项关键产出指标</p>
       </div>
     </div>
+    <div class="app-action-row header-actions">
+      <el-button v-if="canEdit && !readOnly" type="primary" @click="openCreateA">新增指标</el-button>
+      <el-button @click="goProgress">进度可视化</el-button>
+      <el-dropdown trigger="click" class="data-menu">
+        <el-button :loading="exporting">
+          数据管理<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-if="canEdit && !readOnly" @click="importVisible = true">导入 Excel</el-dropdown-item>
+            <el-dropdown-item :disabled="exporting" @click="handleExport">导出 Excel</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+    </div>
 
-    <el-card shadow="never" class="filter-card">
-      <el-form inline class="filter-form" @submit.prevent>
-        <el-form-item label="主体">
-          <el-select v-model="filters.subjectType" clearable placeholder="全部" style="width: 120px">
-            <el-option label="校级" value="SCHOOL" />
-            <el-option label="专业群" value="MAJOR_GROUP" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="层级">
-          <el-select
-            v-model="filters.level"
-            clearable
-            placeholder="全部"
-            style="width: 120px"
-            @change="applyFilters"
-          >
-            <el-option label="A 类" value="A" />
-            <el-option label="A+ 类" value="A_PLUS" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="指标性质">
-          <el-select v-model="filters.nature" clearable placeholder="全部" style="width: 120px">
-            <el-option label="约束性" value="CONSTRAINT" />
-            <el-option label="发展性" value="DEVELOPMENT" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="负责人">
-          <el-select
-            v-model="filters.ownerId"
-            clearable
-            filterable
-            placeholder="全部"
-            style="width: 180px"
-            :disabled="filters.onlyMine"
-            @change="applyFilters"
-          >
-            <el-option
-              v-for="user in userOptions"
-              :key="user.id"
-              :label="`${user.name}（${user.username}）`"
-              :value="user.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="关键字">
+    <el-alert
+      v-if="readOnly"
+      title="该计划已归档，只能查看，不能编辑或下发"
+      type="info"
+      :closable="false"
+      class="page-alert"
+    />
+
+    <section class="indicator-workspace">
+      <aside class="direction-sidebar">
+        <div class="direction-sidebar__header">
+          <strong>主要建设方向</strong>
+          <el-button v-if="isAdmin && !readOnly" link type="primary" @click="addDirection">添加</el-button>
+        </div>
+        <button
+          type="button"
+          class="direction-nav-item direction-nav-all"
+          :class="{ 'is-active': selectedDirectionId === '' }"
+          :aria-pressed="selectedDirectionId === ''"
+          data-direction-id=""
+          @click="selectDirection('')"
+        >
+          <span>全部方向</span><span>{{ aRows.length }}</span>
+        </button>
+        <button
+          v-for="direction in directionNavItems"
+          :key="direction.id"
+          type="button"
+          class="direction-nav-item"
+          :class="{ 'is-active': selectedDirectionId === direction.id }"
+          :aria-pressed="selectedDirectionId === direction.id"
+          :data-direction-id="direction.id"
+          @click="selectDirection(direction.id)"
+        >
+          <span>{{ direction.name }}</span><span>{{ direction.count }}</span>
+        </button>
+      </aside>
+
+      <div ref="indicatorMainRef" class="indicator-main">
+        <div class="simple-filter">
           <el-input
             v-model="filters.keyword"
             clearable
-            placeholder="编号 / 名称"
-            style="width: 200px"
+            placeholder="指标编码或名称"
+            class="simple-filter__keyword"
             @input="onKeywordInput"
           />
-        </el-form-item>
-        <el-form-item>
-          <el-checkbox v-model="filters.onlyMine" @change="applyFilters">只看我负责的</el-checkbox>
-        </el-form-item>
-        <el-form-item>
-          <el-button @click="resetFilters">重置</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+          <el-select v-model="filters.quantStatus" placeholder="量化状态" class="simple-filter__status">
+            <el-option label="全部状态" value="" />
+            <el-option label="可量化" value="QUANTIFIABLE" />
+            <el-option label="不可量化" value="NON_QUANTIFIABLE" />
+          </el-select>
+          <el-button type="primary" class="simple-filter__query" @click="applyFilters">查询</el-button>
+          <el-popover placement="bottom-end" :width="360" trigger="click">
+            <template #reference>
+              <el-button link class="more-filter-button">更多筛选</el-button>
+            </template>
+            <el-form label-width="82px" class="advanced-filter-form">
+              <el-form-item label="指标性质">
+                <el-select v-model="filters.nature" clearable placeholder="全部性质" style="width: 100%">
+                  <el-option :label="enumLabel('IndicatorNature', 'CONSTRAINT', userStore.enums)" value="CONSTRAINT" />
+                  <el-option :label="enumLabel('IndicatorNature', 'DEVELOPMENT', userStore.enums)" value="DEVELOPMENT" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="负责人">
+                <el-select v-model="filters.ownerId" clearable filterable placeholder="全部负责人" style="width: 100%" :disabled="filters.onlyMine" @change="applyFilters">
+                  <el-option v-for="user in userOptions" :key="user.id" :label="`${user.name}（${user.username}）`" :value="user.id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item>
+                <el-checkbox v-model="filters.onlyMine" @change="applyFilters">只看我负责的</el-checkbox>
+                <el-button link type="primary" @click="resetFilters">重置全部</el-button>
+              </el-form-item>
+            </el-form>
+          </el-popover>
+          <el-button link type="primary" class="expand-all-button" :loading="expandAllLoading" @click="toggleExpandAll">
+            {{ expandAll ? '全部收起' : '全部展开' }}
+          </el-button>
+        </div>
 
-    <el-card shadow="never">
-      <div class="table-toolbar">
-        <el-button link type="primary" @click="toggleExpandAll">
-          {{ expandAll ? '全部收起' : '全部展开' }}
-        </el-button>
-      </div>
-      <ResponsiveRecordView class="indicator-records">
-        <template #table>
-          <el-table
-        ref="tableRef"
-        :data="lazyTree"
-        row-key="id"
-        :row-class-name="indicatorRowClass"
-        border
-        size="small"
-        max-height="calc(100vh - 330px)"
-        lazy
-        :load="loadChildren"
-        :tree-props="{ children: 'children', hasChildren: 'hasChildren' }"
-        @expand-change="handleExpandChange"
-      >
-        <el-table-column prop="code" label="编号" width="96" fixed="left" class-name="mono" />
-        <el-table-column label="层级" width="140" align="center">
-          <template #default="{ row }">
-            <StatusTag kind="IndicatorLevel" :value="row.level" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="name" label="关键产出指标" min-width="200" fixed="left" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span :class="{ 'row-a-name': row.level === 'A' }">{{ row.name }}</span>
-            <div v-if="row.level === 'A' && !row.isQuantifiable" class="undecomposable-tip">
-              不可量化 · 仅维护基础信息
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="性质" width="88" align="center">
-          <template #default="{ row }">
-            <StatusTag kind="IndicatorNature" :value="row.nature" />
-          </template>
-        </el-table-column>
-        <el-table-column label="口径" width="120" align="center">
-          <template #default="{ row }">
-            <StatusTag v-if="row.statCaliber" kind="StatCaliber" :value="row.statCaliber" />
-            <span v-else>—</span>
-          </template>
-        </el-table-column>
-        <el-table-column
-          label="单位"
-          min-width="72"
-          align="center"
-          class-name="complete-text-cell"
-        >
-          <template #default="{ row }">{{ row.unitLabel ?? '—' }}</template>
-        </el-table-column>
-        <el-table-column label="五年目标" width="104" align="right">
-          <template #default="{ row }">
-            {{ totalTargetDisplay(row) }}
-            <RollupBadge v-if="row.level === 'A' && row.isQuantifiable && row.rollupMode" :mode="row.rollupMode" />
-          </template>
-        </el-table-column>
-        <el-table-column label="年度目标" align="center">
-          <el-table-column
-            v-for="year in years"
-            :key="year"
-            :label="String(year)"
-            width="70"
-            align="right"
-          >
-            <template #header>
-              <span :class="{ 'current-year': year === currentYear }">{{ year }}</span>
-            </template>
-            <template #default="{ row }">
-              {{ formatTargetValue(targetOf(row, year), row.statCaliber) }}
-              <RollupBadge v-if="row.level === 'A' && row.isQuantifiable && row.rollupMode" :mode="row.rollupMode" />
-            </template>
-          </el-table-column>
-        </el-table-column>
-        <el-table-column label="负责人" width="84" align="center">
-          <template #default="{ row }">{{ row.owner?.name ?? '—' }}</template>
-        </el-table-column>
-        <el-table-column label="状态" width="84" align="center">
-          <template #default="{ row }">
-            <StatusTag kind="IndicatorStatus" :value="row.status" />
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="258" fixed="right" align="center">
-          <template #default="{ row }">
-            <div class="row-actions">
-              <el-button link type="primary" @click="goDetail(row)">详情</el-button>
-              <el-button
-                v-if="canEdit && canAllocate && !readOnly && row.level === 'A' && row.isQuantifiable"
-                type="primary"
-                size="small"
-                @click="openDecomposition(row, 'create')"
-              >
-                分解任务
-              </el-button>
-              <el-button
-                v-if="canAllocate && allocatableRow(row)"
-                type="primary"
-                size="small"
-                plain
-                @click="openDecomposition(row, 'allocate')"
-              >
-                {{ row.status === 'DRAFT' ? '继续分工' : '分工管理' }}
-              </el-button>
-              <el-dropdown
-                v-if="activeRowActionsId === row.id"
-                ref="rowActionsDropdownRef"
-                trigger="click"
-                @visible-change="handleRowActionsVisible"
-              >
-                <el-button link type="primary">
-                  更多<el-icon :size="12"><ArrowDown /></el-icon>
-                </el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item v-if="canEdit && !readOnly" @click="openEdit(row)">
-                      编辑
-                    </el-dropdown-item>
-                    <el-dropdown-item
-                      v-if="hasQuantitativeFields(row.level, row.isQuantifiable)"
-                      @click="goYearTargets(row)"
-                    >
-                      年度目标
-                    </el-dropdown-item>
-                    <el-dropdown-item
-                      v-if="canEdit && !readOnly"
-                      class="danger-item"
-                      @click="handleDelete(row)"
-                    >
-                      <span class="danger-text">删除</span>
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-              <el-button v-else link type="primary" @click="openRowActions(row.id)">
-                更多<el-icon :size="12"><ArrowDown /></el-icon>
-              </el-button>
-            </div>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <el-empty :image-size="80" description="还没有指标，可以手动新增或从 Excel 导入">
-            <template v-if="canEdit && !readOnly">
-              <el-button type="primary" @click="openCreateA">新增 A 类指标</el-button>
-              <el-button @click="importVisible = true">导入 Excel</el-button>
-            </template>
-          </el-empty>
-        </template>
-          </el-table>
-        </template>
-        <template #cards>
-          <div class="responsive-card-list indicator-card-list">
-            <article
-              v-for="{ node, depth } in mobileRows"
-              :key="node.id"
-              class="responsive-card indicator-card"
-              :class="{ 'is-a-plus': depth > 0 }"
+        <ResponsiveRecordView class="indicator-records">
+          <template #table>
+            <el-table
+              :data="lazyTree"
+              row-key="id"
+              :expand-row-keys="expandedRowKeys"
+              class="simple-indicator-table"
+              table-layout="fixed"
+              @expand-change="handleTableExpandChange"
             >
-              <div class="responsive-card__header">
-                <div class="indicator-card-heading">
-                  <div class="indicator-card-code mono">{{ depth > 0 ? '└ ' : '' }}{{ node.code }}</div>
-                  <div class="responsive-card__title" :class="{ 'row-a-name': node.level === 'A' }">
-                    {{ node.name }}
+              <el-table-column type="expand" width="36">
+                <template #default="{ row }">
+                  <div class="a-inline-expansion">
+                    <div class="row-actions a-expansion-actions">
+                      <el-button link type="primary" @click="goDetail(row.indicator)">详情</el-button>
+                      <el-button link type="primary" :disabled="!canAllocateRow(row.indicator)" @click="goAllocation(row.indicator)">{{ allocationButtonText }}</el-button>
+                      <el-dropdown
+                        v-if="activeRowActionsId === row.id"
+                        ref="rowActionsDropdownRef"
+                        trigger="click"
+                        @visible-change="handleRowActionsVisible"
+                      >
+                        <el-button link type="primary">更多<el-icon :size="12"><ArrowDown /></el-icon></el-button>
+                        <template #dropdown>
+                          <el-dropdown-menu>
+                            <el-dropdown-item :disabled="!canEditRow(row.indicator)" @click="openEdit(row.indicator)">编辑</el-dropdown-item>
+                            <el-dropdown-item :disabled="!canEditRow(row.indicator)" class="danger-item" @click="handleDelete(row.indicator)"><span class="danger-text">删除</span></el-dropdown-item>
+                          </el-dropdown-menu>
+                        </template>
+                      </el-dropdown>
+                      <el-button v-else link type="primary" @click="openRowActions(row.id)">更多<el-icon :size="12"><ArrowDown /></el-icon></el-button>
+                    </div>
+                    <div class="a-quant-summary">
+                      <div><span>统计口径</span><StatusTag v-if="row.indicator.statCaliber" kind="StatCaliber" :value="row.indicator.statCaliber" /><template v-else>—</template></div>
+                      <div><span>五年目标</span><strong>{{ totalTargetDisplay(row.indicator) }}</strong><RollupBadge v-if="row.indicator.rollupMode" :mode="row.indicator.rollupMode" /></div>
+                      <div><span>当前完成</span><strong>{{ aStats(row.id)?.actualValue ?? '—' }}</strong></div>
+                      <div><span>当年完成率</span><strong>{{ formatPercent(aStats(row.id)?.completionRate) }}</strong></div>
+                      <div><span>五年累计</span><strong>{{ formatPercent(aStats(row.id)?.cumulativeRate) }}</strong></div>
+                      <div><span>负责人</span><strong>{{ row.indicator.owner?.name ?? '—' }}</strong></div>
+                    </div>
+                    <div class="a-summary-years">
+                      <div v-for="year in years" :key="year">
+                        <span :class="{ 'current-year': year === currentYear }">{{ year }}</span>
+                        <strong>{{ formatTargetValue(targetOf(row.indicator, year), row.indicator.statCaliber) }}</strong>
+                      </div>
+                    </div>
+                    <IndicatorTaskPanel
+                      :indicator="row.indicator"
+                      :tasks="tasksByIndicator[row.id]"
+                      :loading="taskLoadingIds.has(row.id)"
+                      :load-error="taskErrorIds.has(row.id)"
+                      :years="years"
+                      :stats-by-task="statsByTask"
+                      :can-allocate="canAllocateRow(row.indicator) && !readOnly"
+                      @retry="retryTasks(row.id)"
+                      @detail="openTaskDrawer"
+                    />
                   </div>
-                  <div v-if="node.level === 'A' && !node.isQuantifiable" class="undecomposable-tip">
-                    不可量化 · 仅维护基础信息
+                </template>
+              </el-table-column>
+              <el-table-column label="编码" width="90" class-name="mono">
+                <template #default="{ row }">
+                  <button
+                    type="button"
+                    class="row-code-expand"
+                    :aria-label="`${row.indicator.code}：${expandedIds.has(row.id) ? '收起' : '展开'} 学院任务`"
+                    :aria-expanded="expandedIds.has(row.id)"
+                    :aria-busy="taskLoadingIds.has(row.id)"
+                    :data-indicator-id="row.id"
+                    @click="toggleExpansion(row)"
+                  >
+                    {{ row.indicator.code }}
+                  </button>
+                </template>
+              </el-table-column>
+              <el-table-column label="关键产出指标" min-width="260" class-name="complete-text-cell">
+                <template #default="{ row }">
+                  <button type="button" class="a-name-button" @click="toggleExpansion(row)">{{ row.indicator.name }}</button>
+                  <div v-if="!row.indicator.isQuantifiable" class="undecomposable-tip">不可量化 · 仅维护基础信息</div>
+                  <div v-if="taskErrorIds.has(row.id) && !taskLoadingIds.has(row.id)" class="task-error-state" role="alert">学院任务加载失败，请点击编号重试</div>
+                </template>
+              </el-table-column>
+              <template #empty>
+                <el-empty :image-size="80" description="当前方向或筛选条件下没有指标" />
+              </template>
+            </el-table>
+          </template>
+
+          <template #cards>
+            <div class="responsive-card-list indicator-card-list">
+              <article v-for="node in lazyTree" :key="node.id" class="responsive-card indicator-card">
+                <div class="indicator-card-topline">
+                  <button
+                    type="button"
+                    class="indicator-card-code mono indicator-card-code-button"
+                    :aria-label="`${node.indicator.code}：${expandedIds.has(node.id) ? '收起' : '展开'} 学院任务`"
+                    :aria-expanded="expandedIds.has(node.id)"
+                    :aria-busy="taskLoadingIds.has(node.id)"
+                    :data-indicator-id="node.id"
+                    @click="toggleExpansion(node)"
+                  >
+                    {{ expandedIds.has(node.id) ? '▾' : '▸' }} {{ node.indicator.code }}
+                  </button>
+                  <StatusTag kind="IndicatorStatus" :value="node.indicator.status" />
+                </div>
+                <button type="button" class="a-name-button responsive-card__title" @click="toggleExpansion(node)">{{ node.indicator.name }}</button>
+                <div v-if="!node.indicator.isQuantifiable" class="undecomposable-tip">不可量化 · 仅维护基础信息</div>
+                <div v-if="taskErrorIds.has(node.id) && !taskLoadingIds.has(node.id)" class="task-error-state" role="alert">学院任务加载失败，请点击编号重试</div>
+                <el-button
+                  link
+                  type="primary"
+                  class="indicator-card-expand"
+                  :loading="taskLoadingIds.has(node.id)"
+                  @click="toggleExpansion(node)"
+                >
+                  {{ expandedIds.has(node.id) ? '收起学院 B 与量化详情' : '展开学院 B 与量化详情' }}
+                  <el-icon class="expand-icon" :class="{ expanded: expandedIds.has(node.id) }"><ArrowDown /></el-icon>
+                </el-button>
+
+                <div v-if="expandedIds.has(node.id)" class="a-inline-expansion">
+                  <div class="row-actions a-expansion-actions">
+                    <el-button link type="primary" @click="goDetail(node.indicator)">详情</el-button>
+                    <el-button link type="primary" :disabled="!canAllocateRow(node.indicator)" @click="goAllocation(node.indicator)">{{ allocationButtonText }}</el-button>
+                    <el-dropdown
+                      v-if="activeRowActionsId === node.id"
+                      ref="rowActionsDropdownRef"
+                      trigger="click"
+                      @visible-change="handleRowActionsVisible"
+                    >
+                      <el-button link type="primary">更多<el-icon :size="12"><ArrowDown /></el-icon></el-button>
+                      <template #dropdown>
+                        <el-dropdown-menu>
+                          <el-dropdown-item :disabled="!canEditRow(node.indicator)" @click="openEdit(node.indicator)">编辑</el-dropdown-item>
+                          <el-dropdown-item :disabled="!canEditRow(node.indicator)" class="danger-item" @click="handleDelete(node.indicator)"><span class="danger-text">删除</span></el-dropdown-item>
+                        </el-dropdown-menu>
+                      </template>
+                    </el-dropdown>
+                    <el-button v-else link type="primary" @click="openRowActions(node.id)">更多<el-icon :size="12"><ArrowDown /></el-icon></el-button>
                   </div>
-                </div>
-                <StatusTag kind="IndicatorLevel" :value="node.level" />
-              </div>
-
-              <div class="indicator-card-tags">
-                <StatusTag kind="IndicatorNature" :value="node.nature" />
-                <StatusTag kind="IndicatorStatus" :value="node.status" />
-              </div>
-
-              <el-button
-                v-if="node.level === 'A' && node.children.length > 0"
-                link
-                type="primary"
-                class="indicator-card-expand"
-                @click="toggleMobileExpansion(node)"
-              >
-                {{ expandedIds.has(node.id) ? '收起 A+ 指标' : `展开 ${node.children.length} 条 A+ 指标` }}
-                <el-icon class="expand-icon" :class="{ expanded: expandedIds.has(node.id) }"><ArrowDown /></el-icon>
-              </el-button>
-
-              <div class="responsive-card__fields">
-                <div v-if="node.parentId" class="responsive-card__field field-wide">
-                  <span class="responsive-card__field-label">上级 A 类指标</span>
-                  {{ tree.find((item) => item.id === node.parentId)?.code ?? node.parentId }}
-                </div>
-                <div class="responsive-card__field">
-                  <span class="responsive-card__field-label">主体</span>
-                  {{ enumLabel('SubjectType', node.subjectType, userStore.enums) }}
-                </div>
-                <div class="responsive-card__field">
-                  <span class="responsive-card__field-label">是否可量化</span>
-                  {{ node.level === 'A' ? (node.isQuantifiable ? '是' : '否') : '沿用上级 A' }}
-                </div>
-                <div class="responsive-card__field">
-                  <span class="responsive-card__field-label">计量类型</span>
-                  {{ node.measureType ? enumLabel('MeasureType', node.measureType, userStore.enums) : '—' }}
-                </div>
-                <div class="responsive-card__field">
-                  <span class="responsive-card__field-label">统计口径</span>
-                  <StatusTag v-if="node.statCaliber" kind="StatCaliber" :value="node.statCaliber" />
-                  <template v-else>—</template>
-                </div>
-                <div class="responsive-card__field">
-                  <span class="responsive-card__field-label">计量单位</span>
-                  {{ node.unitLabel ?? '—' }}
-                </div>
-                <div class="responsive-card__field">
-                  <span class="responsive-card__field-label">达成方向</span>
-                  {{ node.targetDirection ? enumLabel('TargetDirection', node.targetDirection, userStore.enums) : '—' }}
-                </div>
-                <div class="responsive-card__field">
-                  <span class="responsive-card__field-label">汇总方式</span>
-                  {{ node.rollupMode ? enumLabel('RollupMode', node.rollupMode, userStore.enums) : '—' }}
-                </div>
-                <div class="responsive-card__field">
-                  <span class="responsive-card__field-label">校级负责人</span>
-                  {{ node.owner?.name ?? '—' }}
-                </div>
-                <div class="responsive-card__field field-wide indicator-total-target">
-                  <span class="responsive-card__field-label">五年目标</span>
-                  <strong>{{ totalTargetDisplay(node) }}</strong>
-                  <RollupBadge
-                    v-if="node.level === 'A' && node.isQuantifiable && node.rollupMode"
-                    :mode="node.rollupMode"
+                  <div class="a-quant-summary">
+                    <div><span>统计口径</span><StatusTag v-if="node.indicator.statCaliber" kind="StatCaliber" :value="node.indicator.statCaliber" /><template v-else>—</template></div>
+                    <div><span>五年目标</span><strong>{{ totalTargetDisplay(node.indicator) }}</strong></div>
+                    <div><span>当前完成</span><strong>{{ aStats(node.id)?.actualValue ?? '—' }}</strong></div>
+                    <div><span>当年完成率</span><strong>{{ formatPercent(aStats(node.id)?.completionRate) }}</strong></div>
+                    <div><span>五年累计</span><strong>{{ formatPercent(aStats(node.id)?.cumulativeRate) }}</strong></div>
+                    <div><span>负责人</span><strong>{{ node.indicator.owner?.name ?? '—' }}</strong></div>
+                  </div>
+                  <div class="a-summary-years">
+                    <div v-for="year in years" :key="year"><span>{{ year }}</span><strong>{{ formatTargetValue(targetOf(node.indicator, year), node.indicator.statCaliber) }}</strong></div>
+                  </div>
+                  <IndicatorTaskPanel
+                    :indicator="node.indicator"
+                    :tasks="tasksByIndicator[node.id]"
+                    :loading="taskLoadingIds.has(node.id)"
+                    :load-error="taskErrorIds.has(node.id)"
+                    :years="years"
+                    :stats-by-task="statsByTask"
+                    :can-allocate="canAllocateRow(node.indicator) && !readOnly"
+                    @retry="retryTasks(node.id)"
+                    @detail="openTaskDrawer"
                   />
                 </div>
-              </div>
-
-              <div class="indicator-year-section">
-                <div class="indicator-year-title">逐年目标</div>
-                <div class="responsive-year-grid indicator-year-grid">
-                  <div v-for="year in years" :key="year" class="indicator-year-target">
-                    <span :class="{ 'current-year': year === currentYear }">{{ year }} 年</span>
-                    <strong>
-                      {{ formatTargetValue(targetOf(node, year), node.statCaliber) }}
-                      <RollupBadge
-                        v-if="node.level === 'A' && node.isQuantifiable && node.rollupMode"
-                        :mode="node.rollupMode"
-                      />
-                    </strong>
-                  </div>
-                </div>
-              </div>
-
-              <div class="responsive-card__actions indicator-card-main-actions">
-                <el-button @click="goDetail(node)">查看详情</el-button>
-                <el-button
-                  v-if="canEdit && canAllocate && !readOnly && node.level === 'A' && node.isQuantifiable"
-                  type="primary"
-                  @click="openDecomposition(node, 'create')"
-                >
-                  分解任务
-                </el-button>
-                <el-button
-                  v-if="canAllocate && allocatableRow(node)"
-                  type="primary"
-                  plain
-                  @click="openDecomposition(node, 'allocate')"
-                >
-                  {{ node.status === 'DRAFT' ? '继续分工' : '分工管理' }}
-                </el-button>
-              </div>
-              <div
-                v-if="(canEdit && !readOnly) || hasQuantitativeFields(node.level, node.isQuantifiable)"
-                class="indicator-card-secondary-actions"
-              >
-                <el-button v-if="canEdit && !readOnly" link type="primary" @click="openEdit(node)">
-                  编辑指标
-                </el-button>
-                <el-button
-                  v-if="hasQuantitativeFields(node.level, node.isQuantifiable)"
-                  link
-                  type="primary"
-                  @click="goYearTargets(node)"
-                >
-                  年度目标
-                </el-button>
-                <el-button
-                  v-if="canEdit && !readOnly"
-                  link
-                  type="danger"
-                  @click="handleDelete(node)"
-                >
-                  删除指标
-                </el-button>
-              </div>
-            </article>
-            <el-empty
-              v-if="mobileRows.length === 0"
-              :image-size="80"
-              description="还没有指标，可以手动新增或从 Excel 导入"
-            >
-              <template v-if="canEdit && !readOnly">
-                <el-button type="primary" @click="openCreateA">新增 A 类指标</el-button>
-                <el-button @click="importVisible = true">导入 Excel</el-button>
-              </template>
-            </el-empty>
-          </div>
-        </template>
-      </ResponsiveRecordView>
-      <div class="table-footer">
-        共 A 类 {{ aRows.length }} 条、A+ 类 {{ aPlusCount }} 条；约束性 {{ aConstraintCount }} /
-        发展性 {{ aDevelopmentCount }}
+              </article>
+              <el-empty v-if="lazyTree.length === 0" :image-size="80" description="当前方向或筛选条件下没有指标" />
+            </div>
+          </template>
+        </ResponsiveRecordView>
+        <div class="table-footer">共 {{ aRows.length }} 条指标；当前显示 {{ lazyTree.length }} 条；约束性 {{ aConstraintCount }} / 发展性 {{ aDevelopmentCount }}</div>
       </div>
-    </el-card>
+    </section>
 
     <IndicatorEditDrawer
       v-model="drawerVisible"
       :plan-id="planId"
       :indicator="editingIndicator"
-      :preset-parent-id="presetParentId"
-      :parents="parentOptions"
       :years="years"
+      :direction-options="directionOptions"
+      :plan-archived="isArchived"
       @saved="onSaved"
     />
-
-    <DecompositionWizardDrawer
-      v-model="decompositionVisible"
+    <TaskAllocationModal
+      v-model="allocationVisible"
       :plan-id="planId"
-      :parent="decompositionParent"
-      :initial-a-plus-id="decompositionAPlusId"
-      :allow-create="canEdit && !readOnly"
-      :years="years"
-      :mode="decompositionMode"
-      @saved="onDecompositionSaved"
+      :indicator-id="allocationIndicator?.id ?? null"
+      :indicator-code="allocationIndicator?.code"
+      :indicator-name="allocationIndicator?.name"
+      @changed="onAllocationSaved"
     />
-
+    <TaskDetailDrawer
+      v-model="taskDrawerVisible"
+      :task-id="taskDrawerId"
+    />
     <ImportDialog v-model="importVisible" :plan-id="planId" @imported="loadTree" />
   </div>
 </template>
 
 <style scoped>
-.page-alert {
-  margin-bottom: var(--space-4);
+.indicator-page {
+  --indicator-ink: #17233c;
+  --indicator-muted: #6c7687;
+  --indicator-line: #e4e9f0;
+  --indicator-warm: #f6f8fb;
+  --indicator-paper: #ffffff;
+  --indicator-soft: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  color: var(--indicator-ink);
 }
 
 .page-header {
   display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: 18px;
+  padding: 2px 0 18px;
+  border-bottom: 1px solid var(--indicator-line);
+}
+.page-heading-copy { min-width: 0; }
+.page-eyebrow {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--el-color-primary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  line-height: 16px;
+}
+.page-title { margin: 0; font-size: 25px; line-height: 34px; font-weight: 650; letter-spacing: -0.4px; }
+.page-subtitle { margin: 4px 0 0; color: var(--indicator-muted); font-size: 12px; line-height: 20px; }
+.page-subtitle > span { padding: 0 7px; color: var(--el-border-color); }
+.header-actions { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: var(--space-2); }
+.header-actions :deep(.el-button) { margin-left: 0; }
+.data-menu { flex: 0 0 auto; }
+.page-alert { margin-bottom: var(--space-4); }
+
+.indicator-workspace {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  flex: 1;
+  gap: 22px;
+  min-height: 0;
+  overflow: hidden;
+  min-width: 0;
+  background: transparent;
+}
+.direction-sidebar {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 10px;
+  border: 1px solid var(--indicator-line);
+  border-top: 3px solid var(--el-color-primary);
+  border-radius: 8px;
+  background: var(--indicator-paper);
+}
+.direction-sidebar__header {
+  display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-4);
+  margin-bottom: 10px;
+  padding: 0 10px 14px;
+  border-bottom: 1px solid var(--indicator-line);
+  font-size: 14px;
 }
-
-.page-title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 28px;
-}
-
-.page-subtitle {
-  margin: var(--space-1) 0 0;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.header-actions {
+.direction-sidebar__header strong { font-weight: 600; letter-spacing: 0.3px; }
+.direction-nav-item {
+  position: relative;
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--el-text-color-regular);
+  font: inherit;
+  font-size: 13px;
+  line-height: 21px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease;
 }
-
-.filter-card {
-  margin-bottom: var(--space-4);
-  border-radius: var(--radius-card);
-}
-
-.table-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: var(--space-2);
-}
-
-.mono {
-  font-family: var(--app-font-mono);
-}
-
-.row-a-name {
-  font-weight: 600;
-}
-
-.undecomposable-tip {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.current-year {
-  color: var(--el-color-primary);
-  border-bottom: 2px solid var(--el-color-primary);
-}
-
-:deep(.complete-text-cell .cell) {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.row-actions {
-  display: flex;
+.direction-nav-item > span:first-child { min-width: 0; }
+.direction-nav-item > span:last-child {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
-  white-space: nowrap;
-}
-
-.row-actions :deep(.el-button) {
-  height: 24px;
-  margin: 0;
-  padding: 0;
-}
-
-.row-actions :deep(.el-button--small) {
-  padding: 0 10px;
-}
-
-.danger-text {
-  color: var(--el-color-danger);
-}
-
-.indicator-records,
-.indicator-card-list,
-.indicator-card-heading {
-  min-width: 0;
-}
-
-:deep(.indicator-row-a-collapsed > td) {
-  background-color: var(--el-bg-color) !important;
-  box-shadow: none;
-}
-
-:deep(.indicator-row-a-plus > td) {
-  background-color: var(--el-color-primary-light-9) !important;
-}
-
-:deep(.indicator-row-a-plus > td:first-child) {
-  box-shadow: inset 3px 0 0 var(--el-color-primary);
-}
-
-:deep(.indicator-row-a-plus:hover > td) {
-  background-color: var(--el-color-primary-light-8) !important;
-}
-
-.indicator-card {
-  background: var(--el-bg-color);
-  border-left: 3px solid var(--el-border-color-light);
-}
-
-.indicator-card.is-a-plus {
-  margin-left: var(--space-4);
-  background: var(--el-color-primary-light-9);
-  border-left-color: var(--el-color-primary);
-}
-
-.indicator-card-heading {
-  flex: 1;
-}
-
-.indicator-card-code {
-  margin-bottom: 2px;
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
-}
-
-.indicator-card-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-}
-
-.indicator-card-expand {
-  justify-content: flex-start;
-  width: 100%;
-  margin: var(--space-2) 0 0;
-}
-
-.expand-icon {
-  margin-left: var(--space-1);
-  transition: transform 0.2s;
-}
-
-.expand-icon.expanded {
-  transform: rotate(180deg);
-}
-
-.indicator-card .responsive-card__fields {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.indicator-card .field-wide {
-  grid-column: 1 / -1;
-}
-
-.indicator-total-target strong {
-  margin-right: var(--space-1);
-  font-size: 16px;
-}
-
-.indicator-year-section {
-  margin: var(--space-3) 0;
-}
-
-.indicator-year-title {
-  margin-bottom: var(--space-2);
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-}
-
-.indicator-year-target {
-  min-width: 0;
-  padding: var(--space-2) var(--space-3);
-  background: var(--el-fill-color-light);
-  border-radius: var(--el-border-radius-base);
-}
-
-.indicator-year-target > span,
-.indicator-year-target > strong {
-  display: block;
-}
-
-.indicator-year-target > span {
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-}
-
-.indicator-year-target > strong {
-  margin-top: 2px;
-  overflow-wrap: anywhere;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--indicator-warm);
+  color: var(--indicator-muted);
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+.direction-nav-item:hover { background: var(--indicator-warm); color: var(--el-color-primary); }
+.direction-nav-item.is-active { background: var(--el-color-primary-light-9); color: var(--el-color-primary); font-weight: 600; }
+.direction-nav-item.is-active::before { position: absolute; top: 10px; bottom: 10px; left: 0; width: 3px; border-radius: 2px; background: var(--el-color-primary); content: ''; }
+.direction-nav-item.is-active > span:last-child { background: var(--el-color-primary); color: #fff; }
+.direction-nav-item:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: -2px; }
+.direction-nav-all { margin-bottom: 6px; }
 
-.indicator-card-main-actions {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  margin-top: var(--space-3);
-}
-
-.indicator-card-main-actions .el-button {
-  width: 100%;
-  margin: 0;
-}
-
-.indicator-card-secondary-actions {
+.indicator-main { min-width: 0; min-height: 0; overflow-y: auto; padding: 0 2px 12px 0; }
+.simple-filter {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--el-border-color-lighter);
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--indicator-line);
+  border-radius: 7px;
+  background: var(--indicator-soft);
 }
+.simple-filter__keyword { width: 250px; }
+.simple-filter__status { width: 142px; }
+.simple-filter__query { min-width: 66px; }
+.more-filter-button, .expand-all-button { margin-left: 0; }
+.advanced-filter-form :deep(.el-form-item) { margin-bottom: 14px; }
+.advanced-filter-form :deep(.el-form-item:last-child) { margin-bottom: 0; }
 
-.indicator-card-secondary-actions .el-button {
-  min-width: 88px;
-  min-height: 44px;
-  margin: 0;
-}
-
-.table-footer {
-  margin-top: var(--space-3);
+.simple-indicator-table { width: 100%; color: var(--indicator-ink); }
+.simple-indicator-table :deep(.el-table__inner-wrapper::before),
+.simple-indicator-table :deep(.el-table__border-left-patch) { display: none; }
+.simple-indicator-table :deep(.el-table__header th) {
+  height: 40px;
+  padding: 0;
+  border-bottom: 1px solid #cfd7e3;
+  background: transparent;
+  color: var(--indicator-muted);
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+.simple-indicator-table :deep(.el-table__body td) {
+  padding: 15px 0;
+  border-bottom: 1px solid var(--indicator-line);
+  background: transparent;
+}
+.simple-indicator-table :deep(.el-table__body tr:hover > td) { background: #fafbfc; }
+.simple-indicator-table :deep(.el-table__expand-icon) { color: var(--indicator-muted); }
+.simple-indicator-table :deep(.el-table__expand-icon:hover) { color: var(--el-color-primary); }
+.simple-indicator-table :deep(.el-table__expanded-cell) { padding: 0 0 16px 36px; background: transparent; }
+.simple-indicator-table :deep(.cell) { white-space: normal; overflow-wrap: anywhere; line-height: 21px; }
+.mono { font-family: var(--app-font-mono); font-variant-numeric: tabular-nums; }
+.complete-text-cell :deep(.cell) { word-break: break-word; }
+.row-code-expand, .a-name-button, .indicator-card-code-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.row-code-expand {
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.row-code-expand:hover { background: var(--el-color-primary-light-8); }
+.row-code-expand:hover, .a-name-button:hover, .indicator-card-code-button:hover { color: var(--el-color-primary); }
+.row-code-expand:focus-visible, .a-name-button:focus-visible, .indicator-card-code-button:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 3px; }
+.a-name-button { display: inline; color: var(--indicator-ink); font-weight: 550; line-height: 22px; }
+.undecomposable-tip, .task-error-state { margin-top: 3px; font-size: 12px; }
+.undecomposable-tip { color: var(--indicator-muted); }
+.task-error-state { color: var(--el-color-danger); }
+.row-actions { display: flex; align-items: center; justify-content: flex-start; gap: 2px 8px; flex-wrap: wrap; }
+.row-actions :deep(.el-button) { margin: 0; padding: 0; }
+.a-expansion-actions { justify-content: flex-start; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--indicator-line); }
+.danger-text { color: var(--el-color-danger); }
+
+.a-inline-expansion {
+  min-width: 0;
+  padding: 12px 16px 16px;
+  border-left: 3px solid var(--el-color-primary);
+  border-radius: 0 6px 6px 0;
+  background: var(--indicator-soft);
+}
+.a-quant-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  overflow: hidden;
+  border-top: 1px solid var(--indicator-line);
+  border-bottom: 1px solid var(--indicator-line);
+  background: var(--indicator-paper);
+}
+.a-quant-summary > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+  border-right: 1px solid var(--indicator-line);
+}
+.a-quant-summary > div:last-child { border-right: 0; }
+.a-quant-summary span { color: var(--indicator-muted); font-size: 11px; }
+.a-quant-summary strong { color: var(--indicator-ink); font-size: 14px; font-variant-numeric: tabular-nums; }
+.a-summary-years {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+.a-summary-years > div { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 9px 11px; border: 1px solid var(--indicator-line); border-radius: 5px; background: var(--indicator-paper); }
+.a-summary-years span { color: var(--indicator-muted); font-size: 11px; }
+.a-summary-years strong { font-size: 13px; font-variant-numeric: tabular-nums; }
+.current-year { color: var(--el-color-primary) !important; font-weight: 600; }
+.completion-cell { display: flex; align-items: center; gap: 8px; }
+
+.indicator-card-list { gap: 12px; }
+.indicator-card { padding: 15px; border: 1px solid var(--indicator-line); border-left: 3px solid var(--el-color-primary-light-7); border-radius: 6px; background: var(--indicator-paper); box-shadow: none; }
+.indicator-card-topline { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.indicator-card-code { padding: 3px 7px; border-radius: 4px; background: var(--el-color-primary-light-9); color: var(--el-color-primary); font-size: 12px; }
+.indicator-card-expand { justify-content: flex-start; width: 100%; margin: 10px 0 0; }
+.expand-icon { margin-left: 3px; transition: transform 0.18s; }
+.expand-icon.expanded { transform: rotate(180deg); }
+.indicator-card .a-inline-expansion { margin-top: 12px; padding: 12px; }
+.indicator-card .a-quant-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.indicator-card .a-quant-summary > div:nth-child(2n) { border-right: 0; }
+.indicator-card-secondary-actions { display: flex; justify-content: flex-start; gap: 12px; }
+.table-footer { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--indicator-line); color: var(--indicator-muted); font-size: 12px; line-height: 20px; }
+
+@media (max-width: 1100px) {
+  .indicator-workspace { grid-template-columns: 200px minmax(0, 1fr); gap: 16px; }
+  .a-quant-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .a-quant-summary > div:nth-child(3n) { border-right: 0; }
+  .simple-filter { flex-wrap: wrap; }
+  .simple-filter__keyword { flex: 1 1 220px; }
+  .more-filter-button { margin-left: 0; }
+  .expand-all-button { margin-left: 0; }
 }
 
 @media (max-width: 768px) {
-  .page-header {
-    align-items: stretch;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  .header-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: 100%;
-  }
-
-  .header-actions > .el-button,
-  .header-actions > span,
-  .header-actions .el-button {
-    width: 100%;
-    margin: 0;
-  }
-
-  .header-actions .el-button {
-    min-height: 44px;
-    white-space: normal;
-  }
-
-  .filter-form {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .filter-form :deep(.el-form-item) {
-    display: flex;
-    width: 100%;
-    margin-right: 0;
-  }
-
-  .filter-form :deep(.el-form-item__content) {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .filter-form :deep(.el-select),
-  .filter-form :deep(.el-input) {
-    width: 100% !important;
-  }
-
-  .filter-form :deep(.el-form-item__content > .el-button) {
-    flex: 1;
-    min-height: 44px;
-  }
-
-  .table-toolbar .el-button {
-    min-height: 44px;
-  }
+  .indicator-page { display: block; height: auto; }
+  .page-header { align-items: flex-start; flex-direction: column; }
+  .page-title { font-size: 23px; }
+  .header-actions { justify-content: flex-start; }
+  .header-actions > .el-button, .data-menu { grid-column: 1 / -1; width: 100%; }
+  .header-actions > .el-button, .data-menu :deep(.el-button) { min-height: 44px; }
+  .data-menu :deep(.el-button) { width: 100%; min-width: 0; }
+  .indicator-workspace { display: block; overflow: visible; background: transparent; }
+  .direction-sidebar { display: flex; gap: 8px; margin-bottom: 14px; padding: 10px; overflow-x: auto; border: 1px solid var(--indicator-line); border-top: 3px solid var(--el-color-primary); border-radius: 7px; }
+  .direction-sidebar__header { flex: 0 0 auto; align-items: flex-start; flex-direction: column; gap: 2px; margin: 0; padding: 4px 8px; border-bottom: 0; }
+  .direction-nav-item { flex: 0 0 auto; width: auto; min-height: 40px; white-space: nowrap; }
+  .direction-nav-all { margin-bottom: 0; }
+  .indicator-main { overflow: visible; padding: 0; background: var(--indicator-paper); }
+  .simple-filter__keyword { flex: 1 1 100%; }
+  .simple-filter__status { flex: 1 1 130px; }
+  .simple-filter__query { flex: 0 0 auto; }
+  .expand-all-button { margin-left: 0; }
+  .a-summary-years { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-@media (max-width: 428px) {
-  .indicator-card .responsive-card__fields {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .indicator-card .field-wide {
-    grid-column: auto;
-  }
-
-  .indicator-card.is-a-plus {
-    margin-left: var(--space-2);
-  }
+@media (max-width: 420px) {
+  .simple-filter { gap: 8px; padding: 10px; }
+  .a-quant-summary, .indicator-card .a-quant-summary { grid-template-columns: minmax(0, 1fr); }
+  .a-quant-summary > div { border-right: 0; }
+  .a-summary-years { grid-template-columns: minmax(0, 1fr); }
+  .header-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .header-actions .el-button { width: 100%; margin: 0; }
 }
 </style>

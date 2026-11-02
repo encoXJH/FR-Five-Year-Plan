@@ -44,7 +44,7 @@ public class Review {
     /** 是否管理员代审 */
     private Boolean isProxy;
 
-    /** 代审原因（敏感操作必填） */
+    /** 代审原因（选填） */
     private String proxyReason;
 
     /** 审核时间 */

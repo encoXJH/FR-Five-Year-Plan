@@ -36,7 +36,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * 分解矩阵（API 约定 15.4 / 16.3）：A+ 按「执行单元 × 年度」分解为 B。
+ * 分解矩阵（API 约定 15.4 / 16.3）：可量化 A 直接分解为 B，历史 A+ 保持兼容。
  * 矩阵草稿即 task / task_year 行（status = PENDING_DISTRIBUTION），不另建草稿表。
  */
 @Service
@@ -72,21 +72,21 @@ public class AllocationService {
         return buildView(indicator);
     }
 
-    /** 保存分解矩阵（整体替换；允许合计不一致存草稿，下发时才强制 50001） */
+    /** 保存分解矩阵（整体替换；允许合计不足存草稿，下发时才强制 50001） */
     @Transactional
     public TaskDtos.AllocationView putAllocation(Long indicatorId, TaskDtos.AllocationPutRequest request) {
         Indicator indicator = requireAllocatable(indicatorId);
+        if ("A".equals(indicator.getLevel()) && indicatorService.hasLegacyAPlus(indicator)) {
+            throw new BizException(ErrorCode.LEVEL_INVALID, "含历史 A+ 的 A 只能查看聚合分工，不能新增直承 B");
+        }
         Plan plan = planService.requirePlan(indicator.getPlanId());
         planService.requireNotArchived(plan);
-        if ("DISTRIBUTED".equals(indicator.getStatus())) {
-            throw new BizException(ErrorCode.TASK_DISTRIBUTED, "指标已下发，不能修改分解矩阵");
-        }
         dataScopeService.canAccessIndicatorOwner(indicatorService.effectiveOwnerOf(indicator));
         planService.requireVersion(indicator.getVersion(), request.getVersion());
 
         List<TaskDtos.AllocationRow> rows = request.getRows() == null ? List.of() : request.getRows();
         List<Integer> planYears = planYears(plan);
-        Map<Long, Task> existingByUnit = tasksOf(indicator.getId()).stream()
+        Map<Long, Task> existingByUnit = tasksOf(indicator).stream()
                 .collect(Collectors.toMap(Task::getUnitId, Function.identity()));
 
         Set<Long> seen = new java.util.HashSet<>();
@@ -98,7 +98,8 @@ public class AllocationService {
             }
             Task existing = existingByUnit.get(row.getUnitId());
             boolean historical = existing != null && Boolean.TRUE.equals(existing.getIsHistorical());
-            OrgUnit unit = historical ? orgUnitAdminService.requireUnit(row.getUnitId())
+            boolean readOnlyTask = existing != null && !isEditableTask(existing);
+            OrgUnit unit = readOnlyTask ? orgUnitAdminService.requireUnit(row.getUnitId())
                     : orgUnitAdminService.requireBAssignable(row.getUnitId());
             units.put(unit.getId(), unit);
             if (!historical) {
@@ -118,16 +119,19 @@ public class AllocationService {
                     throw new BizException(ErrorCode.PARAM_INVALID, "是否型任务每行至多指定一个计划完成年份");
                 }
             }
-            if (historical) {
-                requireHistoricalRowUnchanged(existing, row.getOwnerId(), targets, planYears);
+            if (readOnlyTask) {
+                requireReadOnlyRowUnchanged(existing, row.getOwnerId(), targets, planYears);
             }
             rowTargets.put(unit.getId(), targets);
         }
 
         Long userId = SecurityUtils.getUserId();
         for (Task task : existingByUnit.values()) {
-            if (Boolean.TRUE.equals(task.getIsHistorical()) && !rowTargets.containsKey(task.getUnitId())) {
-                throw new BizException(ErrorCode.TASK_HISTORICAL_READ_ONLY, "历史任务不能移出分解矩阵");
+            if (!isEditableTask(task) && !rowTargets.containsKey(task.getUnitId())) {
+                if (Boolean.TRUE.equals(task.getIsHistorical())) {
+                    throw new BizException(ErrorCode.TASK_HISTORICAL_READ_ONLY, "历史任务不能移出分解矩阵");
+                }
+                throw new BizException(ErrorCode.TASK_DISTRIBUTED, "已生效任务不能移出分解矩阵");
             }
         }
 
@@ -144,14 +148,15 @@ public class AllocationService {
             TaskDtos.AllocationRow row = rows.stream()
                     .filter(r -> r.getUnitId().equals(unitId)).findFirst().orElseThrow();
             Task task = existingByUnit.get(unitId);
-            if (task != null && Boolean.TRUE.equals(task.getIsHistorical())) {
+            if (task != null && !isEditableTask(task)) {
                 continue;
             }
             if (task == null) {
                 task = new Task();
                 task.setPlanId(plan.getId());
                 task.setIndicatorId(indicator.getId());
-                task.setTopIndicatorId(indicator.getParentId() == null ? indicator.getId() : indicator.getParentId());
+                task.setTopIndicatorId("A".equals(indicator.getLevel())
+                        ? indicator.getId() : indicator.getParentId());
                 task.setUnitId(unitId);
                 task.setCode(AllocationRules.taskCode(indicator.getCode(), unit.getCode()));
                 task.setOwnerId(row.getOwnerId());
@@ -182,8 +187,10 @@ public class AllocationService {
 
     private Indicator requireAllocatable(Long indicatorId) {
         Indicator indicator = indicatorService.requireIndicator(indicatorId);
-        if (!AllocationRules.isAllocatable(indicator.getLevel())) {
-            throw new BizException(ErrorCode.LEVEL_INVALID, "分解矩阵仅适用于 A+");
+        boolean legacyAPlus = AllocationRules.isAllocatable(indicator.getLevel());
+        boolean directA = "A".equals(indicator.getLevel()) && Boolean.TRUE.equals(indicator.getIsQuantifiable());
+        if (!legacyAPlus && !directA) {
+            throw new BizException(ErrorCode.LEVEL_INVALID, "分解矩阵仅适用于可量化 A 或历史 A+");
         }
         return indicator;
     }
@@ -192,7 +199,7 @@ public class AllocationService {
     public TaskDtos.AllocationView buildView(Indicator indicator) {
         Plan plan = planService.requirePlan(indicator.getPlanId());
         List<Integer> planYears = planYears(plan);
-        List<Task> tasks = tasksOf(indicator.getId());
+        List<Task> tasks = tasksOf(indicator);
         Map<Long, List<TaskYear>> yearsByTask = taskYearsByTask(tasks.stream().map(Task::getId).toList());
 
         Map<Long, OrgUnit> units = unitsOf(tasks.stream().map(Task::getUnitId).toList());
@@ -227,11 +234,16 @@ public class AllocationService {
                 AllocationRules.isBalanced(indicator.getStatCaliber(), summary), summary, rows);
     }
 
-    private List<Task> tasksOf(Long indicatorId) {
-        return taskMapper.selectList(new LambdaQueryWrapper<Task>()
-                .eq(Task::getIndicatorId, indicatorId)
-                .eq(Task::getDeleted, 0L)
-                .orderByAsc(Task::getCode));
+    private List<Task> tasksOf(Indicator indicator) {
+        LambdaQueryWrapper<Task> query = new LambdaQueryWrapper<Task>()
+                .eq(Task::getDeleted, 0L);
+        if ("A".equals(indicator.getLevel())) {
+            query.and(wrapper -> wrapper.eq(Task::getIndicatorId, indicator.getId())
+                    .or().eq(Task::getTopIndicatorId, indicator.getId()));
+        } else {
+            query.eq(Task::getIndicatorId, indicator.getId());
+        }
+        return taskMapper.selectList(query.orderByAsc(Task::getCode));
     }
 
     private Map<Long, List<TaskYear>> taskYearsByTask(List<Long> taskIds) {
@@ -255,10 +267,18 @@ public class AllocationService {
                 .stream().collect(Collectors.toMap(OrgUnit::getId, Function.identity()));
     }
 
-    private void requireHistoricalRowUnchanged(Task task, Long ownerId, Map<Integer, BigDecimal> targets,
-                                               List<Integer> planYears) {
+    private boolean isEditableTask(Task task) {
+        return !Boolean.TRUE.equals(task.getIsHistorical())
+                && "PENDING_DISTRIBUTION".equals(task.getStatus());
+    }
+
+    private void requireReadOnlyRowUnchanged(Task task, Long ownerId, Map<Integer, BigDecimal> targets,
+                                             List<Integer> planYears) {
+        boolean historical = Boolean.TRUE.equals(task.getIsHistorical());
+        ErrorCode errorCode = historical ? ErrorCode.TASK_HISTORICAL_READ_ONLY : ErrorCode.TASK_DISTRIBUTED;
+        String taskLabel = historical ? "历史任务" : "已生效任务";
         if (!Objects.equals(task.getOwnerId(), ownerId)) {
-            throw new BizException(ErrorCode.TASK_HISTORICAL_READ_ONLY, "历史任务的负责人不能修改");
+            throw new BizException(errorCode, taskLabel + "的负责人不能修改");
         }
         Map<Integer, TaskYear> existing = taskYearMapper.selectList(new LambdaQueryWrapper<TaskYear>()
                         .eq(TaskYear::getTaskId, task.getId())
@@ -270,7 +290,7 @@ public class AllocationService {
             BigDecimal newTarget = targets.get(year);
             if (oldTarget == null ? newTarget != null
                     : newTarget == null || oldTarget.compareTo(newTarget) != 0) {
-                throw new BizException(ErrorCode.TASK_HISTORICAL_READ_ONLY, "历史任务的年度目标不能修改");
+                throw new BizException(errorCode, taskLabel + "的年度目标不能修改");
             }
         }
     }

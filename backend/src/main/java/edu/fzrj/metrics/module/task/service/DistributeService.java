@@ -2,6 +2,7 @@ package edu.fzrj.metrics.module.task.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import edu.fzrj.metrics.common.api.FieldError;
+import edu.fzrj.metrics.common.datascope.DataScopeService;
 import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
@@ -10,6 +11,7 @@ import edu.fzrj.metrics.module.indicator.service.IndicatorService;
 import edu.fzrj.metrics.module.notify.entity.Notification;
 import edu.fzrj.metrics.module.notify.mapper.NotificationMapper;
 import edu.fzrj.metrics.module.plan.entity.Plan;
+import edu.fzrj.metrics.module.plan.service.PlanReadScopeService;
 import edu.fzrj.metrics.module.plan.service.PlanService;
 import edu.fzrj.metrics.module.system.entity.OrgUnit;
 import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
@@ -20,6 +22,7 @@ import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.module.task.service.support.AllocationRules;
+import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,12 +34,13 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * 任务下发（API 约定 15.4）：校验链 50005 → 50001 → 50002，全部通过后在
- * 一个事务内把 B 任务与指标置为 DISTRIBUTED，并给学院负责人生成站内通知。
+ * 任务下发（API 约定 15.4）：先复核指标完整性、40002、40003，再校验 50001、50002；
+ * 全部通过后在一个事务内把 B 任务与指标置为 DISTRIBUTED，并给学院负责人生成站内通知。
  */
 @Service
 public class DistributeService {
@@ -49,11 +53,14 @@ public class DistributeService {
     private final OrgUnitMapper orgUnitMapper;
     private final OrgUnitAdminService orgUnitAdminService;
     private final NotificationMapper notificationMapper;
+    private final DataScopeService dataScopeService;
+    private final PlanReadScopeService planReadScopeService;
 
     public DistributeService(PlanService planService, IndicatorService indicatorService,
                              IndicatorMapper indicatorMapper, TaskMapper taskMapper,
                              TaskYearMapper taskYearMapper, OrgUnitMapper orgUnitMapper,
-                             OrgUnitAdminService orgUnitAdminService, NotificationMapper notificationMapper) {
+                             OrgUnitAdminService orgUnitAdminService, NotificationMapper notificationMapper,
+                             DataScopeService dataScopeService, PlanReadScopeService planReadScopeService) {
         this.planService = planService;
         this.indicatorService = indicatorService;
         this.indicatorMapper = indicatorMapper;
@@ -62,34 +69,51 @@ public class DistributeService {
         this.orgUnitMapper = orgUnitMapper;
         this.orgUnitAdminService = orgUnitAdminService;
         this.notificationMapper = notificationMapper;
+        this.dataScopeService = dataScopeService;
+        this.planReadScopeService = planReadScopeService;
     }
 
     @Transactional
     public TaskDtos.DistributeResponse distribute(Long planId, TaskDtos.DistributeRequest request) {
         Plan plan = planService.requirePlan(planId);
+        planReadScopeService.requireVisible(plan);
         planService.requireNotArchived(plan);
         planService.requireVersion(plan.getVersion(), request.getVersion());
-        // 校验链顺序：未定稿 50005 → 分解不平衡 50001 → 缺学院负责人 50002
-        AllocationRules.requireFinalized(plan.getFinalizedAt());
-
         List<Indicator> all = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
                 .eq(Indicator::getPlanId, planId)
                 .eq(Indicator::getDeleted, 0L));
         Map<Long, Indicator> byId = all.stream().collect(Collectors.toMap(Indicator::getId, Function.identity()));
-        List<Indicator> expanded = expand(request.getIndicatorIds(), all, byId);
-        // 幂等语义：已下发（DISTRIBUTED）的指标跳过
-        List<Indicator> candidates = expanded.stream()
-                .filter(i -> "FINALIZED".equals(i.getStatus()))
+        List<Indicator> expanded = restrictToScope(
+                expand(request.getIndicatorIds(), all, byId), request.getIndicatorIds(), byId);
+        List<Indicator> distributable = expanded.stream()
+                .filter(i -> "DRAFT".equals(i.getStatus()) || "FINALIZED".equals(i.getStatus())
+                        || "DISTRIBUTED".equals(i.getStatus()))
+                .toList();
+        if (distributable.isEmpty()) {
+            return new TaskDtos.DistributeResponse(0, 0);
+        }
+        List<Long> distributableIds = distributable.stream().map(Indicator::getId).toList();
+        List<Task> expandedTasks = taskMapper.selectList(new LambdaQueryWrapper<Task>()
+                .in(Task::getIndicatorId, distributableIds)
+                .eq(Task::getDeleted, 0L));
+        Set<Long> indicatorsWithPending = expandedTasks.stream()
+                .filter(t -> !Boolean.TRUE.equals(t.getIsHistorical()))
+                .filter(t -> "PENDING_DISTRIBUTION".equals(t.getStatus()))
+                .map(Task::getIndicatorId)
+                .collect(Collectors.toSet());
+        List<Indicator> candidates = distributable.stream()
+                .filter(i -> !"DISTRIBUTED".equals(i.getStatus()) || indicatorsWithPending.contains(i.getId()))
                 .toList();
         if (candidates.isEmpty()) {
             return new TaskDtos.DistributeResponse(0, 0);
         }
+        indicatorService.validateForDistribution(plan, all);
 
         List<Long> candidateIds = candidates.stream().map(Indicator::getId).toList();
         Map<Long, Map<Integer, BigDecimal>> indicatorTargets = indicatorService.loadTargets(candidateIds);
-        List<Task> tasks = taskMapper.selectList(new LambdaQueryWrapper<Task>()
-                .in(Task::getIndicatorId, candidateIds)
-                .eq(Task::getDeleted, 0L));
+        List<Task> tasks = expandedTasks.stream()
+                .filter(t -> candidateIds.contains(t.getIndicatorId()))
+                .toList();
         Map<Long, List<Task>> tasksByIndicator = tasks.stream()
                 .collect(Collectors.groupingBy(Task::getIndicatorId));
         Map<Long, List<TaskYear>> yearsByTask = taskYearsByTask(tasks.stream().map(Task::getId).toList());
@@ -153,11 +177,32 @@ public class DistributeService {
 
     // ---------------- 内部 ----------------
 
-    /** 展开下发对象：空 = 全部 A+；传 A = 其全部 A+；传 A+ = 本身 */
+    private List<Indicator> restrictToScope(List<Indicator> indicators, List<Long> requestedIds,
+                                            Map<Long, Indicator> byId) {
+        LoginUser user = SecurityUtils.getLoginUser();
+        if (dataScopeService.isAllData(user)) {
+            return indicators;
+        }
+        if (!dataScopeService.isOwnerScope(user)) {
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
+        }
+        if (requestedIds != null && !requestedIds.isEmpty()) {
+            requestedIds.forEach(id -> dataScopeService.canAccessIndicatorOwner(
+                    indicatorService.effectiveOwnerOf(byId.get(id))));
+            indicators.forEach(indicator -> dataScopeService.canAccessIndicatorOwner(
+                    indicatorService.effectiveOwnerOf(indicator)));
+            return indicators;
+        }
+        return indicators.stream()
+                .filter(indicator -> user.getUserId().equals(indicatorService.effectiveOwnerOf(indicator)))
+                .toList();
+    }
+
+    /** 纯 A 下发自身直承 B；legacy A 只展开旧 A+，避免父子重复下发。 */
     private List<Indicator> expand(List<Long> indicatorIds, List<Indicator> all, Map<Long, Indicator> byId) {
         if (indicatorIds == null || indicatorIds.isEmpty()) {
             return all.stream()
-                    .filter(i -> AllocationRules.isAllocatable(i.getLevel()))
+                    .filter(i -> AllocationRules.isAllocatable(i.getLevel()) || isPureDirectA(i, all))
                     .toList();
         }
         Map<Long, Indicator> result = new LinkedHashMap<>();
@@ -167,9 +212,15 @@ public class DistributeService {
                 throw new BizException(ErrorCode.NOT_FOUND, "指标不存在或不属于本计划：" + id);
             }
             if ("A".equals(indicator.getLevel())) {
-                all.stream().filter(i -> id.equals(i.getParentId()))
+                List<Indicator> legacyChildren = all.stream()
+                        .filter(i -> id.equals(i.getParentId()))
                         .filter(i -> AllocationRules.isAllocatable(i.getLevel()))
-                        .forEach(i -> result.put(i.getId(), i));
+                        .toList();
+                if (legacyChildren.isEmpty() && isPureDirectA(indicator, all)) {
+                    result.put(indicator.getId(), indicator);
+                } else {
+                    legacyChildren.forEach(i -> result.put(i.getId(), i));
+                }
             } else if (AllocationRules.isAllocatable(indicator.getLevel())) {
                 result.put(indicator.getId(), indicator);
             }
@@ -177,12 +228,20 @@ public class DistributeService {
         return List.copyOf(result.values());
     }
 
+    private boolean isPureDirectA(Indicator indicator, List<Indicator> all) {
+        return "A".equals(indicator.getLevel())
+                && Boolean.TRUE.equals(indicator.getIsQuantifiable())
+                && all.stream().noneMatch(i -> indicator.getId().equals(i.getParentId())
+                && AllocationRules.isAllocatable(i.getLevel()));
+    }
+
     private void markParentsDistributed(List<Indicator> candidates, Map<Long, Indicator> byId, Long userId) {
         List<Indicator> all = List.copyOf(byId.values());
         candidates.stream().map(Indicator::getParentId).filter(java.util.Objects::nonNull).distinct()
                 .forEach(parentId -> {
                     Indicator parent = byId.get(parentId);
-                    if (parent == null || !"FINALIZED".equals(parent.getStatus())) {
+                    if (parent == null || !("DRAFT".equals(parent.getStatus())
+                            || "FINALIZED".equals(parent.getStatus()))) {
                         return;
                     }
                     boolean allDistributed = all.stream()
@@ -204,9 +263,9 @@ public class DistributeService {
         Notification notification = new Notification();
         notification.setUserId(task.getOwnerId());
         notification.setType("TASK_DISTRIBUTED");
-        notification.setTitle("新的 B 任务下发：" + task.getCode());
+        notification.setTitle("新的学院任务下发：" + task.getCode());
         notification.setContent("【" + plan.getName() + "】" + (indicator == null ? "" : indicator.getName())
-                + "（" + task.getCode() + "）已下发到 " + (unit == null ? "本单位" : unit.getName()) + "，请及时确认接收。");
+                + "（" + task.getCode() + "）已下发到 " + (unit == null ? "本单位" : unit.getName()) + "，请在年度激活后及时填报。");
         notification.setBizType("task");
         notification.setBizId(task.getId());
         notification.setFeishuStatus("PENDING");

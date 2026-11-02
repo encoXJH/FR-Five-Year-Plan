@@ -4,11 +4,13 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import {
   completeMultipart,
-  getFileDownloadUrl,
+  downloadFile,
   getMultipartSession,
+  getPartUploadUrl,
   initMultipart,
   uploadFile,
   uploadPart,
+  uploadPartDirect,
 } from '@/api/file'
 import FilePreviewDrawer from '@/components/FilePreviewDrawer.vue'
 import { ApiError } from '@/utils/request'
@@ -42,6 +44,7 @@ interface UploadItem {
   /** 秒传 */
   instant: boolean
   multipart: boolean
+  directUpload?: boolean
   fileInfo?: FileInfo
   file?: File
   uploadId?: string
@@ -234,6 +237,7 @@ async function startUpload(item: UploadItem): Promise<void> {
     item.uploadId = init.uploadId
     item.partSize = init.partSize
     item.partCount = init.partCount
+    item.directUpload = init.directUpload
     item.uploadedPartSet = new Set()
     item.uploadedParts = 0
     await uploadParts(item)
@@ -253,16 +257,22 @@ async function uploadParts(item: UploadItem): Promise<void> {
     const blob = item.file!.slice(start, Math.min(start + partSize, item.size))
     item.controller = new AbortController()
     try {
-      await uploadPart(item.uploadId!, partNumber, blob, {
+      const config = {
         signal: item.controller.signal,
-        onUploadProgress: (event) => {
+        onUploadProgress: (event: { loaded: number; total?: number }) => {
           const partRatio = event.total ? event.loaded / event.total : 0
           item.progress = Math.min(
             99,
             Math.round(((item.uploadedParts + partRatio) / total) * 100),
           )
         },
-      })
+      }
+      if (item.directUpload) {
+        const { url } = await getPartUploadUrl(item.uploadId!, partNumber)
+        await uploadPartDirect(url, blob, config)
+      } else {
+        await uploadPart(item.uploadId!, partNumber, blob, config)
+      }
     } catch (error) {
       if (!isCancel(error) && !isPaused(item)) markError(item, error)
       return
@@ -292,6 +302,7 @@ async function resume(item: UploadItem): Promise<void> {
   }
   try {
     const session = await getMultipartSession(item.uploadId)
+    item.directUpload = session.directUpload
     item.uploadedPartSet = new Set(session.uploadedParts ?? [])
     item.uploadedParts = item.uploadedPartSet.size
   } catch {
@@ -308,6 +319,7 @@ function retry(item: UploadItem): void {
   item.uploadedParts = 0
   item.uploadedPartSet = new Set()
   item.uploadId = undefined
+  item.directUpload = false
   void startUpload(item)
 }
 
@@ -328,8 +340,7 @@ function openPreview(item: UploadItem): void {
 async function download(item: UploadItem): Promise<void> {
   if (!item.fileInfo) return
   try {
-    const { url } = await getFileDownloadUrl(item.fileInfo.id)
-    window.open(url, '_blank')
+    await downloadFile(item.fileInfo.id, item.fileInfo.fileName, item.fileInfo.size)
   } catch {
     ElMessage.error('获取下载地址失败，请重试')
   }

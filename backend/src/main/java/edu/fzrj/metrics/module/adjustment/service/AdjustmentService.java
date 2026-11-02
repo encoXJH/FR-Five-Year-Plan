@@ -541,6 +541,10 @@ public class AdjustmentService {
         }
         Indicator indicator = indicatorService.requireIndicator(task.getIndicatorId());
         String caliber = indicator.getStatCaliber();
+        if (AdjustmentRules.isTransfer(type) && "A".equals(indicator.getLevel())
+                && indicatorService.hasLegacyAPlus(indicator)) {
+            errors.add(new VError(ErrorCode.LEVEL_INVALID, "toUnitId", "不能在 legacy A+ 与 A 直承 B 之间转移"));
+        }
         if (!AdjustmentRules.supports(caliber, type)) {
             errors.add(new VError(ErrorCode.ADJUST_TYPE_UNSUPPORTED, "type",
                     caliber + " 口径不支持 " + typeLabel(type) + " 调整"));
@@ -716,8 +720,8 @@ public class AdjustmentService {
         requireTargetChangeTarget(indicator);
         Plan plan = planService.requirePlan(indicator.getPlanId());
         planService.requireNotArchived(plan);
-        if (plan.getFinalizedAt() == null) {
-            throw new BizException(ErrorCode.PLAN_STATUS_INVALID, "指标体系未定稿，可直接编辑目标，无需目标调整");
+        if (!indicatorService.hasDistributedScope(indicator)) {
+            throw new BizException(ErrorCode.PLAN_STATUS_INVALID, "指标尚未下发，可直接编辑目标，无需目标调整");
         }
         List<VError> errors = new ArrayList<>();
         List<PreparedItem> items = new ArrayList<>();
@@ -757,6 +761,10 @@ public class AdjustmentService {
             }
             Indicator itemTarget = indicatorService.requireIndicator(targetIndicatorId);
             requireTargetChangeTarget(itemTarget);
+            if (!indicatorService.hasDistributedScope(itemTarget)) {
+                throw new BizException(ErrorCode.PLAN_STATUS_INVALID,
+                        "配套指标 " + itemTarget.getCode() + " 尚未下发，不能通过目标调整修改");
+            }
             if ("BOOLEAN".equals(itemTarget.getStatCaliber())
                     && item.getNewTarget().compareTo(BigDecimal.ONE) > 0) {
                 errors.add(new VError(ErrorCode.PARAM_INVALID, field + ".newTarget",
@@ -862,17 +870,17 @@ public class AdjustmentService {
                 }
                 Indicator parent = indicatorService.requireIndicator(target.getParentId());
                 if ("AUTO_SUM".equals(parent.getRollupMode()) && !affected.containsKey(parent.getId())) {
-                    Map<Integer, BigDecimal> aplusSum = siblingSumByYear(parent.getId(),
+                    Map<Integer, BigDecimal> allocationSum = combinedAllocationSumByYear(parent.getId(),
                             entry.getKey(), afterTargets);
                     for (String error : AdjustmentRules.conservationErrors(parent.getStatCaliber(),
-                            parent.getCode() + " 目标", aplusSum, indicatorTargets(parent.getId()))) {
+                            parent.getCode() + " 目标", allocationSum, indicatorTargets(parent.getId()))) {
                         errors.add(new FieldError("items", error));
                     }
                 }
             } else if ("AUTO_SUM".equals(target.getRollupMode())) {
-                Map<Integer, BigDecimal> aplusSum = siblingSumByYear(target.getId(), null, null);
+                Map<Integer, BigDecimal> allocationSum = combinedAllocationSumByYear(target.getId(), null, null);
                 for (String error : AdjustmentRules.conservationErrors(target.getStatCaliber(),
-                        "ΣA+ 目标", aplusSum, afterTargets)) {
+                        "ΣB / ΣA+ 目标", allocationSum, afterTargets)) {
                     errors.add(new FieldError("items", error));
                 }
             }
@@ -882,6 +890,13 @@ public class AdjustmentService {
 
     /** 目标调整明细视图（守恒复核入参；targetIndicatorId + toYear + newTarget，toYear 为 null 表示五年总量） */
     public record PreparedItemView(Long targetIndicatorId, Integer toYear, BigDecimal newTarget) {
+    }
+
+    private Map<Integer, BigDecimal> combinedAllocationSumByYear(Long parentId, Long replaceIndicatorId,
+                                                                 Map<Integer, BigDecimal> override) {
+        Map<Integer, BigDecimal> sum = new HashMap<>(siblingSumByYear(parentId, replaceIndicatorId, override));
+        bSumByYear(parentId).forEach((year, target) -> sum.merge(year, target, BigDecimal::add));
+        return sum;
     }
 
     /** Σ 各 A+ 年度目标（replaceIndicatorId 的年度目标用 override 替换，用于试算） */

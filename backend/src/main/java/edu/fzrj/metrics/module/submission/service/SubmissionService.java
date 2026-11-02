@@ -28,6 +28,7 @@ import edu.fzrj.metrics.module.submission.entity.Review;
 import edu.fzrj.metrics.module.submission.mapper.ReviewMapper;
 import edu.fzrj.metrics.module.submission.mapper.SubmissionHistoryMapper;
 import edu.fzrj.metrics.module.submission.mapper.SubmissionMapper;
+import edu.fzrj.metrics.module.submission.service.support.AnnualTargetGuard;
 import edu.fzrj.metrics.module.submission.service.support.SubmissionValueRules;
 import edu.fzrj.metrics.module.system.entity.OrgUnit;
 import edu.fzrj.metrics.module.system.entity.SysUser;
@@ -46,6 +47,7 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.time.Year;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -82,6 +84,7 @@ public class SubmissionService {
     private final DataScopeService dataScopeService;
     private final UserRefResolver userRefResolver;
     private final ObjectMapper objectMapper;
+    private final AnnualTargetGuard annualTargetGuard;
 
     public SubmissionService(SubmissionMapper submissionMapper, SubmissionHistoryMapper historyMapper,
                              ReviewMapper reviewMapper, TaskYearMapper taskYearMapper,
@@ -89,7 +92,8 @@ public class SubmissionService {
                              FileInfoMapper fileInfoMapper, OrgUnitMapper orgUnitMapper,
                              TaskService taskService, IndicatorService indicatorService,
                              PlanService planService, DataScopeService dataScopeService,
-                             UserRefResolver userRefResolver, ObjectMapper objectMapper) {
+                             UserRefResolver userRefResolver, ObjectMapper objectMapper,
+                             AnnualTargetGuard annualTargetGuard) {
         this.submissionMapper = submissionMapper;
         this.historyMapper = historyMapper;
         this.reviewMapper = reviewMapper;
@@ -104,6 +108,7 @@ public class SubmissionService {
         this.dataScopeService = dataScopeService;
         this.userRefResolver = userRefResolver;
         this.objectMapper = objectMapper;
+        this.annualTargetGuard = annualTargetGuard;
     }
 
     // ---------------- 查询 ----------------
@@ -139,8 +144,12 @@ public class SubmissionService {
     /** 详情（含材料 file_ref、审核记录 review、历史 submission_history）；按数据范围 */
     public SubmissionDtos.Detail detail(Long submissionId) {
         Submission submission = requireSubmission(submissionId);
-        taskService.requireAccess(taskService.requireTask(submission.getTaskId()));
+        requireAccess(submission);
         return toDetail(submission);
+    }
+
+    public void requireAccess(Submission submission) {
+        taskService.requireAccess(taskService.requireTask(submission.getTaskId()));
     }
 
     // ---------------- 新建草稿 ----------------
@@ -148,7 +157,11 @@ public class SubmissionService {
     @Transactional
     public SubmissionDtos.Detail create(Long taskId, SubmissionDtos.CreateRequest request) {
         Task task = taskService.requireTask(taskId);
-        boolean proxy = requireSubmitter(task.getUnitId(), request.getProxyReason());
+        String proxyReason = request.getProxyReason() == null ? null : request.getProxyReason().trim();
+        boolean proxy = requireSubmitter(task.getUnitId(), proxyReason);
+        if (proxy && !StringUtils.hasText(proxyReason)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "管理员代填必须填写代填原因（proxyReason）");
+        }
         taskService.requireCurrentTask(task);
         requireTaskFillable(task);
         Indicator indicator = indicatorService.requireIndicator(task.getIndicatorId());
@@ -176,7 +189,7 @@ public class SubmissionService {
         submission.setStatus("DRAFT");
         submission.setRevisionNo(0);
         submission.setIsProxy(proxy);
-        submission.setProxyReason(proxy ? request.getProxyReason() : null);
+        submission.setProxyReason(proxy ? proxyReason : null);
         submission.setCreatedBy(userId);
         submission.setUpdatedBy(userId);
         submissionMapper.insert(submission);
@@ -191,6 +204,7 @@ public class SubmissionService {
         Submission submission = requireSubmission(submissionId);
         requireSubmitter(submission.getUnitId(), null);
         taskService.requireCurrentTask(submission.getTaskId());
+        requireFillableYear(submission.getPlanId(), submission.getYear());
         if (!EDITABLE_STATUSES.contains(submission.getStatus())) {
             throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "只有草稿 / 已驳回 / 已撤回的填报可以修改");
         }
@@ -271,6 +285,7 @@ public class SubmissionService {
         if ("ADJUSTING".equals(taskYear.getYearStatus())) {
             throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "该年度正在调整审批中，不能提交");
         }
+        annualTargetGuard.checkSubmit(submission, indicator, taskYear);
 
         Long userId = SecurityUtils.getUserId();
         LocalDateTime now = LocalDateTime.now();
@@ -359,8 +374,12 @@ public class SubmissionService {
         }
     }
 
-    /** 年度可填报：plan_year 已激活（50004）且未核算锁定（60003） */
+    /** 年度可填报：仅当前自然年，且未核算锁定。 */
     public void requireFillableYear(Long planId, Integer year) {
+        int currentYear = Year.now().getValue();
+        if (year != currentYear) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "只能填报当前自然年份（" + currentYear + "年）的数据");
+        }
         PlanYear planYear = planYearMapper.selectOne(new LambdaQueryWrapper<PlanYear>()
                 .eq(PlanYear::getPlanId, planId)
                 .eq(PlanYear::getYear, year)

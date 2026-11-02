@@ -43,10 +43,18 @@ export interface MultipartInitResponse {
   partSize: number
   partCount: number
   fileInfo: FileInfo | null
+  /** true 时浏览器通过预签名 PUT 直传 MINIO */
+  directUpload: boolean
+}
+
+export interface PartUploadUrlInfo {
+  url: string
+  expiresAt: string
 }
 
 /** GET /files/multipart/{uploadId} 返回：已上传的分片编号（断点续传） */
 export interface MultipartSessionInfo {
   uploadId: string
   uploadedParts: number[]
+  directUpload: boolean
 }

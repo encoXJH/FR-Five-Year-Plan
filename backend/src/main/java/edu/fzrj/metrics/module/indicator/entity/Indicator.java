@@ -87,7 +87,7 @@ public class Indicator {
     /** 排序号 */
     private Integer sort;
 
-    /** 指标状态：DRAFT 草稿 / FINALIZED 已定稿 / DISTRIBUTED 已下发 */
+    /** 指标状态：DRAFT 草稿 / FINALIZED 历史定稿（按未下发处理）/ DISTRIBUTED 已下发 */
     private String status;
 
     /** 乐观锁版本号 */

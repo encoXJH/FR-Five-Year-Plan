@@ -113,7 +113,7 @@ onMounted(() => {
 
 <template>
   <div>
-    <div class="panel-toolbar">
+    <div class="app-action-row panel-actions">
       <el-button type="primary" @click="openCreate">新增专业群</el-button>
       <el-button @click="load">刷新</el-button>
     </div>
@@ -132,7 +132,7 @@ onMounted(() => {
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="160" fixed="right">
+      <el-table-column label="操作" width="120" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
           <el-button
@@ -177,9 +177,15 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.panel-toolbar {
-  display: flex;
-  gap: var(--space-3);
+.panel-actions {
   margin-bottom: var(--space-4);
+}
+
+@media (max-width: 768px) {
+  .panel-actions :deep(.el-button),
+  :deep(.el-table .el-button) {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 </style>

@@ -3,8 +3,10 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getLastRequestId } from '@/utils/request'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
 const requestId = ref(getLastRequestId())
 
 function copyRequestId(): void {
@@ -22,7 +24,7 @@ function copyRequestId(): void {
       </p>
     </template>
     <template #extra>
-      <el-button type="primary" @click="router.push('/plans')">返回首页</el-button>
+      <el-button type="primary" @click="router.push(userStore.homePath)">返回首页</el-button>
     </template>
   </el-result>
 </template>

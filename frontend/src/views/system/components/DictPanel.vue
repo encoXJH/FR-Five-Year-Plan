@@ -142,7 +142,6 @@ onMounted(() => {
         <div class="dict-items" v-loading="customLoading">
           <div class="panel-toolbar">
             <el-button size="small" type="primary" @click="addDictRow">新增字典项</el-button>
-            <div class="toolbar-spacer" />
             <el-button size="small" :disabled="!dictDirty" @click="loadCustomDict">重置</el-button>
             <el-button
               size="small"
@@ -219,7 +218,6 @@ onMounted(() => {
         <div class="dict-items">
           <div class="panel-toolbar">
             <span class="dict-current">{{ activeEnumType || '—' }}</span>
-            <div class="toolbar-spacer" />
             <el-button size="small" @click="loadEnums">刷新</el-button>
           </div>
           <el-table :data="enumItems" border size="default">
@@ -294,16 +292,39 @@ onMounted(() => {
 
 .panel-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: var(--space-2);
   margin-bottom: var(--space-3);
+}
+
+.panel-toolbar :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .dict-current {
   font-weight: 600;
 }
 
-.toolbar-spacer {
-  flex: 1;
+@media (max-width: 768px) {
+  .dict-panel {
+    flex-direction: column;
+  }
+
+  .dict-types {
+    width: 100%;
+    max-height: 160px;
+    padding-right: 0;
+    padding-bottom: var(--space-3);
+    border-right: 0;
+    border-bottom: 1px solid var(--el-border-color-light);
+  }
+
+  .panel-toolbar :deep(.el-button),
+  :deep(.el-table .el-button) {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 .dict-tip {

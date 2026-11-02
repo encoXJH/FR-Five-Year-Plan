@@ -4,13 +4,15 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElNotification } from 'element-plus'
 import ResponsiveRecordView from '@/components/ResponsiveRecordView.vue'
 import StatusTag from '@/components/StatusTag.vue'
+import YearProgressPanel from './components/YearProgressPanel.vue'
 import { listPlans, getPlan } from '@/api/plan'
+import { listIndicators } from '@/api/indicator'
 import {
-  getIndicatorTrend,
   getStatsByIndicator,
   getStatsByUnit,
   getStatsOverview,
   getStatsTree,
+  getIndicatorTrend,
 } from '@/api/stats'
 import { getYearSettlement } from '@/api/settlement'
 import { createExport, pollExport } from '@/api/export'
@@ -27,13 +29,16 @@ import { EMPTY_DISPLAY, formatCount, formatNumber, formatPercent } from '@/utils
 import { formatTargetValue, isPercentCaliber } from '@/utils/indicator'
 import { progressPercentage } from '@/utils/task'
 import { getCurrentPlan, setCurrentPlan } from '@/utils/currentPlan'
+import { aggregateSubjectDimension } from '@/utils/stats'
+import { triggerFileDownload } from '@/utils/file'
 import type { PlanCard, PlanDetail } from '@/types/plan'
+import type { IndicatorTreeNode } from '@/types/indicator'
 import type { ExportType } from '@/types/export'
 import type {
   IndicatorStat,
+  IndicatorTrend,
   StatsOverview,
   StatsTreeNode,
-  TrendYearItem,
   UnitStatItem,
   YearSettlement,
 } from '@/types/stats'
@@ -41,6 +46,29 @@ import type { StatCaliber } from '@/types/enums'
 
 const route = useRoute()
 const router = useRouter()
+
+const trendVisible = ref(false)
+const trendLoading = ref(false)
+const indicatorTrend = ref<IndicatorTrend | null>(null)
+let trendRequestSequence = 0
+
+async function openIndicatorDetail(id: string): Promise<void> {
+  const sequence = ++trendRequestSequence
+  indicatorTrend.value = null
+  trendVisible.value = true
+  trendLoading.value = true
+  try {
+    const result = await getIndicatorTrend(id)
+    if (sequence === trendRequestSequence) indicatorTrend.value = result
+  } finally {
+    if (sequence === trendRequestSequence) trendLoading.value = false
+  }
+}
+
+function openTrendGantt(): void {
+  if (!indicatorTrend.value) return
+  router.push({ path: `/indicators/${indicatorTrend.value.indicatorId}`, query: { from: route.fullPath } })
+}
 
 const plans = ref<PlanCard[]>([])
 const planId = ref<string>((route.query.planId as string) || '')
@@ -53,6 +81,7 @@ const overview = ref<StatsOverview | null>(null)
 const byUnit = ref<UnitStatItem[]>([])
 const byIndicator = ref<IndicatorStat[]>([])
 const tree = ref<StatsTreeNode[]>([])
+const subjectIndicators = ref<IndicatorTreeNode[]>([])
 
 type LazyStatsNode = Omit<StatsTreeNode, 'children'> & {
   children: LazyStatsNode[]
@@ -120,14 +149,14 @@ const yearOptions = computed<number[]>(() => {
 
 const planName = computed(() => plan.value?.name ?? plans.value.find((p) => p.id === planId.value)?.name ?? '')
 
-// ---------- 统计维度（UI 规范 P11：执行单元 / A 级指标 / 指标层级 / 指标性质 / 主体） ----------
+// ---------- 统计维度（UI 规范 P11：执行单元 / 指标 / 指标层级 / 指标性质 / 主体） ----------
 type StatsDimension = 'UNIT' | 'INDICATOR' | 'LEVEL' | 'NATURE' | 'SUBJECT'
 
 const dimension = ref<StatsDimension>('UNIT')
 
 const dimensionOptions: { value: StatsDimension; label: string }[] = [
   { value: 'UNIT', label: '执行单元' },
-  { value: 'INDICATOR', label: 'A 级指标' },
+  { value: 'INDICATOR', label: '指标' },
   { value: 'LEVEL', label: '指标层级' },
   { value: 'NATURE', label: '指标性质' },
   { value: 'SUBJECT', label: '主体' },
@@ -143,11 +172,9 @@ interface DimRow {
   cumulativeRate: number | null
 }
 
-/** 指标层级 / 性质维度由 stats/tree 前端聚合（主体维度暂无聚合接口，用下钻树演示过滤） */
+/** 指标层级 / 性质 / 主体维度复用现有指标树与 stats/tree 在前端聚合。 */
 const dimensionNote = computed(() => {
-  if (dimension.value === 'SUBJECT') {
-    return '主体维度暂无后端聚合接口，请在下方下钻树中按执行单元查看'
-  }
+  if (dimension.value === 'SUBJECT') return '按指标所属主体汇总学院任务'
   if (dimension.value === 'LEVEL' || dimension.value === 'NATURE') {
     return '该维度由下钻树（stats/tree）在前端聚合'
   }
@@ -173,6 +200,12 @@ const detailRows = computed<DimRow[]>(() => {
       achievedCount: item.achievedCount,
       completionRate: item.completionRate,
       cumulativeRate: item.cumulativeRate,
+    }))
+  }
+  if (dimension.value === 'SUBJECT') {
+    return aggregateSubjectDimension(tree.value, subjectIndicators.value).map((item) => ({
+      ...item,
+      name: enumLabel('SubjectType', item.key),
     }))
   }
   if (dimension.value === 'LEVEL' || dimension.value === 'NATURE') {
@@ -217,6 +250,12 @@ const detailRows = computed<DimRow[]>(() => {
   return []
 })
 
+const dimensionEmptyText = computed(() =>
+  dimension.value === 'SUBJECT'
+    ? '当前计划暂无可按主体统计的任务'
+    : dimensionNote.value || '暂无数据',
+)
+
 async function loadPlanContext(): Promise<void> {
   if (!planId.value) return
   plan.value = await getPlan(planId.value)
@@ -229,16 +268,18 @@ async function loadStats(): Promise<void> {
   loading.value = true
   try {
     const y = year.value ?? undefined
-    const [o, u, d, t] = await Promise.all([
+    const [o, u, d, t, indicators] = await Promise.all([
       getStatsOverview(planId.value, y),
       getStatsByUnit(planId.value, y),
       getStatsByIndicator(planId.value, y),
       getStatsTree(planId.value, y),
+      listIndicators(planId.value).catch(() => [] as IndicatorTreeNode[]),
     ])
     overview.value = o
     byUnit.value = u
     byIndicator.value = d
     tree.value = t
+    subjectIndicators.value = indicators
     await syncExpandedNodes()
     if (chartFrame !== null) cancelAnimationFrame(chartFrame)
     chartFrame = requestAnimationFrame(() => {
@@ -266,8 +307,6 @@ function handlePlanChange(): void {
   if (selected) setCurrentPlan(selected)
   year.value = null
   syncQuery()
-  trendIndicator.value = null
-  trendData.value = []
   loadPlanContext().then(loadStats)
 }
 
@@ -367,56 +406,6 @@ watch(dimension, async () => {
   renderComboChart()
 })
 
-// ---------- 指标趋势 ----------
-const trendChart = useEChart()
-const trendIndicator = ref<{ id: string; code: string; name: string } | null>(null)
-const trendData = ref<TrendYearItem[]>([])
-const trendLoading = ref(false)
-
-async function showTrend(node: StatsTreeNode): Promise<void> {
-  if (node.level === 'B' || !node.statCaliber) return
-  trendIndicator.value = { id: node.id, code: node.code, name: node.name }
-  trendLoading.value = true
-  try {
-    const trend = await getIndicatorTrend(node.id)
-    trendData.value = trend.years ?? []
-    await nextTick()
-    renderTrendChart()
-  } finally {
-    trendLoading.value = false
-  }
-}
-
-function renderTrendChart(): void {
-  const points = trendData.value
-  trendChart.setOption({
-    legend: { top: 0 },
-    grid: { left: 8, right: 24, top: 32, bottom: 8, containLabel: true },
-    xAxis: { type: 'category', data: points.map((p) => `${p.year}`) },
-    yAxis: { type: 'value' },
-    series: [
-      {
-        name: '目标',
-        type: 'line',
-        smooth: true,
-        symbolSize: 6,
-        lineStyle: { color: '#BFCEEC', type: 'dashed' },
-        itemStyle: { color: '#BFCEEC' },
-        data: points.map((p) => (typeof p.target === 'number' ? p.target : null)),
-      },
-      {
-        name: '实际',
-        type: 'line',
-        smooth: true,
-        symbolSize: 6,
-        lineStyle: { color: '#2B5BC0', width: 3 },
-        itemStyle: { color: '#2B5BC0' },
-        data: points.map((p) => p.actualValue),
-      },
-    ],
-  })
-}
-
 // ---------- 树表工具 ----------
 function nodeTargetText(node: StatsTreeNode): string {
   return formatTargetValue(node.target, node.statCaliber ?? ('INCREMENT' as StatCaliber))
@@ -428,17 +417,13 @@ function nodeActualText(node: StatsTreeNode): string {
   return formatNumber(node.actualValue)
 }
 
-/** 下钻树行颜色：A 白底、A+ 浅蓝（与指标总表同色）、B 浅绿 */
+/** 下钻树行颜色：A 白底、B 浅绿。 */
 function treeRowClass({ row }: { row: LazyStatsNode }): string {
-  if (row.level === 'A_PLUS') return 'stats-row-a-plus'
-  if (row.level === 'B') return 'stats-row-b'
-  return ''
+  return row.level === 'B' ? 'stats-row-b' : ''
 }
 
 function treeCardClass(row: StatsTreeNode): string {
-  if (row.level === 'A_PLUS') return 'tree-card-a-plus'
-  if (row.level === 'B') return 'tree-card-b'
-  return ''
+  return row.level === 'B' ? 'tree-card-b' : ''
 }
 
 // ---------- 导出 ----------
@@ -457,7 +442,7 @@ async function handleExport(type: ExportType, params: Record<string, string | nu
     const job = await pollExport(exportId)
     notification.close()
     if (job.status === 'SUCCEEDED' && job.downloadUrl) {
-      window.open(job.downloadUrl, '_blank')
+      triggerFileDownload(job.downloadUrl, '统计报表.xlsx')
       ElNotification({ title: '导出 Excel', message: '导出完成，已开始下载', type: 'success' })
     } else {
       ElNotification({
@@ -562,12 +547,12 @@ onMounted(async () => {
         <h1 class="page-title">统计报表</h1>
         <p v-if="planName" class="page-subtitle">{{ planName }}</p>
       </div>
-      <div class="header-actions">
-        <el-button @click="openSettlement">年度核算结果</el-button>
-        <el-button type="primary" :loading="exporting" :disabled="!planId" @click="exportStats">
-          导出 Excel
-        </el-button>
-      </div>
+    </div>
+    <div class="app-action-row header-actions">
+      <el-button type="primary" :loading="exporting" :disabled="!planId" @click="exportStats">
+        导出 Excel
+      </el-button>
+      <el-button @click="openSettlement">年度核算结果</el-button>
     </div>
 
     <el-card shadow="never" class="filter-card">
@@ -634,6 +619,8 @@ onMounted(async () => {
         </el-card>
       </div>
 
+      <YearProgressPanel :plan-id="planId" :year="year" />
+
       <div class="chart-row">
         <el-card shadow="never" class="chart-card">
           <template #header><span class="card-title">执行单元五年累计完成率排名</span></template>
@@ -647,7 +634,7 @@ onMounted(async () => {
             </span>
           </template>
           <div v-if="detailRows.length === 0" class="chart-empty">
-            {{ dimensionNote || '暂无数据' }}
+            {{ dimensionEmptyText }}
           </div>
           <div v-show="detailRows.length > 0" :ref="comboChart.container" class="chart-box" />
         </el-card>
@@ -697,7 +684,7 @@ onMounted(async () => {
                 </template>
               </el-table-column>
               <template #empty>
-                <el-empty :image-size="80" :description="dimensionNote || '暂无数据'" />
+                <el-empty :image-size="80" :description="dimensionEmptyText" />
               </template>
             </el-table>
           </template>
@@ -705,7 +692,7 @@ onMounted(async () => {
             <el-empty
               v-if="detailRows.length === 0"
               :image-size="80"
-              :description="dimensionNote || '暂无数据'"
+              :description="dimensionEmptyText"
             />
             <div v-else class="responsive-card-list">
               <article v-for="row in detailRows" :key="row.key" class="responsive-card">
@@ -755,8 +742,7 @@ onMounted(async () => {
       <el-card shadow="never" class="table-card">
         <template #header>
           <div class="card-header">
-            <span class="card-title">指标下钻（A → A+ → B）</span>
-            <span class="card-tip">点击「趋势」查看指标 2026–2030 目标与实际对比</span>
+            <span class="card-title">指标下钻（指标 → 学院任务）</span>
           </div>
         </template>
         <ResponsiveRecordView>
@@ -830,23 +816,14 @@ onMounted(async () => {
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="100" align="center">
+          <el-table-column label="操作" width="80" align="center" fixed="right">
             <template #default="{ row }">
-              <StatusTag v-if="row.achieveStatus" kind="AchieveStatus" :value="row.achieveStatus" />
-              <span v-else class="empty-text">—</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="130" align="center" fixed="right">
-            <template #default="{ row }">
-              <el-button v-if="row.level !== 'B' && row.statCaliber" link type="primary" size="small" @click="showTrend(row)">
-                趋势
-              </el-button>
               <el-button
                 v-if="row.level !== 'B'"
                 link
                 type="primary"
                 size="small"
-                @click="router.push(`/indicators/${row.id}`)"
+                @click="openIndicatorDetail(row.id)"
               >
                 详情
               </el-button>
@@ -921,11 +898,6 @@ onMounted(async () => {
                       <span>{{ formatPercent(row.cumulativeRate ?? null) }}</span>
                     </div>
                   </div>
-                  <div class="responsive-card__field">
-                    <span class="responsive-card__field-label">状态</span>
-                    <StatusTag v-if="row.achieveStatus" kind="AchieveStatus" :value="row.achieveStatus" />
-                    <span v-else class="empty-text">—</span>
-                  </div>
                   <div v-if="row.yearStatus" class="responsive-card__field">
                     <span class="responsive-card__field-label">年度状态</span>
                     <StatusTag kind="TaskYearStatus" :value="row.yearStatus" />
@@ -945,18 +917,10 @@ onMounted(async () => {
                     {{ expandedIds.has(row.id) ? '收起' : '展开' }}
                   </el-button>
                   <el-button
-                    v-if="row.level !== 'B' && row.statCaliber"
-                    link
-                    type="primary"
-                    @click="showTrend(row)"
-                  >
-                    趋势
-                  </el-button>
-                  <el-button
                     v-if="row.level !== 'B'"
                     link
                     type="primary"
-                    @click="router.push(`/indicators/${row.id}`)"
+                    @click="openIndicatorDetail(row.id)"
                   >
                     详情
                   </el-button>
@@ -967,18 +931,6 @@ onMounted(async () => {
         </ResponsiveRecordView>
       </el-card>
 
-      <el-card v-if="trendIndicator" v-loading="trendLoading" shadow="never" class="table-card">
-        <template #header>
-          <div class="card-header">
-            <span class="card-title">
-              指标趋势：{{ trendIndicator.code }} {{ trendIndicator.name }}
-            </span>
-            <el-button link type="info" size="small" @click="trendIndicator = null">收起</el-button>
-          </div>
-        </template>
-        <div v-if="trendData.length === 0 && !trendLoading" class="chart-empty">暂无趋势数据</div>
-        <div v-show="trendData.length > 0" :ref="trendChart.container" class="chart-box" />
-      </el-card>
     </template>
 
     <el-empty v-else-if="!loading" description="暂无统计数据（计划未选择或接口未就绪）" />
@@ -1029,6 +981,48 @@ onMounted(async () => {
         <el-empty v-else-if="!settlementLoading" description="选择年度查询核算结果" :image-size="70" />
       </div>
     </el-dialog>
+
+    <el-drawer
+      v-model="trendVisible"
+      title="指标统计详情"
+      size="min(760px, 100vw)"
+      class="indicator-trend-drawer"
+      destroy-on-close
+    >
+      <div v-loading="trendLoading" class="trend-drawer-body">
+        <template v-if="indicatorTrend">
+          <div class="trend-heading">
+            <div><span class="mono">{{ indicatorTrend.code }}</span><h2>{{ indicatorTrend.name }}</h2></div>
+            <StatusTag v-if="indicatorTrend.statCaliber" kind="StatCaliber" :value="indicatorTrend.statCaliber" />
+          </div>
+          <div class="trend-summary">
+            <div><span>五年总目标</span><strong>{{ formatTargetValue(indicatorTrend.totalTarget, indicatorTrend.statCaliber) }}</strong></div>
+            <div><span>累计完成</span><strong>{{ formatTargetValue(indicatorTrend.cumulativeActual, indicatorTrend.statCaliber) }}</strong></div>
+            <div><span>累计进度</span><strong class="primary-value">{{ formatPercent(indicatorTrend.cumulativeRate ?? null) }}</strong></div>
+          </div>
+          <el-table :data="indicatorTrend.years" border size="small" class="trend-table">
+            <el-table-column prop="year" label="年度" width="76" align="center" />
+            <el-table-column label="目标" min-width="110" align="right">
+              <template #default="{ row }">{{ formatTargetValue(row.target, indicatorTrend.statCaliber) }}</template>
+            </el-table-column>
+            <el-table-column label="完成值（审核通过）" min-width="135" align="right">
+              <template #default="{ row }">{{ formatTargetValue(row.actualValue, indicatorTrend.statCaliber) }}</template>
+            </el-table-column>
+            <el-table-column label="完成率" width="100" align="right">
+              <template #default="{ row }">{{ formatPercent(row.completionRate) }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="100" align="center">
+              <template #default="{ row }"><StatusTag v-if="row.achieveStatus" kind="AchieveStatus" :value="row.achieveStatus" /><span v-else>—</span></template>
+            </el-table-column>
+          </el-table>
+          <div class="trend-footer">
+            <span>留在统计报表查看数据，筛选条件不会丢失</span>
+            <el-button type="primary" plain @click="openTrendGantt">查看任务甘特图</el-button>
+          </div>
+        </template>
+        <el-empty v-else-if="!trendLoading" description="暂未获取到指标趋势数据" :image-size="80" />
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -1238,19 +1232,7 @@ onMounted(async () => {
   margin-top: var(--space-2);
 }
 
-/* ---------- 下钻树三级行颜色：A 白底、A+ 浅蓝（与指标总表同色）、B 浅绿 ---------- */
-:deep(.stats-row-a-plus > td) {
-  background-color: var(--el-color-primary-light-9) !important;
-}
-
-:deep(.stats-row-a-plus > td:first-child) {
-  box-shadow: inset 3px 0 0 var(--el-color-primary);
-}
-
-:deep(.stats-row-a-plus:hover > td) {
-  background-color: var(--el-color-primary-light-8) !important;
-}
-
+/* ---------- 下钻树行颜色：A 白底、B 浅绿 ---------- */
 :deep(.stats-row-b > td) {
   background-color: var(--el-color-success-light-9) !important;
 }
@@ -1261,11 +1243,6 @@ onMounted(async () => {
 
 :deep(.stats-row-b:hover > td) {
   background-color: var(--el-color-success-light-8) !important;
-}
-
-.tree-card-a-plus {
-  background: var(--el-color-primary-light-9);
-  border-left-color: var(--el-color-primary);
 }
 
 .tree-card-b {
@@ -1341,6 +1318,18 @@ onMounted(async () => {
   }
 }
 
+.trend-drawer-body { min-height: 240px; }
+.trend-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.trend-heading .mono { color: #2B5BC0; font-weight: 600; }
+.trend-heading h2 { margin: 5px 0 0; font-size: 18px; line-height: 1.5; }
+.trend-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin-bottom: 18px; background: #E4E9F2; border: 1px solid #E4E9F2; }
+.trend-summary > div { display: flex; flex-direction: column; gap: 7px; padding: 14px; background: #F7F9FC; }
+.trend-summary span { color: #606266; font-size: 12px; }
+.trend-summary strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.trend-summary .primary-value { color: #2B5BC0; }
+.trend-table { width: 100%; }
+.trend-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; color: #909399; font-size: 12px; }
+
 @media (max-width: 600px) {
   .stats-filter :deep(.el-form-item) {
     width: 100%;
@@ -1367,5 +1356,9 @@ onMounted(async () => {
     font-size: 22px;
     line-height: 30px;
   }
+
+  .trend-summary { grid-template-columns: 1fr; }
+  .trend-summary > div { padding: 10px 12px; }
+  .trend-footer { align-items: stretch; flex-direction: column; }
 }
 </style>

@@ -34,10 +34,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 计划（API 约定 15.2）：新建（空白 / 模板 / 复制）、修改、启动、归档、另存为模板
@@ -60,12 +63,14 @@ public class PlanService {
     private final TaskMapper taskMapper;
     private final TaskYearMapper taskYearMapper;
     private final ObjectMapper objectMapper;
+    private final PlanReadScopeService planReadScopeService;
 
     public PlanService(PlanMapper planMapper, PlanYearMapper planYearMapper, TemplateMapper templateMapper,
                        DirectionMapper directionMapper, IndicatorMapper indicatorMapper,
                        IndicatorYearTargetMapper yearTargetMapper, MajorGroupMapper majorGroupMapper,
                        UserRefResolver userRefResolver, UserRoleMapper userRoleMapper,
-                       TaskMapper taskMapper, TaskYearMapper taskYearMapper, ObjectMapper objectMapper) {
+                       TaskMapper taskMapper, TaskYearMapper taskYearMapper, ObjectMapper objectMapper,
+                       PlanReadScopeService planReadScopeService) {
         this.planMapper = planMapper;
         this.planYearMapper = planYearMapper;
         this.templateMapper = templateMapper;
@@ -78,6 +83,7 @@ public class PlanService {
         this.taskMapper = taskMapper;
         this.taskYearMapper = taskYearMapper;
         this.objectMapper = objectMapper;
+        this.planReadScopeService = planReadScopeService;
     }
 
     // ---------------- 查询 ----------------
@@ -88,15 +94,30 @@ public class PlanService {
                 .eq(Plan::getDeleted, 0L)
                 .eq(StringUtils.hasText(status), Plan::getStatus, status)
                 .orderByDesc(Plan::getCreatedAt);
-        return planMapper.selectList(wrapper).stream()
-                .map(p -> new PlanDtos.ListItem(p.getId(), p.getName(), p.getStartYear(), p.getEndYear(),
-                        p.getBaselineYear(), p.getStatus(), p.getSource(), p.getFinalizedAt(),
-                        completionRateOf(p), p.getCreatedAt()))
+        return planReadScopeService.filterVisiblePlans(planMapper.selectList(wrapper)).stream()
+                .map(this::toListItem)
                 .toList();
     }
 
+    private PlanDtos.ListItem toListItem(Plan plan) {
+        List<Task> visibleTasks = planReadScopeService.visibleTasks(plan.getId());
+        List<Indicator> indicators = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
+                .eq(Indicator::getPlanId, plan.getId())
+                .eq(Indicator::getDeleted, 0L)
+                .select(Indicator::getId, Indicator::getParentId, Indicator::getLevel, Indicator::getOwnerId));
+        java.util.Set<Long> visibleIndicatorIds = planReadScopeService.visibleIndicatorIds(indicators, visibleTasks);
+        long indicatorCountA = indicators.stream()
+                .filter(i -> visibleIndicatorIds.contains(i.getId()) && "A".equals(i.getLevel())).count();
+        long indicatorCountAPlus = indicators.stream()
+                .filter(i -> visibleIndicatorIds.contains(i.getId()) && "A_PLUS".equals(i.getLevel())).count();
+        return new PlanDtos.ListItem(plan.getId(), plan.getName(), plan.getStartYear(), plan.getEndYear(),
+                plan.getBaselineYear(), plan.getStatus(), plan.getSource(), plan.getFinalizedAt(),
+                completionRateOf(plan, visibleTasks), plan.getCreatedAt(), indicatorCountA, indicatorCountAPlus,
+                (long) visibleTasks.size(), plan.getUpdatedAt() == null ? plan.getCreatedAt() : plan.getUpdatedAt());
+    }
+
     /** 整体完成率：当前激活年度（无激活取最近锁定年度，再无取起始年）达标任务数 ÷ 有正目标的任务数 */
-    private java.math.BigDecimal completionRateOf(Plan plan) {
+    private java.math.BigDecimal completionRateOf(Plan plan, List<Task> visibleTasks) {
         List<PlanYear> planYears = planYearMapper.selectList(new LambdaQueryWrapper<PlanYear>()
                 .eq(PlanYear::getPlanId, plan.getId())
                 .eq(PlanYear::getDeleted, 0L));
@@ -108,17 +129,15 @@ public class PlanService {
                 .orElse(planYears.stream().filter(y -> "LOCKED".equals(y.getStatus()))
                         .map(PlanYear::getYear).max(Integer::compareTo)
                         .orElse(plan.getStartYear()));
-        List<Task> tasks = taskMapper.selectList(new LambdaQueryWrapper<Task>()
-                .eq(Task::getPlanId, plan.getId())
-                .ne(Task::getStatus, "PENDING_DISTRIBUTION")
-                .eq(Task::getIsHistorical, false)
-                .eq(Task::getDeleted, 0L)
-                .select(Task::getId));
-        if (tasks.isEmpty()) {
+        List<Long> taskIds = visibleTasks.stream()
+                .filter(task -> !"PENDING_DISTRIBUTION".equals(task.getStatus()))
+                .filter(task -> !Boolean.TRUE.equals(task.getIsHistorical()))
+                .map(Task::getId).toList();
+        if (taskIds.isEmpty()) {
             return null;
         }
         List<TaskYear> rows = taskYearMapper.selectList(new LambdaQueryWrapper<TaskYear>()
-                .in(TaskYear::getTaskId, tasks.stream().map(Task::getId).toList())
+                .in(TaskYear::getTaskId, taskIds)
                 .eq(TaskYear::getYear, year)
                 .eq(TaskYear::getDeleted, 0L));
         List<TaskYear> countable = rows.stream()
@@ -141,7 +160,9 @@ public class PlanService {
     }
 
     public PlanDtos.Detail detail(Long planId) {
-        return toDetail(requirePlan(planId));
+        Plan plan = requirePlan(planId);
+        planReadScopeService.requireVisible(plan);
+        return toDetail(plan);
     }
 
     // ---------------- 新建 ----------------
@@ -186,6 +207,7 @@ public class PlanService {
                     throw new BizException(ErrorCode.PARAM_INVALID, "复制计划时必须提供 sourcePlanId");
                 }
                 Plan source = requirePlan(request.getSourcePlanId());
+                planReadScopeService.requireVisible(source);
                 plan.setSourcePlanId(source.getId());
                 content = snapshot(source.getId());
             }
@@ -199,6 +221,9 @@ public class PlanService {
 
         if (content != null) {
             instantiate(plan, content);
+        }
+        if ("COPY".equals(request.getSource()) && Boolean.TRUE.equals(request.getCopyAllocations())) {
+            copyAllocations(request.getSourcePlanId(), plan, userId);
         }
         // 重查以拿到 DB 默认的 version / createdAt
         return toDetail(requirePlan(plan.getId()));
@@ -222,6 +247,7 @@ public class PlanService {
         Integer baselineYear = patch.has("baselineYear") ? patch.integer("baselineYear") : plan.getBaselineYear();
         if (yearFieldsTouched) {
             validateYears(startYear, endYear, baselineYear);
+            requireNoOutOfRangeYearData(plan, startYear, endYear);
             plan.setStartYear(startYear);
             plan.setEndYear(endYear);
             plan.setBaselineYear(baselineYear);
@@ -269,7 +295,9 @@ public class PlanService {
             PlanYear planYear = new PlanYear();
             planYear.setPlanId(plan.getId());
             planYear.setYear(year);
-            planYear.setStatus("NOT_ACTIVATED");
+            planYear.setStatus("ACTIVE");
+            planYear.setActivatedAt(LocalDateTime.now());
+            planYear.setActivatedBy(userId);
             planYear.setCreatedBy(userId);
             planYear.setUpdatedBy(userId);
             planYearMapper.insert(planYear);
@@ -407,6 +435,13 @@ public class PlanService {
     /** 把结构快照实例化到计划（S / 指标 / 年度目标；年度目标仅落在计划起止年内） */
     @Transactional
     public void instantiate(Plan plan, TemplateContent content) {
+        List<TemplateContent.IndicatorNode> roots = new ArrayList<>(content.getUnassignedIndicators());
+        content.getDirections().forEach(direction -> roots.addAll(direction.getIndicators()));
+        boolean containsAPlus = roots.stream().anyMatch(node -> "A_PLUS".equals(node.getLevel())
+                || node.getChildren().stream().anyMatch(child -> "A_PLUS".equals(child.getLevel())));
+        if (containsAPlus) {
+            throw new BizException(ErrorCode.LEVEL_INVALID, "模板包含历史 A+，新流程不能实例化该层级");
+        }
         Long userId = SecurityUtils.getUserId();
         for (TemplateContent.DirectionNode directionNode : content.getDirections()) {
             Direction direction = new Direction();
@@ -460,6 +495,74 @@ public class PlanService {
                 insertYearTargets(ap.getId(), apNode.getYearTargets(), plan, userId);
             }
         }
+    }
+
+    /** 复制 B 分工结构到同编码的新指标；所有执行状态重置，不复制任何完成或审批数据。 */
+    void copyAllocations(Long sourcePlanId, Plan targetPlan, Long userId) {
+        Map<Long, Indicator> sourceIndicators = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
+                        .eq(Indicator::getPlanId, sourcePlanId)
+                        .eq(Indicator::getDeleted, 0L))
+                .stream().collect(Collectors.toMap(Indicator::getId, Function.identity()));
+        Map<String, Long> targetIndicatorIds = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
+                        .eq(Indicator::getPlanId, targetPlan.getId())
+                        .eq(Indicator::getDeleted, 0L))
+                .stream().collect(Collectors.toMap(Indicator::getCode, Indicator::getId));
+        List<Task> sourceTasks = taskMapper.selectList(new LambdaQueryWrapper<Task>()
+                .eq(Task::getPlanId, sourcePlanId)
+                .eq(Task::getIsHistorical, false)
+                .eq(Task::getDeleted, 0L));
+        if (sourceTasks.isEmpty()) {
+            return;
+        }
+        Map<Long, List<TaskYear>> yearsByTask = taskYearMapper.selectList(new LambdaQueryWrapper<TaskYear>()
+                        .in(TaskYear::getTaskId, sourceTasks.stream().map(Task::getId).toList())
+                        .eq(TaskYear::getDeleted, 0L))
+                .stream().collect(Collectors.groupingBy(TaskYear::getTaskId));
+        for (Task source : sourceTasks) {
+            Long indicatorId = mappedIndicatorId(sourceIndicators, targetIndicatorIds, source.getIndicatorId());
+            Long topIndicatorId = mappedIndicatorId(sourceIndicators, targetIndicatorIds, source.getTopIndicatorId());
+            Task target = new Task();
+            target.setPlanId(targetPlan.getId());
+            target.setIndicatorId(indicatorId);
+            target.setTopIndicatorId(topIndicatorId);
+            target.setUnitId(source.getUnitId());
+            target.setCode(source.getCode());
+            target.setOwnerId(source.getOwnerId());
+            target.setStatus("PENDING_DISTRIBUTION");
+            target.setIsHistorical(false);
+            target.setCreatedBy(userId);
+            target.setUpdatedBy(userId);
+            taskMapper.insert(target);
+            for (TaskYear sourceYear : yearsByTask.getOrDefault(source.getId(), List.of())) {
+                if (sourceYear.getYear() < targetPlan.getStartYear() || sourceYear.getYear() > targetPlan.getEndYear()) {
+                    continue;
+                }
+                TaskYear targetYear = new TaskYear();
+                targetYear.setTaskId(target.getId());
+                targetYear.setYear(sourceYear.getYear());
+                targetYear.setPlanId(targetPlan.getId());
+                targetYear.setIndicatorId(indicatorId);
+                targetYear.setUnitId(source.getUnitId());
+                targetYear.setTarget(sourceYear.getTarget());
+                targetYear.setOriginalTarget(sourceYear.getTarget());
+                targetYear.setTargetVersion(1);
+                targetYear.setFrozenAmount(BigDecimal.ZERO);
+                targetYear.setYearStatus("NOT_ACTIVATED");
+                targetYear.setCreatedBy(userId);
+                targetYear.setUpdatedBy(userId);
+                taskYearMapper.insert(targetYear);
+            }
+        }
+    }
+
+    private Long mappedIndicatorId(Map<Long, Indicator> sourceIndicators,
+                                   Map<String, Long> targetIndicatorIds, Long sourceIndicatorId) {
+        Indicator source = sourceIndicators.get(sourceIndicatorId);
+        Long targetId = source == null ? null : targetIndicatorIds.get(source.getCode());
+        if (targetId == null) {
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "复制分解失败：新计划缺少对应指标 " + sourceIndicatorId);
+        }
+        return targetId;
     }
 
     private Indicator toIndicator(Long planId, Long directionId, Long parentId,
@@ -553,13 +656,6 @@ public class PlanService {
         return planMapper.updateById(plan) == 0;
     }
 
-    /** 定稿后指标体系锁定（40005） */
-    public void requireNotFinalized(Plan plan) {
-        if (plan.getFinalizedAt() != null) {
-            throw new BizException(ErrorCode.INDICATOR_FINALIZED);
-        }
-    }
-
     public void requireVersion(Integer current, Integer requestVersion) {
         if (requestVersion == null) {
             throw new BizException(ErrorCode.PARAM_INVALID, "缺少 version（乐观锁版本号）");
@@ -583,6 +679,33 @@ public class PlanService {
         }
         if (baselineYear != null && baselineYear != startYear - 1) {
             throw new BizException(ErrorCode.PLAN_YEARS_INVALID, "基线年应为规划起始年前一年");
+        }
+    }
+
+    private void requireNoOutOfRangeYearData(Plan plan, Integer startYear, Integer endYear) {
+        boolean shortened = startYear > plan.getStartYear() || endYear < plan.getEndYear();
+        if (!shortened) {
+            return;
+        }
+        List<Long> indicatorIds = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
+                        .eq(Indicator::getPlanId, plan.getId())
+                        .eq(Indicator::getDeleted, 0L)
+                        .select(Indicator::getId))
+                .stream().map(Indicator::getId).toList();
+        Long targetCount = indicatorIds.isEmpty() ? 0L : yearTargetMapper.selectCount(
+                new LambdaQueryWrapper<IndicatorYearTarget>()
+                        .in(IndicatorYearTarget::getIndicatorId, indicatorIds)
+                        .and(wrapper -> wrapper.lt(IndicatorYearTarget::getYear, startYear)
+                                .or().gt(IndicatorYearTarget::getYear, endYear))
+                        .eq(IndicatorYearTarget::getDeleted, 0L));
+        Long taskYearCount = taskYearMapper.selectCount(new LambdaQueryWrapper<TaskYear>()
+                .eq(TaskYear::getPlanId, plan.getId())
+                .and(wrapper -> wrapper.lt(TaskYear::getYear, startYear)
+                        .or().gt(TaskYear::getYear, endYear))
+                .eq(TaskYear::getDeleted, 0L));
+        if (targetCount > 0 || taskYearCount > 0) {
+            throw new BizException(ErrorCode.PARAM_INVALID,
+                    "新规划期外仍存在指标年度目标或任务年度，不能缩短规划期；请先调整相关年度数据");
         }
     }
 

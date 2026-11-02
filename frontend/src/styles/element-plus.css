@@ -1,7 +1,7 @@
 /* Element Plus 主题变量覆盖（界面设计规范 附录 B） */
 :root {
   --el-font-family: var(--app-font-family);
-  --el-bg-color-page: #f2f3f5;
+  --el-bg-color-page: #ffffff;
   --el-border-radius-small: 2px;
   --el-border-radius-base: 4px;
   --el-border-radius-round: 20px;

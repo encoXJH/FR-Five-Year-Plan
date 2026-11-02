@@ -31,7 +31,7 @@ public class ReviewController {
         this.reviewService = reviewService;
     }
 
-    @Operation(summary = "待审核列表（过滤 planId / unitId / indicatorId / year）",
+    @Operation(summary = "待审核列表（过滤计划 / 学院 / 指标 / 年度 / 关键字 / 提交时间）",
             description = "权限：submission:review；校级负责人只待审本人负责指标的")
     @GetMapping("/reviews/pending")
     @PreAuthorize("hasAuthority('submission:review')")
@@ -40,7 +40,7 @@ public class ReviewController {
     }
 
     @Operation(summary = "审核：{ result, comment, approvedValue? }，approvedValue 用于核减",
-            description = "权限：submission:review（指标负责人；管理员代审需 reason）；必须带 Idempotency-Key；"
+            description = "权限：submission:review（指标负责人；管理员代审 reason 选填）；必须带 Idempotency-Key；"
                     + "驳回必须意见 60004 / 认定值不能大于填报值 60005 / 年度已锁定 60003")
     @PostMapping("/submissions/{submissionId}/review")
     @PreAuthorize("hasAuthority('submission:review')")

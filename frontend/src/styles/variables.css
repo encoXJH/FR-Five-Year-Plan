@@ -1,4 +1,7 @@
 :root {
+  /* 主背景以白色为主，卡片靠边框与浅灰填充分区 */
+  --el-bg-color-page: #ffffff;
+
   /* 主色与色阶（界面设计规范 2.1） */
   --el-color-primary: #2b5bc0;
   --el-color-primary-dark-2: #22499a;

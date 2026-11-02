@@ -8,6 +8,11 @@
     "build": "vue-tsc -b && vite build",
     "test": "vitest run",
     "smoke": "node tests/smoke.mjs",
+    "test:indicator-expand": "node tests/indicator-expand.mjs",
+    "test:direction-allocation": "node tests/direction-allocation.mjs",
+    "test:allocation-modal": "node tests/task-allocation-modal.mjs",
+    "test:gantt": "node tests/indicator-gantt.mjs",
+    "test:navigation": "node tests/navigation.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

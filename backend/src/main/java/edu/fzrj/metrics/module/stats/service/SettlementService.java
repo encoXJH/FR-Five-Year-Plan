@@ -111,6 +111,15 @@ public class SettlementService {
         if (!"ACTIVE".equals(planYear.getStatus())) {
             throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "该年度尚未激活，不能核算");
         }
+        Long pendingCount = submissionMapper.selectCount(new LambdaQueryWrapper<Submission>()
+                .eq(Submission::getPlanId, planId)
+                .eq(Submission::getYear, year)
+                .eq(Submission::getStatus, "PENDING_REVIEW")
+                .eq(Submission::getDeleted, 0L));
+        if (pendingCount > 0) {
+            throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID,
+                    "该年度存在待审核填报，请先完成审核或撤回后再核算锁定");
+        }
         Long userId = SecurityUtils.getUserId();
         LocalDateTime now = LocalDateTime.now();
 

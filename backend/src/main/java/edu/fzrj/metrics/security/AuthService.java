@@ -67,7 +67,7 @@ public class AuthService {
     }
 
     /** 账号密码登录 */
-    @Transactional
+    @Transactional(noRollbackFor = BizException.class)
     public TokenResponse login(String username, String password, String clientType, String ip) {
         SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
                 .eq(SysUser::getUsername, username)
@@ -165,14 +165,19 @@ public class AuthService {
         if (user == null || Boolean.FALSE.equals(user.getIsEnabled())) {
             throw new BizException(ErrorCode.ACCOUNT_DISABLED);
         }
+        int consumed = refreshTokenMapper.update(null, new LambdaUpdateWrapper<RefreshToken>()
+                .eq(RefreshToken::getId, stored.getId())
+                .isNull(RefreshToken::getRevokedAt)
+                .set(RefreshToken::getRevokedAt, now));
+        if (consumed != 1) {
+            throw new BizException(ErrorCode.TOKEN_INVALID);
+        }
         TokenResponse response = issueTokens(user, clientType, ip);
-        // 吊销旧 token 并指向新 token
         String newHash = Sha256.hex(response.getRefreshToken());
         RefreshToken newStored = refreshTokenMapper.selectOne(new LambdaQueryWrapper<RefreshToken>()
                 .eq(RefreshToken::getTokenHash, newHash));
         refreshTokenMapper.update(null, new LambdaUpdateWrapper<RefreshToken>()
                 .eq(RefreshToken::getId, stored.getId())
-                .set(RefreshToken::getRevokedAt, now)
                 .set(RefreshToken::getReplacedById, newStored.getId()));
         return response;
     }

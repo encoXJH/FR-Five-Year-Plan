@@ -54,10 +54,10 @@ public class Plan {
     /** 转移时是否需要接收方确认（FR-M6-07） */
     private Boolean isReceiverConfirmRequired;
 
-    /** 指标体系定稿时间 */
+    /** 历史指标体系定稿时间；新流程不再写入或作为门禁 */
     private LocalDateTime finalizedAt;
 
-    /** 定稿操作人，引用 sys_user.id */
+    /** 历史定稿操作人，引用 sys_user.id */
     @JsonSerialize(using = ToStringSerializer.class)
     private Long finalizedBy;
 

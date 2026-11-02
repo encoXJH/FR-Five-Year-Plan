@@ -1,8 +1,8 @@
 package edu.fzrj.metrics.module.indicator.service;
 
 import edu.fzrj.metrics.module.indicator.dto.IndicatorDtos;
-import edu.fzrj.metrics.module.indicator.service.support.IndicatorRules;
-import edu.fzrj.metrics.module.task.dto.TaskDtos;
+import edu.fzrj.metrics.common.error.ErrorCode;
+import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.task.service.AllocationService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,15 +21,6 @@ public class DecompositionService {
     @Transactional
     public IndicatorDtos.DecompositionResponse decompose(Long planId, Long parentId,
                                                          IndicatorDtos.DecompositionRequest request) {
-        IndicatorDtos.CreateRequest createRequest = request.getIndicator();
-        createRequest.setLevel(IndicatorRules.LEVEL_A_PLUS);
-        createRequest.setParentId(parentId);
-        IndicatorDtos.Detail aPlus = indicatorService.create(planId, createRequest);
-
-        TaskDtos.AllocationPutRequest allocationRequest = new TaskDtos.AllocationPutRequest();
-        allocationRequest.setVersion(aPlus.version());
-        allocationRequest.setRows(request.getRows());
-        TaskDtos.AllocationView allocation = allocationService.putAllocation(aPlus.id(), allocationRequest);
-        return new IndicatorDtos.DecompositionResponse(aPlus, allocation);
+        throw new BizException(ErrorCode.LEVEL_INVALID, "新流程不再支持创建 A+，请直接在 A 下分配 B");
     }
 }

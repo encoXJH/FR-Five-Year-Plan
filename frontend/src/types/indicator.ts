@@ -29,6 +29,8 @@ export interface Indicator {
   subjectType: SubjectType
   /** 仅 ADMIN 的 S 归属管理使用，普通业务页面不得展示 */
   directionId?: string | null
+  directionName?: string | null
+  sort?: number | null
   measureType: MeasureType | null
   statCaliber: StatCaliber | null
   unitLabel: string | null
@@ -43,6 +45,8 @@ export interface Indicator {
   owner: UserRef | null
   description: string | null
   evidenceRequirement: string | null
+  /** 必须上传的材料最少数量；非量化为 null */
+  minFileCount: number | null
   status: IndicatorStatus
   version: number
   createdAt: string
@@ -58,6 +62,7 @@ export interface IndicatorTreeNode extends Indicator {
 export interface IndicatorDetail extends Indicator {
   parent: { id: string; code: string; name: string } | null
   children: Indicator[]
+  bSummaries: Array<{ status: string; isHistorical: boolean }>
   /** 当前用户是否可编辑（服务端按数据范围判定） */
   editable: boolean
 }
@@ -73,11 +78,10 @@ export interface IndicatorQuery {
 
 /** POST /plans/{planId}/indicators 请求体（API 16.2） */
 export interface CreateIndicatorRequest {
-  level: IndicatorLevel
-  /** 新增 A+ 时必填 */
-  parentId?: string
+  level: 'A'
   name: string
   nature: IndicatorNature
+  directionId?: string | null
   isQuantifiable?: boolean
   measureType?: MeasureType | null
   statCaliber?: StatCaliber | null
@@ -85,6 +89,7 @@ export interface CreateIndicatorRequest {
   targetDirection?: TargetDirection | null
   rollupMode?: RollupMode | null
   description?: string | null
+  minFileCount?: number | null
   baselineValue?: number | null
   totalTarget?: number | null
   yearTargets?: YearTarget[]
@@ -96,6 +101,7 @@ export interface CreateIndicatorRequest {
 export interface UpdateIndicatorRequest {
   name?: string
   nature?: IndicatorNature
+  directionId?: string | null
   /** 仅 A 使用；不可量化 A 的量化字段提交为 null */
   isQuantifiable?: boolean
   measureType?: MeasureType | null
@@ -107,6 +113,7 @@ export interface UpdateIndicatorRequest {
   baselineValue?: number | null
   ownerId?: string | null
   evidenceRequirement?: string | null
+  minFileCount?: number | null
   version: number
 }
 
@@ -119,7 +126,7 @@ export interface UpdateYearTargetsRequest {
 
 /** 导入预览单行结果 */
 export interface ImportPreviewRow {
-  row: number
+  rowNum: number
   level: string | null
   code: string | null
   parentCode: string | null
@@ -146,5 +153,8 @@ export interface ImportConfirmRequest {
 
 /** POST .../import-confirm 响应 */
 export interface ImportConfirmResult {
-  createdCount: number
+  directionCount: number
+  aCount: number
+  /** 历史导入响应兼容字段，新流程不再使用 */
+  aPlusCount?: number
 }

@@ -156,7 +156,7 @@ const DEFAULT_LABELS: Record<string, Record<string, string>> = {
     NOT_ACHIEVED: '未达成',
     LAGGING: '进度滞后',
   },
-  IndicatorLevel: { A: 'A 类', A_PLUS: 'A+ 类', B: 'B 类' },
+  IndicatorLevel: { A: '指标', A_PLUS: '历史指标', B: '学院任务' },
   IndicatorNature: { CONSTRAINT: '约束性', DEVELOPMENT: '发展性' },
   StatCaliber: {
     INCREMENT: '增量',

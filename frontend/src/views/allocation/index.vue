@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref, watch } from 'vue'
-import type { VNode } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CircleCheck, Warning } from '@element-plus/icons-vue'
 import StatusTag from '@/components/StatusTag.vue'
-import ResponsiveRecordView from '@/components/ResponsiveRecordView.vue'
+import BackButton from '@/components/BackButton.vue'
+import AllocationMatrixEditor from './components/AllocationMatrixEditor.vue'
 import DistributePreviewDialog from './components/DistributePreviewDialog.vue'
 import type { PreviewRow } from './components/DistributePreviewDialog.vue'
 import { getPlan, listPlans } from '@/api/plan'
@@ -13,96 +13,88 @@ import { listIndicators } from '@/api/indicator'
 import { getUserOptions } from '@/api/user'
 import { listOrgUnits } from '@/api/orgUnit'
 import type { OrgUnit } from '@/api/orgUnit'
-import { distributePlan, getAllocation, saveAllocation } from '@/api/allocation'
+import { distributePlan, getAllocation } from '@/api/allocation'
 import { ApiError } from '@/utils/request'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { enumLabel } from '@/utils/enumLabels'
-import { formatDiff, formatNumber } from '@/utils/format'
 import { formatTargetValue, sumYearTargets } from '@/utils/indicator'
 import {
   canAssignNewB,
-  computeYearSummary,
-  isSummableCaliber,
-  isSummaryBalanced,
-  percentToDisplay,
-  percentToStore,
+  isPendingAllocationRow,
   rowBooleanPlanYear,
   rowHasTarget,
-  rowsMissingOwner,
   rowTotalTarget,
 } from '@/utils/allocation'
-import type { MatrixRow, MatrixTargets } from '@/utils/allocation'
-import type { Allocation, SaveAllocationRequest } from '@/types/allocation'
+import type { AllocationEditorState } from '@/utils/allocation'
+import type { Allocation } from '@/types/allocation'
 import type { PlanDetail } from '@/types/plan'
 import type { IndicatorTreeNode, YearTarget } from '@/types/indicator'
-import type { IndicatorLevel, IndicatorStatus, StatCaliber } from '@/types/enums'
+import type { IndicatorStatus, StatCaliber } from '@/types/enums'
 import type { UserOption } from '@/types/user'
 
-/** 待分解指标（仅 A+） */
+/** 待分解的可量化 A；children 仅用于识别历史分解数据。 */
 interface AllocatableItem {
   id: string
   code: string
   name: string
-  level: IndicatorLevel
-  parentCode: string | null
   status: IndicatorStatus
   statCaliber: StatCaliber
   unitLabel: string | null
   totalTarget: number | null
   yearTargets: YearTarget[]
+  isLegacy: boolean
+  legacyChildIds: string[]
 }
 
+const props = withDefaults(defineProps<{
+  embedded?: boolean
+  planId?: string
+  initialIndicatorId?: string
+}>(), {
+  embedded: false,
+  planId: '',
+  initialIndicatorId: '',
+})
+const emit = defineEmits<{
+  changed: [indicatorId: string]
+}>()
+
 const route = useRoute()
-
-const planId = computed(() => (route.params.planId as string) || (route.query.planId as string) || '')
-
+const router = useRouter()
+const planId = computed(() => props.planId || (route.params.planId as string) || (route.query.planId as string) || '')
 const loading = ref(false)
-const matrixLoading = ref(false)
 const plan = ref<PlanDetail | null>(null)
 const tree = ref<IndicatorTreeNode[]>([])
 const userOptions = ref<UserOption[]>([])
 const unitOptions = ref<OrgUnit[]>([])
 const unitFallback = ref(false)
-
 const keyword = ref('')
 const selectedId = ref('')
 
 const years = computed<number[]>(() => {
   if (!plan.value) return []
   const list: number[] = []
-  for (let year = plan.value.startYear; year <= plan.value.endYear; year += 1) {
-    list.push(year)
-  }
+  for (let year = plan.value.startYear; year <= plan.value.endYear; year += 1) list.push(year)
   return list
 })
 
-const allocatable = computed<AllocatableItem[]>(() => {
-  const list: AllocatableItem[] = []
-  for (const node of tree.value) {
-    if (node.level !== 'A' || !node.isQuantifiable) continue
-    for (const child of node.children ?? []) {
-      const item = pickAllocatable(child, node.code)
-      if (item) list.push(item)
-    }
-  }
-  return list
-})
-
-function pickAllocatable(node: IndicatorTreeNode, parentCode: string | null): AllocatableItem | null {
-  if (node.level !== 'A_PLUS' || !node.statCaliber) return null
-  return {
-    id: node.id,
-    code: node.code,
-    name: node.name,
-    level: node.level,
-    parentCode,
-    status: node.status,
-    statCaliber: node.statCaliber,
-    unitLabel: node.unitLabel,
-    totalTarget: node.totalTarget,
-    yearTargets: node.yearTargets ?? [],
-  }
-}
+const allocatable = computed<AllocatableItem[]>(() =>
+  tree.value.flatMap((node) => {
+    if (node.level !== 'A' || !node.isQuantifiable || !node.statCaliber) return []
+    return [{
+      id: node.id,
+      code: node.code,
+      name: node.name,
+      status: node.status,
+      statCaliber: node.statCaliber,
+      unitLabel: node.unitLabel,
+      totalTarget: node.totalTarget,
+      yearTargets: node.yearTargets ?? [],
+      isLegacy: node.children.length > 0,
+      legacyChildIds: node.children.map((child) => child.id),
+    }]
+  }),
+)
 
 const filteredAllocatable = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -115,113 +107,58 @@ const filteredAllocatable = computed(() => {
 const current = computed<AllocatableItem | null>(
   () => allocatable.value.find((item) => item.id === selectedId.value) ?? null,
 )
-
-const summable = computed(() => (current.value ? isSummableCaliber(current.value.statCaliber) : true))
-const isBoolean = computed(() => current.value?.statCaliber === 'BOOLEAN')
-const isPercent = computed(
-  () => current.value?.statCaliber === 'RATIO' || current.value?.statCaliber === 'DIRECT_PERCENT',
+const currentReadOnly = computed(() =>
+  current.value?.isLegacy === true || plan.value?.status === 'ARCHIVED',
 )
 
-/** A+ 各年度目标 */
-const indicatorTargets = computed<MatrixTargets>(() => {
-  const map: MatrixTargets = {}
-  for (const item of current.value?.yearTargets ?? []) {
-    map[item.year] = typeof item.target === 'number' ? item.target : null
-  }
-  return map
+const editorRef = ref<InstanceType<typeof AllocationMatrixEditor>>()
+const editorState = ref<AllocationEditorState>({
+  indicatorId: '',
+  rows: [],
+  dirty: false,
+  balanced: true,
+  version: 0,
+  serverBalanced: null,
+  loading: false,
+  saving: false,
+  canDistribute: false,
+  distributeBlockReasons: [],
+  hasAnyTarget: false,
+  missingOwners: [],
+  ineligibleTargetRows: [],
+  summary: [],
+  allocatedFiveYear: 0,
+  fiveYearDiff: null,
+  lastSavedAt: null,
 })
 
-// ---------- 矩阵编辑态 ----------
-const rows = ref<MatrixRow[]>([])
-const allocationVersion = ref(0)
-const serverBalanced = ref<boolean | null>(null)
-const dirty = ref(false)
-const lastSavedAt = ref<string | null>(null)
-const editedCells = ref<Set<string>>(new Set())
-/** 最近一次加载 / 保存的服务端数据，重置用 */
-const lastAllocation = ref<Allocation | null>(null)
-
-const readOnly = computed(
-  () => current.value?.status === 'DISTRIBUTED' || plan.value?.status === 'ARCHIVED',
-)
-
-function rowReadOnly(row: MatrixRow): boolean {
-  return readOnly.value || row.isHistorical
+function onEditorState(state: AllocationEditorState): void {
+  editorState.value = state
 }
 
-const liveSummary = computed(() =>
-  computeYearSummary(rows.value, years.value, indicatorTargets.value),
-)
-const balanced = computed(() =>
-  summable.value ? isSummaryBalanced(liveSummary.value) : true,
-)
-const allocatedFiveYear = computed(() =>
-  rows.value.reduce((sum, row) => sum + rowTotalTarget(row.targets), 0),
-)
-const fiveYearDiff = computed(() =>
-  current.value?.totalTarget !== null && current.value?.totalTarget !== undefined
-    ? allocatedFiveYear.value - current.value.totalTarget
-    : null,
-)
-const missingOwners = computed(() => rowsMissingOwner(rows.value))
-const hasAnyTarget = computed(() =>
-  rows.value.some((row) => !row.isHistorical && rowHasTarget(row.targets)),
-)
-const assignableUnitIds = computed(
-  () => new Set(unitOptions.value.filter((unit) => canAssignNewB(unit)).map((unit) => unit.id)),
-)
-const ineligibleTargetRows = computed(() =>
-  rows.value.filter(
-    (row) =>
-      !row.isHistorical && rowHasTarget(row.targets) && !assignableUnitIds.value.has(row.unitId),
-  ),
-)
+function cacheAllocation(allocation: Allocation): void {
+  allocationCache.set(allocation.indicatorId, allocation)
+  balanceMap.value = { ...balanceMap.value, [allocation.indicatorId]: allocation.isBalanced }
+}
 
-const distributeBlockReasons = computed<string[]>(() => {
-  const reasons: string[] = []
-  if (!hasAnyTarget.value) reasons.push('尚未为任何执行单元分解目标')
-  if (ineligibleTargetRows.value.length > 0) {
-    reasons.push(
-      `以下单元已停用或不允许承接新 B：${ineligibleTargetRows.value.map((row) => row.unitCode).join('、')}`,
-    )
-  }
-  if (summable.value && !balanced.value) {
-    const badYears = liveSummary.value
-      .filter((item) => item.diff !== null && item.diff !== 0)
-      .map((item) => `${item.year} 年（差值 ${formatDiff(item.diff)}）`)
-    reasons.push(`合计与指标目标不一致：${badYears.join('、')}`)
-  }
-  if (missingOwners.value.length > 0) {
-    reasons.push(`缺少学院负责人：${missingOwners.value.map((row) => row.unitCode).join('、')}`)
-  }
-  return reasons
-})
+function onAllocationSaved(allocation: Allocation): void {
+  cacheAllocation(allocation)
+  emit('changed', allocation.indicatorId)
+}
 
-const canDistribute = computed(
-  () => !readOnly.value && distributeBlockReasons.value.length === 0,
+const canDistribute = computed(() =>
+  current.value !== null
+    && !currentReadOnly.value
+    && editorState.value.indicatorId === selectedId.value
+    && editorState.value.canDistribute,
 )
-
-/** 下发按钮最终可用性与提示（有未保存修改时须先存草稿） */
-const distributeEnabled = computed(() => canDistribute.value && !dirty.value)
+const distributeEnabled = computed(() => canDistribute.value && !editorState.value.dirty)
 const distributeTooltip = computed(() =>
-  dirty.value ? '有未保存的修改，请先存草稿' : distributeBlockReasons.value.join('；'),
+  editorState.value.dirty
+    ? '有未保存的修改，请先存草稿'
+    : editorState.value.distributeBlockReasons.join('；'),
 )
 
-const unbalancedYears = computed(() => {
-  if (!summable.value) return new Set<number>()
-  return new Set(
-    liveSummary.value
-      .filter((item) => item.diff !== null && item.diff !== 0)
-      .map((item) => item.year),
-  )
-})
-
-/** 差值 ≠ 0 的年度明细（顶部 alert 可点击定位用） */
-const unbalancedItems = computed(() =>
-  liveSummary.value.filter((item) => item.diff !== null && item.diff !== 0),
-)
-
-/** 左侧列表的平衡状态：选择时按需检查；全量状态仅在主动批量下发时扫描 */
 const balanceMap = ref<Record<string, boolean>>({})
 const balanceLoaded = ref(false)
 const balanceScanning = ref(false)
@@ -230,7 +167,7 @@ const allocationCache = new Map<string, Allocation>()
 async function loadBalanceStates(): Promise<void> {
   balanceScanning.value = true
   try {
-    const pending = allocatable.value.filter((item) => item.status !== 'DISTRIBUTED')
+    const pending = allocatable.value.filter((item) => !item.isLegacy)
     const results = await Promise.all(
       pending.map((item) =>
         getAllocation(item.id)
@@ -252,42 +189,8 @@ async function loadBalanceStates(): Promise<void> {
   }
 }
 
-function normalizeTarget(
-  value: number | boolean | null,
-  booleanCaliber: boolean,
-): number | boolean | null {
-  if (booleanCaliber) return value === true || value === 1 ? true : null
-  return typeof value === 'number' ? value : null
-}
-
-function rebuildRows(allocation: Allocation): void {
-  const booleanCaliber = current.value?.statCaliber === 'BOOLEAN'
-  rows.value = (allocation.rows ?? []).map((row) => {
-    const targets: MatrixTargets = {}
-    for (const year of years.value) {
-      const found = row.yearTargets?.find((item) => item.year === year)
-      targets[year] = found ? normalizeTarget(found.target, booleanCaliber) : null
-    }
-    return {
-      unitId: row.unit.id,
-      unitCode: row.unit.code,
-      unitName: row.unit.name,
-      ownerId: row.owner?.id ?? null,
-      isHistorical: row.isHistorical,
-      targets,
-    }
-  })
-  allocationVersion.value = allocation.version
-  serverBalanced.value = allocation.isBalanced
-  lastAllocation.value = allocation
-  allocationCache.set(allocation.indicatorId, allocation)
-  balanceMap.value = { ...balanceMap.value, [allocation.indicatorId]: allocation.isBalanced }
-  dirty.value = false
-  editedCells.value = new Set()
-}
-
 async function selectIndicator(id: string, force = false): Promise<void> {
-  if (!force && dirty.value) {
+  if (!force && editorState.value.dirty) {
     try {
       await ElMessageBox.confirm('当前矩阵有未保存的修改，切换后将丢失。确认切换？', '未保存的修改', {
         confirmButtonText: '放弃修改并切换',
@@ -299,210 +202,25 @@ async function selectIndicator(id: string, force = false): Promise<void> {
     }
   }
   selectedId.value = id
-  matrixLoading.value = true
-  try {
-    const cached = force ? null : allocationCache.get(id)
-    const allocation = cached ?? await getAllocation(id)
-    rebuildRows(allocation)
-  } finally {
-    matrixLoading.value = false
-  }
+  await nextTick()
+  const cached = force ? undefined : allocationCache.get(id)
+  await editorRef.value?.load(id, cached)
 }
 
-function markDirty(row: MatrixRow, year: number): void {
-  if (rowReadOnly(row)) return
-  dirty.value = true
-  const next = new Set(editedCells.value)
-  next.add(`${row.unitId}-${year}`)
-  editedCells.value = next
-}
-
-function setNumberCell(row: MatrixRow, year: number, value: number | undefined): void {
-  if (rowReadOnly(row)) return
-  row.targets[year] = value ?? null
-  markDirty(row, year)
-}
-
-function setPercentCell(row: MatrixRow, year: number, value: number | undefined): void {
-  if (rowReadOnly(row)) return
-  row.targets[year] = percentToStore(value)
-  markDirty(row, year)
-}
-
-function toggleBooleanCell(row: MatrixRow, year: number, checked: boolean): void {
-  if (rowReadOnly(row)) return
-  for (const y of years.value) {
-    row.targets[y] = null
-  }
-  row.targets[year] = checked ? true : null
-  markDirty(row, year)
-}
-
-function numberCellValue(row: MatrixRow, year: number): number | undefined {
-  const value = row.targets[year]
-  return typeof value === 'number' ? value : undefined
-}
-
-function copyFromPrevYear(row: MatrixRow): void {
-  if (rowReadOnly(row)) return
-  const list = years.value
-  for (let i = list.length - 1; i > 0; i -= 1) {
-    row.targets[list[i]] = row.targets[list[i - 1]]
-  }
-  markAllRowDirty(row)
-}
-
-function clearRow(row: MatrixRow): void {
-  if (rowReadOnly(row)) return
-  for (const year of years.value) {
-    row.targets[year] = null
-  }
-  markAllRowDirty(row)
-}
-
-function markAllRowDirty(row: MatrixRow): void {
-  if (rowReadOnly(row)) return
-  dirty.value = true
-  const next = new Set(editedCells.value)
-  for (const year of years.value) {
-    next.add(`${row.unitId}-${year}`)
-  }
-  editedCells.value = next
-}
-
-const addRowUnitId = ref('')
-
-const addableUnits = computed(() => {
-  const used = new Set(rows.value.map((row) => row.unitId))
-  return unitOptions.value.filter((unit) => canAssignNewB(unit) && !used.has(unit.id))
-})
-
-function addRow(): void {
-  if (readOnly.value) return
-  const unit = addableUnits.value.find((item) => item.id === addRowUnitId.value)
-  if (!unit || !canAssignNewB(unit)) return
-  const targets: MatrixTargets = {}
-  for (const year of years.value) {
-    targets[year] = null
-  }
-  rows.value.push({
-    unitId: unit.id,
-    unitCode: unit.code,
-    unitName: unit.name,
-    ownerId: null,
-    isHistorical: false,
-    targets,
-  })
-  dirty.value = true
-  addRowUnitId.value = ''
-}
-
-function removeRow(index: number): void {
-  const row = rows.value[index]
-  if (!row || rowReadOnly(row)) return
-  rows.value.splice(index, 1)
-  dirty.value = true
-}
-
-// ---------- 保存 / 重置 / 下发 ----------
-const saving = ref(false)
-
-function buildSaveRequest(): SaveAllocationRequest {
-  return {
-    version: allocationVersion.value,
-    rows: rows.value.map((row) => ({
-      unitId: row.unitId,
-      ownerId: row.ownerId,
-      yearTargets: years.value.map((year) => ({ year, target: row.targets[year] ?? null })),
-    })),
-  }
-}
-
-function applySavedAllocation(allocation: Allocation): void {
-  rebuildRows(allocation)
-  lastSavedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
-  ElMessage.success(
-    allocation.isBalanced ? '已保存，各年度合计与指标目标一致' : '已保存草稿（合计与指标目标不一致）',
-  )
-}
-
-/** 保存矩阵（silent：10005 并发冲突由本页自行处理，见 UI 规范 10.1-7） */
-async function handleSave(): Promise<void> {
-  if (!current.value || readOnly.value) return
-  saving.value = true
-  try {
-    const allocation = await saveAllocation(current.value.id, buildSaveRequest(), true)
-    applySavedAllocation(allocation)
-  } catch (error) {
-    if (error instanceof ApiError && error.code === 10005) {
-      handleSaveConflict()
-    } else if (error instanceof ApiError) {
-      ElMessage.error(error.message || '保存失败')
-    } else {
-      ElMessage.error('网络异常，请稍后重试')
-    }
-  } finally {
-    saving.value = false
-  }
-}
-
-/** 10005：提供【查看最新】与【保留我的修改并覆盖】（重新拉取 version 后再提交） */
-function handleSaveConflict(): void {
-  ElMessageBox.confirm('该矩阵已被他人修改。可以查看最新数据，或保留我的修改并覆盖。', '保存冲突（10005）', {
-    confirmButtonText: '保留我的修改并覆盖',
-    cancelButtonText: '查看最新',
-    type: 'warning',
-    distinguishCancelAndClose: true,
-  })
-    .then(async () => {
-      if (!current.value) return
-      saving.value = true
-      try {
-        const latest = await getAllocation(current.value.id)
-        allocationVersion.value = latest.version
-        const allocation = await saveAllocation(current.value.id, buildSaveRequest(), true)
-        applySavedAllocation(allocation)
-      } catch (error) {
-        if (error instanceof ApiError && error.code === 10005) {
-          ElMessage.error('矩阵仍被他人修改，请稍后再试')
-        } else if (error instanceof ApiError) {
-          ElMessage.error(error.message || '覆盖保存失败')
-        }
-      } finally {
-        saving.value = false
-      }
-    })
-    .catch((action: string) => {
-      if (action === 'cancel') {
-        selectIndicator(selectedId.value, true)
-      }
-    })
-}
-
-function handleReset(): void {
-  if (lastAllocation.value) {
-    rebuildRows(lastAllocation.value)
-  }
-}
-
-// ---------- 下发预览 ----------
 const previewVisible = ref(false)
 const distributing = ref(false)
-
-/** 幂等 Key：同一次操作成功后重新生成，失败重试沿用旧 Key（UI 规范 10.4） */
 const distributeKey = ref(newIdempotencyKey())
 const batchDistributeKey = ref(newIdempotencyKey())
-
+const assignableUnitIds = computed(() =>
+  new Set(unitOptions.value.filter((unit) => canAssignNewB(unit)).map((unit) => unit.id)),
+)
 const previewRows = computed<PreviewRow[]>(() => {
   if (!current.value) return []
   const ownerNameOf = (id: string | null) =>
     id ? (userOptions.value.find((user) => user.id === id)?.name ?? null) : null
-  return rows.value
-    .filter(
-      (row) =>
-        !row.isHistorical &&
-        assignableUnitIds.value.has(row.unitId) &&
-        rowHasTarget(row.targets),
+  return editorState.value.rows
+    .filter((row) =>
+      isPendingAllocationRow(row) && assignableUnitIds.value.has(row.unitId) && rowHasTarget(row.targets),
     )
     .map((row) => ({
       code: `${current.value!.code}-${row.unitCode}`,
@@ -515,24 +233,18 @@ const previewRows = computed<PreviewRow[]>(() => {
 })
 
 function openPreview(): void {
-  if (!canDistribute.value) return
+  if (!canDistribute.value || editorState.value.dirty) return
   previewVisible.value = true
 }
 
-/** 下发失败的业务错误弹窗（50001 / 50002 / 50005） */
 function showDistributeError(error: unknown): void {
-  if (error instanceof ApiError && (error.code === 50001 || error.code === 50002)) {
+  if (error instanceof ApiError && [10001, 40002, 40003, 50001, 50002].includes(error.code)) {
     const lines = error.fieldErrors.map((item) => item.message)
     ElMessageBox.alert(
       lines.length > 0 ? lines.join('\n') : error.message,
       `${error.message}（${error.code}）`,
       { confirmButtonText: '返回修改', type: 'error' },
     )
-  } else if (error instanceof ApiError && error.code === 50005) {
-    ElMessageBox.alert('指标体系尚未定稿，请先在指标总表完成定稿（50005）', '不能下发', {
-      confirmButtonText: '我知道了',
-      type: 'error',
-    })
   }
 }
 
@@ -546,10 +258,11 @@ async function handleDistribute(): Promise<void> {
       distributeKey.value,
     )
     distributeKey.value = newIdempotencyKey()
-    ElMessage.success(`「${current.value.code}」已正式交给学院，B 任务已生成并通知负责人`)
+    ElMessage.success(`「${current.value.code}」已正式交给学院，学院任务已生成并通知负责人`)
     previewVisible.value = false
     await loadTree()
     await selectIndicator(selectedId.value, true)
+    emit('changed', current.value.id)
   } catch (error) {
     showDistributeError(error)
   } finally {
@@ -557,14 +270,15 @@ async function handleDistribute(): Promise<void> {
   }
 }
 
-// ---------- 批量下发 ----------
 const batchDistributing = ref(false)
-
-/** 已平衡且未下发的指标（页头批量下发的候选清单） */
 const balancedPending = computed(() =>
-  allocatable.value.filter(
-    (item) => item.status !== 'DISTRIBUTED' && balanceMap.value[item.id] === true,
-  ),
+  allocatable.value.filter((item) => {
+    const allocation = allocationCache.get(item.id)
+    return !item.isLegacy
+      && balanceMap.value[item.id] === true
+      && allocation?.rows.some((row) =>
+        !row.isHistorical && row.taskStatus === 'PENDING_DISTRIBUTION') === true
+  }),
 )
 
 async function handleBatchDistribute(): Promise<void> {
@@ -577,9 +291,7 @@ async function handleBatchDistribute(): Promise<void> {
   }
   try {
     await ElMessageBox.confirm(
-      `将把以下 ${ready.length} 个已平衡的指标正式交给学院：${ready
-        .map((item) => item.code)
-        .join('、')}。确认后生成 B 任务并通知学院负责人，任务编号与负责人不可修改。`,
+      `将把以下 ${ready.length} 个已平衡的指标正式交给学院：${ready.map((item) => item.code).join('、')}。确认后生成 学院任务并通知学院负责人，任务编号与负责人不可修改。`,
       '批量正式交给学院',
       { confirmButtonText: '确认交给学院', cancelButtonText: '取消' },
     )
@@ -596,95 +308,13 @@ async function handleBatchDistribute(): Promise<void> {
     batchDistributeKey.value = newIdempotencyKey()
     ElMessage.success(`已将 ${ready.length} 个指标正式交给学院`)
     await loadTree()
-    if (selectedId.value) {
-      await selectIndicator(selectedId.value, true)
-    }
+    if (selectedId.value) await selectIndicator(selectedId.value, true)
+    if (ready[0]) emit('changed', ready[0].id)
   } catch (error) {
-    // 失败重试沿用旧 batchDistributeKey
     showDistributeError(error)
   } finally {
     batchDistributing.value = false
   }
-}
-
-// ---------- 表格展示 ----------
-function cellClassName({ row, columnIndex }: { row: MatrixRow; columnIndex: number }): string {
-  const yearIdx = columnIndex - 2
-  if (yearIdx < 0 || yearIdx >= years.value.length) return ''
-  const year = years.value[yearIdx]
-  const classes: string[] = []
-  if (unbalancedYears.value.has(year)) classes.push('cell-unbalanced')
-  if (editedCells.value.has(`${row.unitId}-${year}`)) classes.push('cell-edited')
-  return classes.join(' ')
-}
-
-function rowClassName({ row }: { row: MatrixRow }): string {
-  return rowHasTarget(row.targets) && !row.ownerId ? 'row-missing-owner' : ''
-}
-
-function yearHeaderClass(year: number): string {
-  const base = `year-col-${year}`
-  return unbalancedYears.value.has(year) ? `${base} col-unbalanced` : base
-}
-
-/** 顶部 alert 点击年份：横向滚动到该年度列并短暂高亮（UI 规范 10.1-3） */
-function locateYear(year: number): void {
-  const selector = window.innerWidth <= 768
-    ? `.matrix-card .mobile-year-col-${year}`
-    : `.matrix-card .year-col-${year}`
-  const el = document.querySelector(selector)
-  if (!(el instanceof HTMLElement)) return
-  el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
-  el.classList.add('col-highlight')
-  window.setTimeout(() => el.classList.remove('col-highlight'), 1600)
-}
-
-interface SummaryColumn {
-  property?: string
-}
-
-function summaryMethod({ columns }: { columns: SummaryColumn[] }): (string | VNode)[][] {
-  const blank = ''
-  const totalRow: (string | VNode)[] = []
-  const targetRow: (string | VNode)[] = []
-  const diffRow: (string | VNode)[] = []
-  const caliber = current.value?.statCaliber ?? 'INCREMENT'
-  const yearTotal = sumYearTargets(current.value?.yearTargets)
-  columns.forEach((column, index) => {
-    const yearIdx = index - 2
-    if (index === 0) {
-      totalRow.push('合计')
-      targetRow.push(`${current.value?.level === 'A_PLUS' ? 'A+' : 'A'} 目标`)
-      diffRow.push('差值')
-      return
-    }
-    if (column.property === '__owner__' || column.property === '__actions__') {
-      totalRow.push(blank)
-      targetRow.push(blank)
-      diffRow.push(blank)
-      return
-    }
-    if (column.property === '__five__') {
-      totalRow.push(formatNumber(allocatedFiveYear.value))
-      targetRow.push(formatTargetValue(current.value?.totalTarget ?? yearTotal, caliber))
-      diffRow.push(diffCell(fiveYearDiff.value))
-      return
-    }
-    const year = years.value[yearIdx]
-    const item = liveSummary.value.find((entry) => entry.year === year)
-    totalRow.push(formatNumber(item?.allocatedTarget ?? null))
-    targetRow.push(formatTargetValue(item?.indicatorTarget ?? null, caliber))
-    diffRow.push(diffCell(item?.diff ?? null))
-  })
-  return [totalRow, targetRow, diffRow]
-}
-
-function diffCell(diff: number | null): VNode {
-  return h(
-    'span',
-    { class: diff === null ? 'diff-na' : diff === 0 ? 'diff-ok' : 'diff-bad' },
-    formatDiff(diff),
-  )
 }
 
 async function loadTree(): Promise<void> {
@@ -701,19 +331,16 @@ async function loadAll(): Promise<void> {
   try {
     const [planDetail] = await Promise.all([getPlan(planId.value), loadTree()])
     plan.value = planDetail
-    const queryId = route.query.indicatorId as string | undefined
-    const first = allocatable.value.find((item) => item.id === queryId) ?? allocatable.value[0]
-    if (first) {
-      await selectIndicator(first.id, true)
-    }
+    const queryId = props.initialIndicatorId || route.query.indicatorId as string | undefined
+    const first = allocatable.value.find((item) => item.id === queryId)
+      ?? allocatable.value.find((item) => queryId !== undefined && item.legacyChildIds.includes(queryId))
+      ?? allocatable.value[0]
+    if (first) await selectIndicator(first.id, true)
   } finally {
     loading.value = false
   }
 }
 
-const router = useRouter()
-
-/** 无计划上下文（菜单直链 /allocation）时自动进入当前执行中的计划 */
 async function redirectToActivePlan(): Promise<void> {
   try {
     const plans = await listPlans()
@@ -724,7 +351,6 @@ async function redirectToActivePlan(): Promise<void> {
   }
 }
 
-// planId 驱动加载：组件可能被复用（直链跳转后 onMounted 不再触发），用 watch 保证有上下文即加载
 watch(planId, (id) => {
   if (id) loadAll()
 }, { immediate: true })
@@ -734,49 +360,44 @@ onMounted(() => {
     redirectToActivePlan()
     return
   }
-  getUserOptions()
-    .then((list) => {
-      userOptions.value = list
-    })
-    .catch(() => undefined)
-  listOrgUnits()
-    .then((list) => {
-      unitOptions.value = list
-    })
-    .catch(() => {
-      unitOptions.value = []
-      unitFallback.value = true
-    })
+  getUserOptions().then((list) => {
+    userOptions.value = list
+  }).catch(() => undefined)
+  listOrgUnits().then((list) => {
+    unitOptions.value = list
+  }).catch(() => {
+    unitOptions.value = []
+    unitFallback.value = true
+  })
 })
 </script>
 
 <template>
-  <el-empty v-if="!planId" description="请先从首页选择一个计划">
-    <el-button type="primary" @click="$router.push('/plans')">返回计划列表</el-button>
-  </el-empty>
+  <BackButton v-if="!embedded" />
+  <el-empty v-if="!planId" description="请先从首页选择一个计划" />
 
-  <div v-else v-loading="loading" class="allocation-page">
+  <div v-else v-loading="loading" class="allocation-page" :class="{ 'is-embedded': embedded }">
     <div class="page-header">
       <div>
-        <h1 class="page-title">分解下发</h1>
+        <h1 v-if="!embedded" class="page-title">任务分解</h1>
         <p class="page-subtitle">{{ plan?.name ?? '' }}</p>
       </div>
-      <div class="header-actions">
-        <el-button
-          :loading="batchDistributing || balanceScanning"
-          :disabled="plan?.status === 'ARCHIVED'"
-          @click="handleBatchDistribute"
-        >
-          批量正式交给学院
-        </el-button>
-        <el-tooltip :disabled="distributeEnabled" :content="distributeTooltip" placement="top">
-          <span>
-            <el-button type="primary" :disabled="!distributeEnabled" @click="openPreview">
-              正式交给学院
-            </el-button>
-          </span>
-        </el-tooltip>
-      </div>
+    </div>
+    <div class="app-action-row header-actions">
+      <el-tooltip :disabled="distributeEnabled" :content="distributeTooltip" placement="top">
+        <span>
+          <el-button type="primary" :disabled="!distributeEnabled" @click="openPreview">
+            正式交给学院
+          </el-button>
+        </span>
+      </el-tooltip>
+      <el-button
+        :loading="batchDistributing || balanceScanning"
+        :disabled="plan?.status === 'ARCHIVED'"
+        @click="handleBatchDistribute"
+      >
+        批量正式交给学院
+      </el-button>
     </div>
 
     <el-alert
@@ -803,11 +424,7 @@ onMounted(() => {
               <el-tooltip v-if="item.status === 'DISTRIBUTED'" content="已下发" placement="top">
                 <el-icon class="item-icon ok"><CircleCheck /></el-icon>
               </el-tooltip>
-              <el-tooltip
-                v-else-if="balanceMap[item.id] === true"
-                content="已平衡，可下发"
-                placement="top"
-              >
+              <el-tooltip v-else-if="balanceMap[item.id] === true" content="已平衡，可下发" placement="top">
                 <el-icon class="item-icon balanced"><CircleCheck /></el-icon>
               </el-tooltip>
               <el-tooltip v-else-if="balanceMap[item.id] === false" content="未平衡" placement="top">
@@ -828,10 +445,10 @@ onMounted(() => {
         </el-scrollbar>
       </el-card>
 
-      <div v-if="current" v-loading="matrixLoading" class="matrix-panel">
+      <div v-if="current" class="matrix-panel">
         <el-card shadow="never" class="info-card">
           <div class="indicator-info">
-            <StatusTag kind="IndicatorLevel" :value="current.level" />
+            <StatusTag kind="IndicatorLevel" value="A" />
             <span class="mono info-code">{{ current.code }}</span>
             <span class="info-name">{{ current.name }}</span>
             <span class="info-meta">
@@ -843,353 +460,21 @@ onMounted(() => {
           </div>
         </el-card>
 
-        <el-alert
-          v-if="readOnly && current.status === 'DISTRIBUTED'"
-          type="info"
-          :closable="false"
-          class="page-alert"
-          title="该指标已下发，矩阵只读；如需调整请发起延期 / 转移申请"
+        <AllocationMatrixEditor
+          ref="editorRef"
+          :years="years"
+          :stat-caliber="current.statCaliber"
+          :year-targets="current.yearTargets"
+          :total-target="current.totalTarget"
+          :user-options="userOptions"
+          :unit-options="unitOptions"
+          :legacy="current.isLegacy"
+          :distributed="current.status === 'DISTRIBUTED'"
+          :archived="plan?.status === 'ARCHIVED'"
+          @state-change="onEditorState"
+          @loaded="cacheAllocation"
+          @saved="onAllocationSaved"
         />
-        <el-alert
-          v-else-if="!summable"
-          type="info"
-          :closable="false"
-          class="page-alert"
-          :title="isBoolean
-            ? '是否型指标不做目标求和校验，每行勾选计划完成年份'
-            : '占比 / 直填百分比型指标不做目标求和校验，完成值按 Σ分子 ÷ Σ分母 汇总'"
-        />
-        <template v-else>
-          <el-alert
-            v-if="canDistribute"
-            type="success"
-            :closable="false"
-            class="page-alert"
-            title="各年度合计与指标目标一致，可以下发"
-          />
-          <el-alert
-            v-else
-            type="error"
-            :closable="false"
-            class="page-alert"
-          >
-            <template #title>
-              <span v-if="!hasAnyTarget">尚未为任何执行单元分解目标；</span>
-              <span v-if="ineligibleTargetRows.length > 0">
-                以下单元已停用或不允许承接新 B：{{ ineligibleTargetRows.map((row) => row.unitCode).join('、') }}；
-              </span>
-              <template v-if="unbalancedItems.length > 0">
-                合计与指标目标不一致（点击年份定位）：
-                <template v-for="(item, index) in unbalancedItems" :key="item.year">
-                  <a class="year-link" @click="locateYear(item.year)">
-                    {{ item.year }} 年（差值 {{ formatDiff(item.diff) }}）
-                  </a>
-                  <span>{{ index < unbalancedItems.length - 1 ? '、' : '；' }}</span>
-                </template>
-              </template>
-              <span v-if="missingOwners.length > 0">
-                缺少学院负责人：{{ missingOwners.map((row) => row.unitCode).join('、') }}
-              </span>
-            </template>
-          </el-alert>
-        </template>
-
-        <el-card shadow="never" class="matrix-card">
-          <ResponsiveRecordView class="matrix-records">
-            <template #table>
-              <el-table
-            :data="rows"
-            border
-            size="small"
-            :show-summary="summable"
-            :summary-method="summaryMethod"
-            :cell-class-name="cellClassName"
-            :row-class-name="rowClassName"
-          >
-            <el-table-column label="执行单元" min-width="180" fixed="left">
-              <template #default="{ row }">
-                <span class="mono">{{ row.unitCode }}</span>
-                {{ row.unitName }}
-                <el-tag v-if="row.isHistorical" type="info" size="small" effect="plain">历史只读</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="学院负责人" width="150" prop="__owner__">
-              <template #default="{ row }">
-                <el-select
-                  v-if="!rowReadOnly(row)"
-                  v-model="row.ownerId"
-                  filterable
-                  clearable
-                  placeholder="选择负责人"
-                  :class="{ 'owner-missing': rowHasTarget(row.targets) && !row.ownerId }"
-                  @change="markAllRowDirty(row)"
-                >
-                  <el-option
-                    v-for="user in userOptions"
-                    :key="user.id"
-                    :label="`${user.name}（${user.username}）`"
-                    :value="user.id"
-                  />
-                </el-select>
-                <span v-else>
-                  {{ userOptions.find((user) => user.id === row.ownerId)?.name ?? '—' }}
-                </span>
-              </template>
-            </el-table-column>
-            <el-table-column
-              v-for="year in years"
-              :key="year"
-              :label="String(year)"
-              :label-class-name="yearHeaderClass(year)"
-              width="110"
-              align="right"
-            >
-              <template #header>
-                <span>{{ year }}<template v-if="unbalancedYears.has(year)"> ⚠</template></span>
-              </template>
-              <template #default="{ row }">
-                <template v-if="rowReadOnly(row)">
-                  {{ formatTargetValue(row.targets[year] ?? null, current.statCaliber) }}
-                </template>
-                <el-checkbox
-                  v-else-if="isBoolean"
-                  :model-value="row.targets[year] === true"
-                  @update:model-value="(checked: string | number | boolean) => toggleBooleanCell(row, year, checked === true)"
-                />
-                <el-input-number
-                  v-else-if="isPercent"
-                  :model-value="percentToDisplay(row.targets[year] as number | null)"
-                  :precision="1"
-                  :min="0"
-                  :max="999.9"
-                  controls-position="right"
-                  class="cell-input"
-                  @update:model-value="(value: number | undefined) => setPercentCell(row, year, value)"
-                />
-                <el-input-number
-                  v-else
-                  :model-value="numberCellValue(row, year)"
-                  :precision="current.statCaliber === 'INCREMENT' ? 0 : undefined"
-                  :min="0"
-                  controls-position="right"
-                  class="cell-input"
-                  @update:model-value="(value: number | undefined) => setNumberCell(row, year, value)"
-                />
-              </template>
-            </el-table-column>
-            <el-table-column label="五年合计" width="100" align="right" prop="__five__">
-              <template #default="{ row }">
-                <template v-if="isBoolean">
-                  {{
-                    rowBooleanPlanYear(row.targets) === null
-                      ? '—'
-                      : `是（${rowBooleanPlanYear(row.targets)} 年）`
-                  }}
-                </template>
-                <template v-else>
-                  {{ formatTargetValue(rowTotalTarget(row.targets), current.statCaliber) }}
-                </template>
-              </template>
-            </el-table-column>
-            <el-table-column v-if="!readOnly" label="操作" width="120" fixed="right" align="center" prop="__actions__">
-              <template #default="{ row, $index }">
-                <template v-if="!rowReadOnly(row)">
-                  <el-button link type="primary" @click="copyFromPrevYear(row)">顺沿上年</el-button>
-                  <el-dropdown trigger="click">
-                    <el-button link type="primary">更多</el-button>
-                    <template #dropdown>
-                      <el-dropdown-menu>
-                        <el-dropdown-item @click="clearRow(row)">清空本行</el-dropdown-item>
-                        <el-dropdown-item class="danger-item" @click="removeRow($index)">
-                          <span class="danger-text">删除行</span>
-                        </el-dropdown-item>
-                      </el-dropdown-menu>
-                    </template>
-                  </el-dropdown>
-                </template>
-                <span v-else class="empty-text">历史只读</span>
-              </template>
-            </el-table-column>
-            <template #empty>
-              <el-empty :image-size="80" description="暂无分解行，请在下方新增执行单元" />
-            </template>
-              </el-table>
-            </template>
-            <template #cards>
-              <div class="responsive-card-list allocation-mobile-list">
-                <article
-                  v-for="(row, index) in rows"
-                  :key="row.unitId"
-                  class="responsive-card allocation-mobile-card"
-                  :class="{ 'missing-owner': rowHasTarget(row.targets) && !row.ownerId, 'is-historical': row.isHistorical }"
-                >
-                  <div class="responsive-card__header">
-                    <div class="responsive-card__title">
-                      <span class="mono">{{ row.unitCode }}</span> {{ row.unitName }}
-                    </div>
-                    <el-tag v-if="row.isHistorical" type="info" size="small" effect="plain">历史只读</el-tag>
-                  </div>
-
-                  <div class="mobile-owner-field">
-                    <label>学院负责人</label>
-                    <el-select
-                      v-if="!rowReadOnly(row)"
-                      v-model="row.ownerId"
-                      filterable
-                      clearable
-                      placeholder="选择负责人"
-                      :class="{ 'owner-missing': rowHasTarget(row.targets) && !row.ownerId }"
-                      @change="markAllRowDirty(row)"
-                    >
-                      <el-option
-                        v-for="user in userOptions"
-                        :key="user.id"
-                        :label="`${user.name}（${user.username}）`"
-                        :value="user.id"
-                      />
-                    </el-select>
-                    <strong v-else class="mobile-readonly-value">
-                      {{ userOptions.find((user) => user.id === row.ownerId)?.name ?? '—' }}
-                    </strong>
-                  </div>
-
-                  <div class="responsive-year-grid allocation-mobile-years">
-                    <div
-                      v-for="year in years"
-                      :key="year"
-                      class="mobile-target-field"
-                      :class="[`mobile-year-col-${year}`, {
-                        'is-unbalanced': unbalancedYears.has(year),
-                        'is-edited': editedCells.has(`${row.unitId}-${year}`),
-                      }]"
-                    >
-                      <label>
-                        {{ year }} 年<span v-if="unbalancedYears.has(year)" class="diff-bad"> ⚠</span>
-                      </label>
-                      <strong v-if="rowReadOnly(row)" class="mobile-readonly-value">
-                        {{ formatTargetValue(row.targets[year] ?? null, current.statCaliber) }}
-                      </strong>
-                      <el-checkbox
-                        v-else-if="isBoolean"
-                        :model-value="row.targets[year] === true"
-                        @update:model-value="(checked: string | number | boolean) => toggleBooleanCell(row, year, checked === true)"
-                      />
-                      <el-input-number
-                        v-else-if="isPercent"
-                        :model-value="percentToDisplay(row.targets[year] as number | null)"
-                        :precision="1"
-                        :min="0"
-                        :max="999.9"
-                        controls-position="right"
-                        class="mobile-cell-input"
-                        @update:model-value="(value: number | undefined) => setPercentCell(row, year, value)"
-                      />
-                      <el-input-number
-                        v-else
-                        :model-value="numberCellValue(row, year)"
-                        :precision="current.statCaliber === 'INCREMENT' ? 0 : undefined"
-                        :min="0"
-                        controls-position="right"
-                        class="mobile-cell-input"
-                        @update:model-value="(value: number | undefined) => setNumberCell(row, year, value)"
-                      />
-                    </div>
-                  </div>
-
-                  <div class="allocation-mobile-total">
-                    <span>五年目标</span>
-                    <strong v-if="isBoolean">
-                      {{ rowBooleanPlanYear(row.targets) === null ? '—' : `是（${rowBooleanPlanYear(row.targets)} 年）` }}
-                    </strong>
-                    <strong v-else>{{ formatTargetValue(rowTotalTarget(row.targets), current.statCaliber) }}</strong>
-                  </div>
-
-                  <div v-if="!rowReadOnly(row)" class="responsive-card__actions allocation-mobile-actions">
-                    <el-button type="primary" plain @click="copyFromPrevYear(row)">顺沿上年</el-button>
-                    <el-button @click="clearRow(row)">清空本行</el-button>
-                    <el-button type="danger" plain @click="removeRow(index)">删除行</el-button>
-                  </div>
-                  <div v-else class="mobile-readonly-note">
-                    {{ row.isHistorical ? '历史目标冻结，仅参与守恒' : '任务已下发，目标只读' }}
-                  </div>
-                </article>
-
-                <el-empty
-                  v-if="rows.length === 0"
-                  :image-size="80"
-                  description="暂无分解行，请在下方新增执行单元"
-                />
-
-                <div v-if="summable" class="responsive-card allocation-mobile-summary">
-                  <div class="responsive-card__title">逐年守恒核对</div>
-                  <div class="responsive-year-grid mobile-summary-grid">
-                    <div
-                      v-for="item in liveSummary"
-                      :key="item.year"
-                      class="mobile-summary-year"
-                      :class="item.diff === 0 || item.diff === null ? 'is-ok' : 'is-bad'"
-                    >
-                      <strong>{{ item.year }} 年</strong>
-                      <span>合计 {{ formatTargetValue(item.allocatedTarget, current.statCaliber) }}</span>
-                      <span>A+ 目标 {{ formatTargetValue(item.indicatorTarget, current.statCaliber) }}</span>
-                      <span :class="item.diff === 0 ? 'diff-ok' : item.diff === null ? 'diff-na' : 'diff-bad'">
-                        差值 {{ formatDiff(item.diff) }}
-                      </span>
-                    </div>
-                  </div>
-                  <div class="allocation-mobile-summary-total">
-                    <span>五年合计 {{ formatNumber(allocatedFiveYear) }}</span>
-                    <span>
-                      A+ 目标 {{ formatTargetValue(current.totalTarget ?? sumYearTargets(current.yearTargets), current.statCaliber) }}
-                    </span>
-                    <span :class="fiveYearDiff === 0 ? 'diff-ok' : fiveYearDiff === null ? 'diff-na' : 'diff-bad'">
-                      差值 {{ formatDiff(fiveYearDiff) }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </template>
-          </ResponsiveRecordView>
-
-          <div v-if="!readOnly" class="add-row-bar">
-            <el-select
-              v-model="addRowUnitId"
-              filterable
-              placeholder="选择执行单元新增一行"
-              style="width: 240px"
-              :disabled="addableUnits.length === 0"
-            >
-              <el-option
-                v-for="unit in addableUnits"
-                :key="unit.id"
-                :label="`${unit.code} ${unit.name}`"
-                :value="unit.id"
-              />
-            </el-select>
-            <el-button :disabled="!addRowUnitId" @click="addRow">添加行</el-button>
-          </div>
-        </el-card>
-
-        <div v-if="!readOnly" class="sticky-bar">
-          <span class="bar-status">
-            <template v-if="dirty">已修改未保存</template>
-            <template v-else-if="lastSavedAt">上次保存 {{ lastSavedAt }}</template>
-            <template v-else-if="serverBalanced !== null">
-              {{ serverBalanced ? '已保存（平衡）' : '已保存（未平衡）' }}
-            </template>
-          </span>
-          <div class="bar-actions">
-            <el-button :disabled="!dirty" @click="handleReset">重置</el-button>
-            <el-button :loading="saving" :disabled="!dirty" @click="handleSave">存草稿</el-button>
-            <el-tooltip :disabled="distributeEnabled" :content="distributeTooltip" placement="top">
-              <span>
-                <el-button type="primary" :disabled="!distributeEnabled" @click="openPreview">
-                  正式交给学院
-                </el-button>
-              </span>
-            </el-tooltip>
-          </div>
-        </div>
       </div>
 
       <el-card v-else shadow="never" class="matrix-panel">
@@ -1213,6 +498,50 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.allocation-page.is-embedded {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.is-embedded .page-header {
+  flex-shrink: 0;
+  margin-bottom: var(--space-3);
+}
+
+.is-embedded .allocation-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.is-embedded .indicator-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.is-embedded .indicator-panel :deep(.el-card__body) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.is-embedded .panel-list {
+  flex: 1;
+  max-height: none;
+}
+
+.is-embedded .matrix-panel {
+  height: 100%;
+  min-height: 0;
+  padding-right: 2px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .page-alert {
   margin-bottom: var(--space-4);
 }
@@ -1264,12 +593,12 @@ onMounted(() => {
   position: relative;
 }
 
-.indicator-item:hover {
+.indicator-item:hover,
+.indicator-item.active {
   background-color: var(--el-color-primary-light-9);
 }
 
 .indicator-item.active {
-  background-color: var(--el-color-primary-light-9);
   box-shadow: inset 3px 0 0 var(--el-color-primary);
 }
 
@@ -1322,10 +651,7 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
-.info-code {
-  font-weight: 600;
-}
-
+.info-code,
 .info-name {
   font-weight: 600;
 }
@@ -1335,251 +661,28 @@ onMounted(() => {
   color: var(--el-text-color-secondary);
 }
 
-.matrix-card {
-  min-width: 0;
-  border-radius: var(--radius-card);
-}
-
-.matrix-records,
-.allocation-mobile-list,
-.allocation-mobile-card {
-  min-width: 0;
-}
-
-.allocation-mobile-card.missing-owner {
-  border-left: 3px solid var(--el-color-warning);
-}
-
-.allocation-mobile-card.is-historical {
-  background: var(--el-fill-color-light);
-}
-
-.mobile-owner-field {
-  margin: var(--space-3) 0;
-}
-
-.mobile-owner-field label,
-.mobile-target-field label {
-  display: block;
-  margin-bottom: var(--space-1);
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-}
-
-.mobile-owner-field :deep(.el-select),
-.mobile-cell-input {
-  width: 100%;
-}
-
-.mobile-target-field {
-  position: relative;
-  min-width: 0;
-  padding: var(--space-2);
-  background: var(--el-fill-color-light);
-  border: 1px solid transparent;
-  border-radius: var(--el-border-radius-base);
-}
-
-.mobile-target-field.is-unbalanced {
-  background: #fef0f0;
-  border-color: var(--el-color-danger-light-8);
-}
-
-.mobile-target-field.is-edited {
-  border-top-color: var(--el-color-primary);
-}
-
-.mobile-readonly-value {
-  display: flex;
-  align-items: center;
-  min-height: 40px;
-  overflow-wrap: anywhere;
-  font-variant-numeric: tabular-nums;
-}
-
-.allocation-mobile-total {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  background: var(--el-fill-color-light);
-  border-radius: var(--el-border-radius-base);
-  font-variant-numeric: tabular-nums;
-}
-
-.allocation-mobile-total > span {
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-}
-
-.allocation-mobile-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-top: var(--space-3);
-}
-
-.allocation-mobile-actions .el-button {
-  width: 100%;
-  min-height: 44px;
-  margin: 0;
-}
-
-.mobile-readonly-note {
-  margin-top: var(--space-3);
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-  text-align: right;
-}
-
-.mobile-summary-grid {
-  margin-top: var(--space-3);
-}
-
-.mobile-summary-year {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  padding: var(--space-2) var(--space-3);
-  background: var(--el-fill-color-light);
-  border-radius: var(--el-border-radius-base);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.mobile-summary-year.is-bad {
-  background: #fef0f0;
-}
-
-.mobile-summary-year > strong {
-  margin-bottom: 2px;
-  font-size: 13px;
-}
-
-.allocation-mobile-summary-total {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--el-border-color-lighter);
-  font-size: 12px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
 .mono {
   font-family: var(--app-font-mono);
-}
-
-.cell-input {
-  width: 100%;
-}
-
-.owner-missing :deep(.el-select__wrapper) {
-  box-shadow: 0 0 0 1px var(--el-color-danger) inset;
-}
-
-.add-row-bar {
-  display: flex;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
-}
-
-.sticky-bar {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 56px;
-  padding: 0 var(--space-5);
-  margin-top: var(--space-4);
-  background: var(--el-bg-color);
-  border-radius: var(--radius-card);
-  box-shadow: var(--el-box-shadow-lighter);
-}
-
-.bar-status {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.bar-actions {
-  display: flex;
-  gap: var(--space-2);
-}
-
-.danger-text {
-  color: var(--el-color-danger);
-}
-
-:deep(.cell-unbalanced) {
-  background-color: #fef0f0 !important;
-}
-
-/* 已修改未保存的单元格：左上角 6px 主色三角（UI 规范 10.1-2） */
-:deep(.cell-edited) {
-  position: relative;
-}
-
-:deep(.cell-edited)::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 0;
-  height: 0;
-  border-style: solid;
-  border-width: 6px 6px 0 0;
-  border-color: var(--el-color-primary) transparent transparent transparent;
-  pointer-events: none;
-  z-index: 1;
-}
-
-:deep(.col-unbalanced) {
-  color: var(--el-color-danger);
-}
-
-/* alert 点击年份定位后的短暂高亮 */
-:deep(.col-highlight) {
-  background-color: var(--el-color-primary-light-8) !important;
-  transition: background-color 0.3s;
-}
-
-.year-link {
-  color: inherit;
-  font-weight: 600;
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-:deep(.row-missing-owner) {
-  box-shadow: inset 3px 0 0 var(--el-color-warning);
-}
-
-:deep(.el-table__footer-wrapper td) {
-  background-color: var(--el-fill-color-light);
-  font-weight: 600;
-}
-
-:deep(.diff-ok) {
-  color: var(--el-color-success);
-}
-
-:deep(.diff-bad) {
-  color: var(--el-color-danger);
-  font-weight: 600;
-}
-
-:deep(.diff-na) {
-  color: var(--el-text-color-placeholder);
 }
 
 @media (max-width: 900px) {
   .allocation-body {
     flex-direction: column;
+  }
+
+  .is-embedded .allocation-body {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .is-embedded .indicator-panel {
+    height: auto;
+    max-height: 280px;
+  }
+
+  .is-embedded .matrix-panel {
+    height: auto;
+    overflow: visible;
   }
 
   .indicator-panel,
@@ -1615,70 +718,6 @@ onMounted(() => {
     width: 100%;
     min-height: 44px;
     margin: 0;
-  }
-
-  .matrix-card :deep(.el-card__body) {
-    padding: var(--space-3);
-  }
-
-  .add-row-bar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .add-row-bar :deep(.el-select),
-  .add-row-bar .el-button {
-    width: 100% !important;
-    min-height: 44px;
-    margin: 0;
-  }
-
-  .sticky-bar {
-    align-items: stretch;
-    flex-direction: column;
-    height: auto;
-    gap: var(--space-3);
-    padding: var(--space-3);
-    padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
-  }
-
-  .bar-actions {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    width: 100%;
-  }
-
-  .bar-actions > .el-button,
-  .bar-actions > span {
-    display: flex;
-    width: 100%;
-    min-width: 0;
-    margin: 0;
-  }
-
-  .bar-actions .el-button {
-    width: 100%;
-    min-height: 44px;
-    margin: 0;
-    padding-right: var(--space-2);
-    padding-left: var(--space-2);
-    white-space: normal;
-  }
-}
-
-@media (max-width: 428px) {
-  .allocation-mobile-actions {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .allocation-mobile-actions .el-button {
-    justify-content: center;
-  }
-
-  .allocation-mobile-total {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: var(--space-1);
   }
 }
 </style>

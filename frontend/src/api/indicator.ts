@@ -79,13 +79,3 @@ export function importConfirm(
     headers: { 'Idempotency-Key': idempotencyKey },
   })
 }
-
-export function finalizeIndicators(
-  planId: string,
-  version: number,
-  idempotencyKey: string,
-): Promise<null> {
-  return http.post(`/plans/${planId}/indicators/finalize`, { version }, {
-    headers: { 'Idempotency-Key': idempotencyKey },
-  })
-}

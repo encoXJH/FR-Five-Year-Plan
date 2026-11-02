@@ -9,9 +9,21 @@ import type {
 } from '@/types/plan'
 import type { PlanTemplate } from '@/types/plan'
 
+type PlanListItem = Omit<PlanCard, 'overallCompletionRate' | 'yearCompletionRate' | 'updatedAt'> & {
+  completionRate: number | null
+  createdAt: string
+  updatedAt: string | null
+}
+
 export async function listPlans(keyword?: string): Promise<PlanCard[]> {
-  const data = await http.get<PlanCard[] | PageResult<PlanCard>>('/plans', { keyword })
-  return Array.isArray(data) ? data : data.items
+  const data = await http.get<PlanListItem[] | PageResult<PlanListItem>>('/plans', { keyword })
+  const items = Array.isArray(data) ? data : data.items
+  return items.map((item) => ({
+    ...item,
+    overallCompletionRate: item.completionRate,
+    yearCompletionRate: item.completionRate,
+    updatedAt: item.updatedAt ?? item.createdAt,
+  }))
 }
 
 export function createPlan(data: CreatePlanRequest): Promise<PlanDetail> {

@@ -34,6 +34,7 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -314,6 +315,11 @@ public class TaskService {
                             userRefResolver.refOf(t.getOwnerId(), refs.users()),
                             t.getStatus(), t.getIsHistorical(), totalTargetOf(caliber, years),
                             current == null ? null : AllocationService.toTargetView(caliber, current.getTarget()),
+                            years.stream()
+                                    .sorted(Comparator.comparing(TaskYear::getYear))
+                                    .map(y -> new TaskDtos.YearTargetView(y.getYear(),
+                                            AllocationService.toTargetView(caliber, y.getTarget())))
+                                    .toList(),
                             current == null ? null : current.getActualValue(),
                             current == null ? null : current.getCompletionRate(),
                             cumulative.actual(), cumulative.rate(),
@@ -407,7 +413,8 @@ public class TaskService {
     private TaskDtos.IndicatorRef indicatorRef(Indicator indicator) {
         return indicator == null ? null
                 : new TaskDtos.IndicatorRef(indicator.getId(), indicator.getCode(), indicator.getName(),
-                        indicator.getStatCaliber(), indicator.getUnitLabel(), indicator.getEvidenceRequirement());
+                        indicator.getStatCaliber(), indicator.getUnitLabel(), indicator.getEvidenceRequirement(),
+                        indicator.getTargetDirection());
     }
 
     private TaskDtos.UnitRef unitRef(OrgUnit unit) {

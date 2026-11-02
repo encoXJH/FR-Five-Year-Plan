@@ -17,6 +17,7 @@ import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.system.service.UserRefResolver;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.service.TaskService;
+import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -127,7 +128,7 @@ public class MilestoneService {
     @Transactional
     public MilestoneDtos.View patch(Long milestoneId, PatchHelper patch) {
         Milestone milestone = requireMilestone(milestoneId);
-        requireScope(milestone);
+        requireWriteAccess(milestone);
         if (milestone.getTaskId() != null) {
             taskService.requireCurrentTask(milestone.getTaskId());
         }
@@ -187,7 +188,7 @@ public class MilestoneService {
     @Transactional
     public void delete(Long milestoneId, Integer version) {
         Milestone milestone = requireMilestone(milestoneId);
-        requireScope(milestone);
+        requireWriteAccess(milestone);
         if (milestone.getTaskId() != null) {
             taskService.requireCurrentTask(milestone.getTaskId());
         }
@@ -218,7 +219,7 @@ public class MilestoneService {
     }
 
     /** 里程碑数据范围：指标级按指标负责人，任务级按任务数据范围 */
-    private void requireScope(Milestone milestone) {
+    public void requireAccess(Milestone milestone) {
         if (milestone.getIndicatorId() != null) {
             Indicator indicator = indicatorService.requireIndicator(milestone.getIndicatorId());
             requireIndicatorScope(indicator);
@@ -227,9 +228,20 @@ public class MilestoneService {
         }
     }
 
+    private void requireWriteAccess(Milestone milestone) {
+        if (milestone.getIndicatorId() != null) {
+            requireIndicatorEditAuthority();
+        }
+        requireAccess(milestone);
+    }
+
     /** 指标级里程碑写操作需要 indicator:edit 权限码（学院负责人只能维护本单元任务的里程碑） */
     private void requireIndicatorEditAuthority() {
-        if (!SecurityUtils.getLoginUser().getPermissions().contains("indicator:edit")) {
+        LoginUser user = SecurityUtils.getLoginUser();
+        if (!dataScopeService.isAllData(user) && !dataScopeService.isOwnerScope(user)) {
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
+        }
+        if (!user.getPermissions().contains("indicator:edit")) {
             throw new BizException(ErrorCode.FORBIDDEN, "指标级里程碑需要 indicator:edit 权限");
         }
     }

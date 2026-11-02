@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { DIRECT_UPLOAD_MAX_SIZE, fileCategoryOf, formatFileSize, maxSizeOf } from '../file'
+import { describe, expect, it, vi } from 'vitest'
+import { DIRECT_UPLOAD_MAX_SIZE, fileCategoryOf, formatFileSize, maxSizeOf, triggerFileDownload } from '../file'
 
 describe('fileCategoryOf 扩展名识别（API 8.5）', () => {
   it('常见格式分类正确且大小写不敏感', () => {
@@ -43,5 +43,33 @@ describe('formatFileSize', () => {
     expect(formatFileSize(null)).toBe('—')
     expect(formatFileSize(undefined)).toBe('—')
     expect(formatFileSize(-1)).toBe('—')
+  })
+})
+
+describe('triggerFileDownload', () => {
+  it('通过带文件名的链接触发下载并清理节点', () => {
+    const anchor = {
+      href: '',
+      download: '',
+      target: '',
+      rel: '',
+      style: { display: '' },
+      click: vi.fn(),
+      remove: vi.fn(),
+    }
+    const appendChild = vi.fn()
+    const doc = {
+      createElement: vi.fn(() => anchor),
+      body: { appendChild },
+    } as unknown as Document
+
+    triggerFileDownload('/api/v1/files/raw/1?e=2&s=3', '佐证.pdf', doc)
+
+    expect(anchor.href).toBe('/api/v1/files/raw/1?e=2&s=3')
+    expect(anchor.download).toBe('佐证.pdf')
+    expect(anchor.rel).toBe('noopener noreferrer')
+    expect(appendChild).toHaveBeenCalledWith(anchor)
+    expect(anchor.click).toHaveBeenCalledOnce()
+    expect(anchor.remove).toHaveBeenCalledOnce()
   })
 })

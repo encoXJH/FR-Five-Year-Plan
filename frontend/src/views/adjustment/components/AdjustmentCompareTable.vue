@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { diffCell, groupSnapshot, groupTotal } from '@/utils/adjustment'
+import { buildConservationLines, diffCell, groupSnapshot, groupTotal } from '@/utils/adjustment'
 import type { SnapshotGroup } from '@/utils/adjustment'
 import { formatTargetValue } from '@/utils/indicator'
 import { EMPTY_DISPLAY, formatNumber } from '@/utils/format'
 import type { AdjustmentSnapshot } from '@/types/adjustment'
-import type { StatCaliber } from '@/types/enums'
+import type { AdjustmentType, StatCaliber } from '@/types/enums'
 
 interface CompareRow {
   key: string
@@ -20,6 +20,7 @@ const props = withDefaults(
     /** 规划期年度列 */
     years: number[]
     caliber?: StatCaliber
+    type?: AdjustmentType
     /** 标注来源：试算 / 快照（UI 规范 10.2） */
     caption?: string
   }>(),
@@ -63,26 +64,8 @@ function cellClass(diff: { changed: boolean }): string {
   return diff.changed ? 'cell-changed' : ''
 }
 
-interface ConservationLine {
-  taskCode: string
-  before: number | null
-  after: number | null
-  balanced: boolean
-}
-
-/** 底部守恒校验行（UI 规范 10.2：五年总量 before → after；优先总量快照条目） */
-const conservationLines = computed<ConservationLine[]>(() =>
-  groups.value.map((group) => {
-    const before = group.totalBefore ?? groupTotal(group.before)
-    const after = group.totalAfter ?? groupTotal(group.after)
-    return {
-      taskCode: group.taskCode,
-      before,
-      after,
-      balanced: before !== null && after !== null && before === after,
-    }
-  }),
-)
+/** 底部守恒校验行：转移合并同一指标的转出与接收任务，延期按单任务判断。 */
+const conservationLines = computed(() => buildConservationLines(groups.value, props.type))
 
 function totalText(value: number | null): string {
   return value === null ? EMPTY_DISPLAY : formatNumber(value)
@@ -144,6 +127,7 @@ function totalText(value: number | null): string {
         :class="['conservation-line', line.balanced ? 'is-ok' : 'is-bad']"
       >
         <span class="mono">{{ line.taskCode }}</span>
+        <template v-if="line.combined">（同一指标转出 + 接收合计）</template>
         五年总量：{{ totalText(line.before) }} → {{ totalText(line.after) }}
         <template v-if="line.balanced"> ✓ 守恒</template>
         <template v-else> ✗ 不守恒（70002）</template>

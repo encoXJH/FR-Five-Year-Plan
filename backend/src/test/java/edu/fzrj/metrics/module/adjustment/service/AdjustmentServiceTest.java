@@ -16,6 +16,7 @@ import edu.fzrj.metrics.module.adjustment.mapper.ApprovalStepMapper;
 import edu.fzrj.metrics.module.file.mapper.FileInfoMapper;
 import edu.fzrj.metrics.module.file.mapper.FileRefMapper;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
+import edu.fzrj.metrics.module.indicator.entity.IndicatorYearTarget;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorYearTargetMapper;
 import edu.fzrj.metrics.module.indicator.service.IndicatorService;
@@ -23,6 +24,7 @@ import edu.fzrj.metrics.module.notify.mapper.NotificationMapper;
 import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.plan.mapper.PlanYearMapper;
 import edu.fzrj.metrics.module.plan.service.PlanService;
+import edu.fzrj.metrics.module.system.entity.OrgUnit;
 import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.mapper.UserRoleMapper;
@@ -35,12 +37,15 @@ import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.module.task.service.TaskService;
 import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -111,8 +116,60 @@ class AdjustmentServiceTest {
         MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(), "");
         TableInfoHelper.initTableInfo(assistant, Adjustment.class);
         TableInfoHelper.initTableInfo(assistant, AdjustmentItem.class);
+        TableInfoHelper.initTableInfo(assistant, Indicator.class);
+        TableInfoHelper.initTableInfo(assistant, IndicatorYearTarget.class);
         TableInfoHelper.initTableInfo(assistant, Task.class);
         TableInfoHelper.initTableInfo(assistant, TaskYear.class);
+    }
+
+    @AfterEach
+    void clearContext() {
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void 未下发指标直接编辑不能发起目标调整() {
+        adminLogin();
+        Indicator indicator = targetChangeIndicator(1L);
+        Plan plan = new Plan();
+        plan.setId(11L);
+        when(indicatorService.requireIndicator(1L)).thenReturn(indicator);
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorService.hasDistributedScope(indicator)).thenReturn(false);
+
+        AdjustmentDtos.CreateRequest request = targetChangeRequest(1L, List.of());
+        BizException error = assertThrows(BizException.class, () -> adjustmentService.preview(request));
+
+        assertEquals(30001, error.getErrorCode().getCode());
+        assertTrue(error.getMessage().contains("可直接编辑"));
+    }
+
+    @Test
+    void 目标调整的每个配套指标都必须已下发() {
+        adminLogin();
+        Indicator root = targetChangeIndicator(1L);
+        Indicator paired = targetChangeIndicator(2L);
+        paired.setCode("A01-1");
+        paired.setLevel("A_PLUS");
+        Plan plan = new Plan();
+        plan.setId(11L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2030);
+        when(indicatorService.requireIndicator(1L)).thenReturn(root);
+        when(indicatorService.requireIndicator(2L)).thenReturn(paired);
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorService.hasDistributedScope(root)).thenReturn(true);
+        when(indicatorService.hasDistributedScope(paired)).thenReturn(false);
+        AdjustmentDtos.ItemRequest item = new AdjustmentDtos.ItemRequest();
+        item.setTargetIndicatorId(2L);
+        item.setYear(2026);
+        item.setNewTarget(BigDecimal.ONE);
+
+        AdjustmentDtos.CreateRequest request = targetChangeRequest(1L, List.of(item));
+        BizException error = assertThrows(BizException.class, () -> adjustmentService.preview(request));
+
+        assertEquals(30001, error.getErrorCode().getCode());
+        assertTrue(error.getMessage().contains("A01-1 尚未下发"));
     }
 
     @Test
@@ -218,6 +275,87 @@ class AdjustmentServiceTest {
         assertSame(expected, actual);
         verify(taskService).requireCurrentTask(101L);
         verify(taskService).requireCurrentTask(102L);
+    }
+
+    @Test
+    void 纯A目标调整按直承B合计校验守恒() {
+        Indicator a = targetChangeIndicator(1L);
+        a.setRollupMode("AUTO_SUM");
+        a.setTotalTarget(BigDecimal.TEN);
+        IndicatorYearTarget target = new IndicatorYearTarget();
+        target.setIndicatorId(1L);
+        target.setYear(2026);
+        target.setTarget(BigDecimal.TEN);
+        when(yearTargetMapper.selectList(any())).thenReturn(List.of(target));
+        when(indicatorMapper.selectList(any())).thenReturn(List.of());
+        when(taskMapper.selectList(any())).thenReturn(List.of(task(101L, false)));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(taskYear(101L, 2026, "10")));
+
+        List<edu.fzrj.metrics.common.api.FieldError> errors = adjustmentService.targetChangeErrors(a,
+                List.of(new AdjustmentService.PreparedItemView(1L, 2026, BigDecimal.TEN)));
+
+        assertTrue(errors.isEmpty());
+    }
+
+    @Test
+    void 直承A与legacyA加之间禁止转移并返回40006() {
+        adminLogin();
+        Task source = task(10L, false);
+        source.setPlanId(1L);
+        source.setIndicatorId(2L);
+        source.setUnitId(30L);
+        source.setStatus("DISTRIBUTED");
+        Plan plan = new Plan();
+        plan.setId(1L);
+        Indicator indicator = new Indicator();
+        indicator.setId(2L);
+        indicator.setLevel("A");
+        indicator.setStatCaliber("INCREMENT");
+        OrgUnit receiver = new OrgUnit();
+        receiver.setId(20L);
+        when(taskService.requireCurrentTask(10L)).thenReturn(source);
+        when(planService.requirePlan(1L)).thenReturn(plan);
+        when(indicatorService.requireIndicator(2L)).thenReturn(indicator);
+        when(indicatorService.hasLegacyAPlus(indicator)).thenReturn(true);
+        when(orgUnitAdminService.requireBAssignable(20L)).thenReturn(receiver);
+        when(taskYearMapper.selectList(any())).thenReturn(List.of());
+        AdjustmentDtos.CreateRequest request = new AdjustmentDtos.CreateRequest();
+        request.setType("TRANSFER");
+        request.setTaskId(10L);
+        request.setToUnitId(20L);
+        request.setItems(List.of());
+
+        BizException error = assertThrows(BizException.class, () -> adjustmentService.create(request));
+
+        assertEquals(40006, error.getErrorCode().getCode());
+        verify(taskMapper, never()).insert(any(Task.class));
+    }
+
+    private static void adminLogin() {
+        LoginUser user = new LoginUser(900L, "admin", "管理员", null,
+                List.of("ADMIN"), List.of());
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(user, null, List.of()));
+    }
+
+    private static Indicator targetChangeIndicator(Long id) {
+        Indicator indicator = new Indicator();
+        indicator.setId(id);
+        indicator.setPlanId(11L);
+        indicator.setLevel("A");
+        indicator.setCode("A01");
+        indicator.setIsQuantifiable(true);
+        indicator.setStatCaliber("INCREMENT");
+        return indicator;
+    }
+
+    private static AdjustmentDtos.CreateRequest targetChangeRequest(Long indicatorId,
+                                                                     List<AdjustmentDtos.ItemRequest> items) {
+        AdjustmentDtos.CreateRequest request = new AdjustmentDtos.CreateRequest();
+        request.setType("TARGET_CHANGE");
+        request.setIndicatorId(indicatorId);
+        request.setItems(items);
+        return request;
     }
 
     private static Adjustment adjustment(Long id, Long taskId) {

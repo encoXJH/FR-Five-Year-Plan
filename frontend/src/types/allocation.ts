@@ -1,8 +1,12 @@
 import type { UnitRef, UserRef } from './api'
-import type { CreateIndicatorRequest, IndicatorDetail, YearTarget } from './indicator'
+import type { YearTarget } from './indicator'
+import type { TaskStatus } from './enums'
 
 /** 分解矩阵行（一个执行单元）（API 16.3） */
 export interface AllocationRow {
+  taskId: string
+  taskCode: string
+  taskStatus: TaskStatus
   unit: UnitRef
   owner: UserRef | null
   isHistorical: boolean
@@ -12,7 +16,7 @@ export interface AllocationRow {
 /** 分解矩阵某年的合计校验结果 */
 export interface AllocationYearSummary {
   year: number
-  /** A+ 当年目标；比率 / 是否型为 null */
+  /** A 当年目标；比率 / 是否型为 null */
   indicatorTarget: number | null
   /** 各单元当年目标合计 */
   allocatedTarget: number | null
@@ -37,18 +41,6 @@ export interface SaveAllocationRequest {
     ownerId: string | null
     yearTargets: YearTarget[]
   }[]
-}
-
-/** POST /plans/{planId}/indicators/{parentId}/decomposition 请求体 */
-export interface DecompositionRequest {
-  indicator: Omit<CreateIndicatorRequest, 'level' | 'parentId'>
-  rows: SaveAllocationRequest['rows']
-}
-
-/** 新建 A+ 并保存分工的编排响应 */
-export interface DecompositionResult {
-  aPlus: IndicatorDetail
-  allocation: Allocation
 }
 
 /** POST /plans/{planId}/distribute 请求体 */

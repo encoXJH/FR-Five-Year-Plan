@@ -54,3 +54,15 @@ export const FILE_CATEGORY_COLORS: Record<FileCategory, string> = {
   VIDEO: '#8E5CD9',
   ARCHIVE: '#909399',
 }
+
+/** 使用下载链接触发保存文件，避免异步 window.open 被浏览器拦截。 */
+export function triggerFileDownload(url: string, fileName: string, doc: Document = document): void {
+  const anchor = doc.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  anchor.rel = 'noopener noreferrer'
+  anchor.style.display = 'none'
+  doc.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}

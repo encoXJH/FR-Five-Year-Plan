@@ -12,7 +12,13 @@ import { useUserStore } from '@/stores/user'
 import { enumLabel, enumOptions } from '@/utils/enumLabels'
 import { formatRelativeTime } from '@/utils/format'
 import { formatDeadline } from '@/utils/task'
-import { TODO_GROUPS, resolveTodoLink, sortTodoItems, todoGroupLabel } from '@/utils/todo'
+import {
+  TODO_GROUPS,
+  resolveNotificationLink,
+  resolveTodoLink,
+  sortTodoItems,
+  todoGroupLabel,
+} from '@/utils/todo'
 import type { TodoGroup, TodoItem, TodosResult } from '@/types/todo'
 import type { NotificationItem } from '@/types/notification'
 
@@ -87,18 +93,21 @@ async function loadNotifications(): Promise<void> {
 }
 
 async function handleRead(item: NotificationItem): Promise<void> {
-  if (item.readAt) {
-    if (item.link) router.push(item.link)
+  const link = resolveNotificationLink(item)
+  if (!link) {
+    ElMessage.info('该通知暂无可跳转页面')
     return
   }
-  try {
-    const updated = await markNotificationRead(item.id)
-    item.readAt = updated.readAt
-    unreadCount.value = Math.max(0, unreadCount.value - 1)
-  } catch {
-    // 拦截器已提示
+  if (!item.readAt) {
+    try {
+      const updated = await markNotificationRead(item.id)
+      item.readAt = updated.readAt
+      unreadCount.value = Math.max(0, unreadCount.value - 1)
+    } catch {
+      // 拦截器已提示
+    }
   }
-  if (item.link) router.push(item.link)
+  router.push(link)
 }
 
 const markingAll = ref(false)
@@ -130,6 +139,11 @@ onMounted(() => {
   <div>
     <div class="page-header">
       <h1 class="page-title">待办与消息</h1>
+    </div>
+    <div v-if="activeTab === 'notifications'" class="app-action-row notification-actions">
+      <el-button type="primary" :loading="markingAll" :disabled="unreadCount === 0" @click="handleReadAll">
+        全部已读
+      </el-button>
     </div>
     <el-card shadow="never">
       <el-tabs v-model="activeTab">
@@ -180,7 +194,9 @@ onMounted(() => {
                 >
                   {{ formatDeadline(todo.deadline).text }}
                 </span>
-                <el-button type="primary" size="small" @click="goHandle(todo)">去处理</el-button>
+                <div class="app-action-row todo-actions">
+                  <el-button type="primary" size="small" @click="goHandle(todo)">去处理</el-button>
+                </div>
               </div>
             </div>
           </div>
@@ -208,10 +224,6 @@ onMounted(() => {
                 :value="o.value"
               />
             </el-select>
-            <div class="toolbar-spacer" />
-            <el-button :loading="markingAll" :disabled="unreadCount === 0" @click="handleReadAll">
-              全部已读
-            </el-button>
           </div>
           <div v-loading="notificationsLoading">
             <el-empty
@@ -268,9 +280,6 @@ onMounted(() => {
 
 <style scoped>
 .page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   margin-bottom: var(--space-4);
 }
 
@@ -325,10 +334,17 @@ onMounted(() => {
 
 .todo-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
   padding: 10px 12px;
   border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.todo-actions {
+  flex: 0 0 100%;
+  width: 100%;
+  margin: 0;
 }
 
 .todo-tag {
@@ -376,10 +392,6 @@ onMounted(() => {
   display: flex;
   align-items: center;
   margin-bottom: var(--space-3);
-}
-
-.toolbar-spacer {
-  flex: 1;
 }
 
 .notif-item {
@@ -474,13 +486,20 @@ onMounted(() => {
     font-size: 13px;
   }
 
+  .notification-actions .el-button {
+    width: 100%;
+    min-height: 44px;
+    margin: 0;
+  }
+
   .todo-item {
-    flex-wrap: wrap;
     padding: 10px 8px;
   }
 
   .todo-item .el-button {
-    min-height: 32px;
+    width: 100%;
+    min-height: 44px;
+    margin: 0;
   }
 
   .notif-time {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import StatusTag from '@/components/StatusTag.vue'
 import {
@@ -33,21 +33,31 @@ const canManage = computed(
 // ---------- 指标选择 ----------
 const indicatorOptions = ref<{ id: string; label: string }[]>([])
 const selectedIndicatorId = ref('')
+let indicatorLoadSequence = 0
+let milestoneLoadSequence = 0
 
 async function loadIndicatorOptions(): Promise<void> {
+  const sequence = ++indicatorLoadSequence
+  const planId = props.planId
+  indicatorOptions.value = []
+  selectedIndicatorId.value = ''
+  milestones.value = []
+  dialogVisible.value = false
+  editingId.value = null
+  milestoneLoadSequence += 1
+  loading.value = false
+  if (!planId) return
   try {
-    const tree = await listIndicators(props.planId)
-    const options: { id: string; label: string }[] = []
-    for (const node of tree) {
-      options.push({ id: node.id, label: `${node.code} ${node.name}（A 类）` })
-      for (const child of node.children ?? []) {
-        options.push({ id: child.id, label: `${child.code} ${child.name}` })
-      }
-    }
+    const tree = await listIndicators(planId)
+    if (sequence !== indicatorLoadSequence || planId !== props.planId) return
+    const options = tree.map((node) => ({
+      id: node.id,
+      label: `${node.code} ${node.name}`,
+    }))
     indicatorOptions.value = options
-    if (!selectedIndicatorId.value && options.length > 0) {
+    if (options.length > 0) {
       selectedIndicatorId.value = options[0].id
-      loadMilestones()
+      await loadMilestones()
     }
   } catch {
     // 拦截器已提示
@@ -64,17 +74,22 @@ const sortedMilestones = computed(() =>
 )
 
 async function loadMilestones(): Promise<void> {
-  if (!selectedIndicatorId.value) {
+  const indicatorId = selectedIndicatorId.value
+  const sequence = ++milestoneLoadSequence
+  if (!indicatorId) {
     milestones.value = []
     return
   }
   loading.value = true
   try {
-    milestones.value = await listMilestones({ indicatorId: selectedIndicatorId.value })
+    const result = await listMilestones({ indicatorId })
+    if (sequence === milestoneLoadSequence && indicatorId === selectedIndicatorId.value) {
+      milestones.value = result
+    }
   } catch {
-    milestones.value = []
+    if (sequence === milestoneLoadSequence) milestones.value = []
   } finally {
-    loading.value = false
+    if (sequence === milestoneLoadSequence) loading.value = false
   }
 }
 
@@ -151,8 +166,14 @@ async function saveMilestone(): Promise<void> {
       })
       ElMessage.success('里程碑已更新')
     } else {
+      const indicatorId = selectedIndicatorId.value
+      if (!indicatorId || !indicatorOptions.value.some((item) => item.id === indicatorId)) {
+        ElMessage.warning('当前计划指标已变化，请重新选择')
+        dialogVisible.value = false
+        return
+      }
       const body: CreateMilestoneRequest = {
-        indicatorId: selectedIndicatorId.value,
+        indicatorId,
         name: milestoneForm.name.trim(),
         year: milestoneForm.year,
         dueDate: milestoneForm.dueDate,
@@ -186,7 +207,9 @@ async function removeMilestone(item: Milestone): Promise<void> {
   await loadMilestones()
 }
 
-onMounted(loadIndicatorOptions)
+watch(() => props.planId, () => {
+  void loadIndicatorOptions()
+}, { immediate: true })
 </script>
 
 <template>
@@ -195,7 +218,7 @@ onMounted(loadIndicatorOptions)
       <el-select
         v-model="selectedIndicatorId"
         filterable
-        placeholder="选择指标（A / A+）查看里程碑"
+        placeholder="选择 指标查看里程碑"
         style="width: 320px"
         @change="loadMilestones"
       >
@@ -302,7 +325,7 @@ onMounted(loadIndicatorOptions)
 .panel-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: var(--space-3);
   margin-bottom: var(--space-4);
   flex-wrap: wrap;

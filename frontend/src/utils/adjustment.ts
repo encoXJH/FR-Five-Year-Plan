@@ -30,7 +30,7 @@ export function adjustmentTypeOptions(
         : { type, enabled: false, reason: '仅平台管理员可发起目标调整' }
     }
     if (caliber === null) {
-      return { type, enabled: false, reason: '请先选择 B 任务' }
+      return { type, enabled: false, reason: '请先选择学院任务' }
     }
     const enabled = ADJUSTMENT_TYPE_CALIBERS[type].includes(caliber)
     return {
@@ -103,6 +103,8 @@ export interface SnapshotGroup {
   taskCode: string
   /** 接收方原本没有该 A+ 的 B：before 无该编码行，after 才有（生效时自动新建） */
   isNew: boolean
+  /** TARGET_CHANGE 使用指标编号而非任务编号 */
+  isIndicator: boolean
   before: Record<number, number | null>
   after: Record<number, number | null>
   /** TARGET_CHANGE 的五年总量条目（快照行 year=null） */
@@ -120,9 +122,10 @@ export function groupSnapshot(
     const key = keyOf(row)
     let group = groups.get(key)
     if (!group) {
-      group = { taskCode: key, isNew: false, before: {}, after: {} }
+      group = { taskCode: key, isNew: false, isIndicator: false, before: {}, after: {} }
       groups.set(key, group)
     }
+    group.isIndicator = group.isIndicator || row.indicatorCode != null
     return group
   }
   for (const row of before ?? []) {
@@ -172,6 +175,76 @@ export function groupTotal(values: Record<number, number | boolean | null>): num
     }
   }
   return has ? sum : null
+}
+
+export interface ConservationLine {
+  taskCode: string
+  before: number | null
+  after: number | null
+  balanced: boolean
+  combined: boolean
+}
+
+function indicatorCodeOfTask(taskCode: string): string {
+  const separator = taskCode.lastIndexOf('-')
+  return separator > 0 ? taskCode.slice(0, separator) : taskCode
+}
+
+function snapshotTotal(group: SnapshotGroup, phase: 'before' | 'after'): number | null {
+  if (phase === 'before') return group.totalBefore ?? groupTotal(group.before)
+  return group.totalAfter ?? groupTotal(group.after)
+}
+
+function combinedTotal(groups: SnapshotGroup[], phase: 'before' | 'after'): number | null {
+  const totals = groups.map((group) => snapshotTotal(group, phase))
+  return totals.some((total) => total !== null)
+    ? totals.reduce<number>((sum, total) => sum + (total ?? 0), 0)
+    : null
+}
+
+function conservationLine(
+  taskCode: string,
+  before: number | null,
+  after: number | null,
+  combined: boolean,
+): ConservationLine {
+  return {
+    taskCode,
+    before,
+    after,
+    balanced: before !== null && after !== null && Math.abs(before - after) < 1e-9,
+    combined,
+  }
+}
+
+/** 延期按单任务守恒；转移按同一指标的转出与接收任务合计守恒。 */
+export function buildConservationLines(
+  groups: SnapshotGroup[],
+  type?: AdjustmentType,
+): ConservationLine[] {
+  if (type === 'TARGET_CHANGE' || (type === undefined && groups.length > 0 && groups.every((group) => group.isIndicator))) {
+    return []
+  }
+  const inferredTransfer = type === undefined && (
+    groups.some((group) => group.isNew)
+    || new Set(groups.map((group) => indicatorCodeOfTask(group.taskCode))).size < groups.length
+  )
+  if ((type !== undefined && isTransferType(type)) || inferredTransfer) {
+    const byIndicator = new Map<string, SnapshotGroup[]>()
+    for (const group of groups) {
+      const key = indicatorCodeOfTask(group.taskCode)
+      byIndicator.set(key, [...(byIndicator.get(key) ?? []), group])
+    }
+    return [...byIndicator.entries()].map(([indicatorCode, related]) =>
+      conservationLine(indicatorCode, combinedTotal(related, 'before'), combinedTotal(related, 'after'), true),
+    )
+  }
+  return groups.map((group) => conservationLine(
+    group.taskCode,
+    snapshotTotal(group, 'before'),
+    snapshotTotal(group, 'after'),
+    false,
+  ))
 }
 
 /** 审批中（未生效、未终结）的状态 */

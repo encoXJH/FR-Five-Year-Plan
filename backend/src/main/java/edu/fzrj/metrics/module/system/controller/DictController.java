@@ -75,7 +75,7 @@ public class DictController {
             m.put("PlanStatus", items("DRAFT:草稿", "ACTIVE:执行中", "ARCHIVED:已归档"));
             m.put("PlanSource", items("BLANK:空白", "TEMPLATE:从模板", "COPY:复制计划"));
             m.put("SubjectType", items("SCHOOL:校级", "MAJOR_GROUP:专业群"));
-            m.put("IndicatorLevel", items("A:A 级（校级原始任务）", "A_PLUS:A+ 级（量化拆解任务）", "B:B 级（院级执行任务）"));
+            m.put("IndicatorLevel", items("A:指标", "A_PLUS:历史指标", "B:学院任务"));
             m.put("IndicatorNature", items("CONSTRAINT:约束性", "DEVELOPMENT:发展性"));
             m.put("MeasureType", items("NUMBER:数值", "BOOLEAN:是否", "PERCENT_QUANTIFIABLE:百分比-可量化", "PERCENT_DIRECT:百分比-不可量化"));
             m.put("StatCaliber", items("INCREMENT:增量累计型", "STOCK:存量时点型", "GROWTH:增长率型", "RATIO:占比型", "DIRECT_PERCENT:直填百分比型", "BOOLEAN:是否型"));
@@ -95,7 +95,7 @@ public class DictController {
             m.put("FileBizType", items("SUBMISSION_ATTACHMENT:填报材料", "ADJUSTMENT_ATTACHMENT:调整附件", "MILESTONE_ATTACHMENT:里程碑附件", "IMPORT_FILE:导入文件"));
             m.put("FileCategory", items("DOCUMENT:文档", "PDF:PDF", "IMAGE:图片", "VIDEO:视频", "ARCHIVE:压缩包"));
             m.put("PreviewType", items("IMAGE:IMAGE", "PDF:PDF", "OFFICE:OFFICE", "VIDEO:VIDEO", "UNSUPPORTED:UNSUPPORTED"));
-            m.put("ExportType", items("INDICATORS:指标体系", "TASKS:B 任务", "STATS_REPORT:统计报表", "SETTLEMENT:核算结果", "AUDIT_LOGS:操作日志"));
+            m.put("ExportType", items("INDICATORS:指标体系", "TASKS:学院任务", "STATS_REPORT:统计报表", "SETTLEMENT:核算结果", "AUDIT_LOGS:操作日志"));
             m.put("JobStatus", items("PENDING:排队中", "RUNNING:执行中", "SUCCEEDED:成功", "FAILED:失败"));
             m.put("NotificationType", items("TASK_DISTRIBUTED:任务下发", "DEADLINE_REMINDER:截止提醒", "REVIEW_RESULT:审核结果", "ADJUSTMENT_TODO:调整待办", "ADJUSTMENT_RESULT:调整结果", "WARNING:预警"));
             m.put("AuditAction", items("LOGIN:LOGIN", "CREATE:CREATE", "UPDATE:UPDATE", "DELETE:DELETE", "IMPORT:IMPORT", "EXPORT:EXPORT", "FINALIZE:FINALIZE", "DISTRIBUTE:DISTRIBUTE", "ACCEPT:ACCEPT", "SUBMIT:SUBMIT", "WITHDRAW:WITHDRAW", "REVIEW:REVIEW", "ADJUST_APPLY:ADJUST_APPLY", "ADJUST_DECIDE:ADJUST_DECIDE", "SETTLE:SETTLE", "UNLOCK:UNLOCK", "PERMISSION_CHANGE:PERMISSION_CHANGE", "FILE_DOWNLOAD:FILE_DOWNLOAD", "FILE_PREVIEW:FILE_PREVIEW", "SYNC_ORG:SYNC_ORG"));

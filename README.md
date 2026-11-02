@@ -33,7 +33,7 @@ cp .env.example .env   # 填写生产数据库密码、JWT 密钥、飞书配置
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-包含 MySQL 8 + 后端 + 前端（Nginx 托管并反代 /api）。HTTPS 配置见 `deploy/nginx-https.conf.example`，数据库每日备份脚本见 `deploy/backup-mysql.sh`，完整步骤与飞书后台配置见 `docs/部署手册.md`。
+包含 MySQL 8 + MinIO + 后端 + 前端（Nginx 托管并反代 /api）。默认仍使用 LOCAL 文件存储；海量文件场景在 `.env` 设置 `FILE_STORAGE_TYPE=MINIO` 并配置对象存储凭证与公网地址。HTTPS 配置见 `deploy/nginx-https.conf.example`，数据库和文件备份脚本见 `deploy/backup-mysql.sh`、`deploy/backup-files.sh`，完整步骤见 `docs/部署手册.md`。
 
 ## 开发测试账号（仅开发环境，密码统一 Test@123456）
 

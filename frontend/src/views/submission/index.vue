@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import StatusTag from '@/components/StatusTag.vue'
+import BackButton from '@/components/BackButton.vue'
 import TaskDetailDrawer from '@/views/workbench/components/TaskDetailDrawer.vue'
 import MaterialUploader from './components/MaterialUploader.vue'
 import SubmissionTimeline from './components/SubmissionTimeline.vue'
@@ -17,11 +18,18 @@ import {
 import { useUserStore } from '@/stores/user'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { ApiError } from '@/utils/request'
-import { formatPercent } from '@/utils/format'
+import { formatGrowth, formatPercent } from '@/utils/format'
 import { formatTargetValue } from '@/utils/indicator'
 import { percentToDisplay, percentToStore } from '@/utils/allocation'
-import { buildMetricValue, computeRatio, formatMetricValue } from '@/utils/submission'
-import { canWriteTask, formatDeadline, progressPercentage } from '@/utils/task'
+import {
+  buildMetricValue,
+  computeRatio,
+  formatMetricValue,
+  parseSubmissionRemark,
+  projectAnnualCompletionRate,
+  serializeSubmissionRemark,
+} from '@/utils/submission'
+import { canWriteTask, formatDeadline, primaryTaskIndicator, progressPercentage } from '@/utils/task'
 import type { FileInfo } from '@/types/file'
 import type { StatCaliber } from '@/types/enums'
 import type { SubmissionListItem } from '@/types/submission'
@@ -32,7 +40,6 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const taskId = route.params.taskId as string
-const queryYear = route.query.year ? Number(route.query.year) : null
 
 const loading = ref(false)
 const loadFailed = ref(false)
@@ -47,20 +54,11 @@ const isDelegateFill = computed(
 // ---------- 年度上下文 ----------
 const currentYear = new Date().getFullYear()
 
-const yearItem = computed<TaskYearItem | null>(() => {
-  const years = task.value?.years ?? []
-  if (queryYear !== null) return years.find((item) => item.year === queryYear) ?? null
-  return (
-    years.find((item) => item.yearStatus === 'IN_PROGRESS') ??
-    years.find((item) => item.year === currentYear) ??
-    years[0] ??
-    null
-  )
-})
+const yearItem = computed<TaskYearItem | null>(() =>
+  (task.value?.years ?? []).find((item) => item.year === currentYear) ?? null,
+)
 
-const year = computed(() => yearItem.value?.year ?? queryYear ?? currentYear)
-
-const yearNotActivated = computed(() => yearItem.value?.yearStatus === 'NOT_ACTIVATED')
+const year = computed(() => yearItem.value?.year ?? currentYear)
 
 /** 提交遇 60003 时置位：年度已锁定（整页只读） */
 const lockedByError = ref(false)
@@ -80,8 +78,9 @@ const yearLocked = computed(() => {
   )
 })
 
-const caliber = computed<StatCaliber>(() => task.value?.indicator?.statCaliber ?? 'INCREMENT')
-const unitLabel = computed(() => task.value?.indicator?.unitLabel ?? null)
+const primaryIndicator = computed(() => primaryTaskIndicator(task.value))
+const caliber = computed<StatCaliber>(() => primaryIndicator.value?.statCaliber ?? 'INCREMENT')
+const unitLabel = computed(() => primaryIndicator.value?.unitLabel ?? null)
 
 /** 填报截止日（任务详情 deadline 字段，YYYY-MM-DD） */
 const deadline = computed(() => formatDeadline(task.value?.deadline))
@@ -130,6 +129,7 @@ const pendingValueText = computed(() =>
     ? formatMetricValue(pendingSubmission.value.value, caliber.value, unitLabel.value)
     : '',
 )
+const pendingRemarkParts = computed(() => parseSubmissionRemark(pendingSubmission.value?.remark))
 
 // ---------- 表单 ----------
 const form = reactive({
@@ -140,7 +140,7 @@ const form = reactive({
   /** 百分比显示值（%，提交时 ÷100） */
   percent: undefined as number | undefined,
   achieved: null as boolean | null,
-  /** BOOLEAN 完成日期（YYYY-MM-DD）；后端 CreateSubmissionRequest 暂无此字段，仅展示不提交 */
+  /** BOOLEAN 完成日期（YYYY-MM-DD）；通过 remark 结构化元数据保存 */
   completionDate: '' as string,
   remark: '',
   sourceNote: '',
@@ -169,7 +169,9 @@ function populate(): void {
   form.denominator = value.denominator ?? undefined
   form.percent = percentToDisplay(value.percent)
   form.achieved = value.achieved ?? null
-  form.remark = target?.remark ?? ''
+  const remarkParts = parseSubmissionRemark(target?.remark)
+  form.completionDate = caliber.value === 'BOOLEAN' ? remarkParts.completionDate : ''
+  form.remark = remarkParts.remark
   form.sourceNote = target?.sourceNote ?? ''
   form.reason = ''
   fileIds.value = target?.files?.map((file) => file.id) ?? target?.fileIds ?? []
@@ -187,11 +189,28 @@ const projectedTotal = computed(() => {
   return completed + (form.amount ?? 0)
 })
 
-const projectedRate = computed(() => {
-  const target = numberOf(yearItem.value?.target)
-  if (!target || target <= 0) return null
-  return projectedTotal.value / target
-})
+const projectedRate = computed(() =>
+  projectAnnualCompletionRate(
+    caliber.value,
+    yearItem.value?.target,
+    yearItem.value,
+    buildMetricValue(caliber.value, {
+      amount: form.amount ?? null,
+      total: form.total ?? null,
+      numerator: form.numerator ?? null,
+      denominator: form.denominator ?? null,
+      percent: percentToStore(form.percent),
+      achieved: form.achieved,
+    }),
+  ),
+)
+
+const projectedExceedsTarget = computed(
+  () =>
+    primaryIndicator.value?.targetDirection === 'HIGHER_BETTER' &&
+    projectedRate.value !== null &&
+    projectedRate.value > 1,
+)
 
 /** RATIO：占比 = 分子 ÷ 分母 */
 const ratioNow = computed(() => computeRatio(form.numerator ?? null, form.denominator ?? null))
@@ -262,7 +281,7 @@ async function saveDraft(): Promise<void> {
   if (editingId.value) {
     const saved = await updateSubmission(editingId.value, {
       value,
-      remark: form.remark || null,
+      remark: serializeSubmissionRemark(caliber.value, form.remark, form.completionDate),
       sourceNote: form.sourceNote || null,
       fileIds: fileIds.value,
       proxyReason: isDelegateFill.value ? form.reason || null : undefined,
@@ -274,7 +293,7 @@ async function saveDraft(): Promise<void> {
   const created = await createSubmission(taskId, {
     year: year.value,
     value,
-    remark: form.remark || null,
+    remark: serializeSubmissionRemark(caliber.value, form.remark, form.completionDate),
     sourceNote: form.sourceNote || null,
     fileIds: fileIds.value,
     proxyReason: isDelegateFill.value ? form.reason || null : undefined,
@@ -359,7 +378,7 @@ async function handleSubmit(): Promise<void> {
     ElMessage.success('已提交审核')
     await reload()
   } catch (error) {
-    // 60002 材料不足 / 60006 口径不匹配 / 50004 年度未激活 / 60003 年度锁定：页内清晰展示
+    // 60002 材料不足 / 60006 口径不匹配 / 60007 年度目标超限 / 50004 年度未激活 / 60003 年度锁定
     if (error instanceof ApiError) {
       submitError.value = { code: error.code, message: error.message }
       if (error.code === 60003) lockedByError.value = true
@@ -399,7 +418,7 @@ async function handleWithdraw(): Promise<void> {
 const detailVisible = ref(false)
 
 function goBack(): void {
-  router.back()
+  void router.push('/workbench')
 }
 
 onBeforeRouteLeave(async () => {
@@ -421,10 +440,11 @@ onMounted(reload)
 
 <template>
   <div class="submit-page">
+    <BackButton />
     <div class="page-header">
       <div>
         <h1 class="page-title">
-          填报 · {{ task?.code ?? '' }} {{ task?.indicator?.name ?? '' }}
+          填报 · {{ task?.code ?? '' }} {{ primaryIndicator?.name ?? '' }}
         </h1>
         <p class="page-subtitle">按统计口径填报完成值，上传佐证材料后提交审核</p>
       </div>
@@ -435,18 +455,15 @@ onMounted(reload)
     <el-result v-else-if="loadFailed" icon="error" title="任务加载失败">
       <template #extra>
         <el-button type="primary" @click="reload">重试</el-button>
-        <el-button @click="goBack">返回</el-button>
       </template>
     </el-result>
 
     <template v-else-if="task">
       <el-empty
-        v-if="yearNotActivated && !isHistorical"
+        v-if="!yearItem && !isHistorical"
         :image-size="120"
-        :description="`${year} 年度尚未激活，激活后即可填报`"
-      >
-        <el-button @click="goBack">返回工作台</el-button>
-      </el-empty>
+        :description="`只能填报当前自然年份（${currentYear}年）的数据`"
+      />
 
       <el-row v-else :gutter="16">
         <el-col :span="16">
@@ -513,6 +530,14 @@ onMounted(reload)
             :title="`${submitError.message}（${submitError.code}）`"
           />
 
+          <el-alert
+            v-if="projectedExceedsTarget"
+            type="warning"
+            :closable="false"
+            class="page-alert"
+            :title="`按已认定数据和本次填报，预计完成率 ${formatPercent(projectedRate)}，提交后将超过年度目标；请调整填报值，最终以后端校验为准（60007）`"
+          />
+
           <el-card shadow="never" class="form-card">
             <!-- 审核中：只读摘要（UI 规范 10.3 纯文本展示） -->
             <template v-if="formReadonly && pendingSubmission">
@@ -524,8 +549,11 @@ onMounted(reload)
                 <el-descriptions-item v-if="pendingSubmission.sourceNote" label="数据来源说明">
                   {{ pendingSubmission.sourceNote }}
                 </el-descriptions-item>
+                <el-descriptions-item v-if="pendingRemarkParts.completionDate" label="完成日期">
+                  {{ pendingRemarkParts.completionDate }}
+                </el-descriptions-item>
                 <el-descriptions-item label="完成情况说明">
-                  {{ pendingSubmission.remark ?? '—' }}
+                  {{ pendingRemarkParts.remark || '—' }}
                 </el-descriptions-item>
               </el-descriptions>
             </template>
@@ -582,7 +610,7 @@ onMounted(reload)
                   <span class="calc-hint">
                     增长率（系统计算）：
                     <template v-if="growthRateNow !== null">
-                      {{ growthRateNow >= 0 ? '+' : '' }}{{ formatPercent(Math.abs(growthRateNow)) }}
+                      {{ formatGrowth(growthRateNow) }}
                     </template>
                     <template v-else>—（缺少上年总量，无法计算）</template>
                   </span>
@@ -652,7 +680,7 @@ onMounted(reload)
                     <el-radio :value="false">否</el-radio>
                   </el-radio-group>
                 </el-form-item>
-                <!-- 后端 CreateSubmissionRequest 暂无完成日期字段：仅展示记录，不随填报提交 -->
+                <!-- API 暂无独立日期字段，保存时结构化附入 remark -->
                 <el-form-item label="完成日期">
                   <el-date-picker
                     v-model="form.completionDate"
@@ -693,8 +721,8 @@ onMounted(reload)
 
             <h3 class="section-title">
               佐证材料
-              <span v-if="task.indicator?.evidenceRequirement" class="requirement">
-                （要求：{{ task.indicator.evidenceRequirement }}）
+              <span v-if="primaryIndicator?.evidenceRequirement" class="requirement">
+                （要求：{{ primaryIndicator.evidenceRequirement }}）
               </span>
             </h3>
             <MaterialUploader
@@ -748,7 +776,7 @@ onMounted(reload)
         </el-col>
       </el-row>
 
-      <div v-if="!yearNotActivated && !formReadonly && !yearLocked" class="sticky-bar">
+      <div v-if="yearItem && !formReadonly && !yearLocked" class="sticky-bar">
         <el-button @click="goBack">取消</el-button>
         <el-button :loading="saving" :disabled="submitting" @click="handleSaveDraft">存草稿</el-button>
         <el-button type="primary" :loading="submitting" :disabled="saving" @click="handleSubmit">
@@ -909,7 +937,7 @@ onMounted(reload)
   position: sticky;
   bottom: 0;
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: var(--space-2);
   height: 56px;
   align-items: center;

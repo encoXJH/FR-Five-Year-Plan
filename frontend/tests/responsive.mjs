@@ -3,9 +3,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const BASE = process.env.SMOKE_BASE_URL || 'http://localhost:15173'
+const BASE = process.env.SMOKE_BASE_URL || 'http://localhost:5173'
 const PASSWORD = process.env.SMOKE_PASSWORD || 'Test@123456'
-const PLAN_NAME = '智能生产装备与技术专业群建设规划（2026—2030年）'
+const PLAN_NAME = process.env.SMOKE_PLAN_NAME || ''
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ARTIFACTS = path.join(__dirname, 'artifacts', 'responsive')
 fs.mkdirSync(ARTIFACTS, { recursive: true })
@@ -35,7 +35,7 @@ async function checkLayout(page, label) {
     const root = document.documentElement
     const visible = (element) => {
       const style = getComputedStyle(element)
-      return style.display !== 'none' && style.visibility !== 'hidden'
+      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
     }
     const offenders = Array.from(document.querySelectorAll('body *'))
       .filter((element) => {
@@ -50,17 +50,31 @@ async function checkLayout(page, label) {
         left: Math.round(element.getBoundingClientRect().left),
         right: Math.round(element.getBoundingClientRect().right),
       }))
+    const actionIssues = window.innerWidth <= 768
+      ? Array.from(document.querySelectorAll('.app-action-row .el-button'))
+        .filter((element) => visible(element) && element.getBoundingClientRect().height < 43.5)
+        .map((element) => element.textContent?.trim())
+      : []
+    const rightAlignedActions = Array.from(document.querySelectorAll('.app-action-row'))
+      .filter((element) => visible(element) && getComputedStyle(element).justifyContent === 'flex-end')
+      .length
     return {
       viewport: root.clientWidth,
       rootScrollWidth: root.scrollWidth,
       bodyScrollWidth: document.body.scrollWidth,
+      independentAPlusText: document.body.innerText.includes('A+'),
       offenders,
+      actionIssues,
+      rightAlignedActions,
     }
   })
   const overflow = Math.max(layout.rootScrollWidth, layout.bodyScrollWidth) > layout.viewport + 1
   const record = { label, ...layout, overflow }
   results.push(record)
   if (overflow) failures.push(record)
+  if (layout.independentAPlusText) failures.push({ label: `${label}-a-plus`, independentAPlusText: true })
+  if (layout.actionIssues.length > 0) failures.push({ label: `${label}-action-size`, actionIssues: layout.actionIssues })
+  if (layout.rightAlignedActions > 0) failures.push({ label: `${label}-action-alignment`, rightAlignedActions: layout.rightAlignedActions })
   return layout
 }
 
@@ -70,49 +84,31 @@ async function openPage(page, pathName, readySelector, label) {
   await checkLayout(page, label)
 }
 
-async function checkWizard(page, viewport) {
+async function checkAllocationEntry(page, viewport) {
   if (viewport.width > 768) return
   const expand = page.locator('.indicator-card-expand:visible').first()
   if (await expand.count()) await expand.click()
   const open = page
-    .getByRole('button', { name: /^(分解任务|继续分工)$/ })
+    .getByRole('button', { name: /^(分解任务|分工管理)$/ })
     .filter({ visible: true })
     .first()
   if ((await open.count()) === 0) {
-    results.push({ label: `${viewport.name}-wizard`, skipped: '当前计划已定稿，编辑向导由全流程冒烟覆盖' })
+    results.push({ label: `${viewport.name}-allocation-entry`, skipped: '当前计划没有可分工对象' })
     return
   }
   await open.click()
-  const drawer = page.locator('.decomposition-wizard:visible')
-  await drawer.waitFor({ timeout: 10000 })
-  await page.waitForTimeout(600)
-  const geometry = await page.evaluate(() => {
-    const drawer = document.querySelector('.decomposition-wizard')
-    const save = Array.from(drawer?.querySelectorAll('button') ?? []).find((button) =>
-      button.textContent?.includes('保存') && /保存( A\+|分工)/.test(button.textContent),
-    )
-    const drawerRect = drawer?.getBoundingClientRect()
-    const saveRect = save?.getBoundingClientRect()
-    return {
-      drawerLeft: drawerRect?.left ?? null,
-      drawerRight: drawerRect?.right ?? null,
-      saveLeft: saveRect?.left ?? null,
-      saveRight: saveRect?.right ?? null,
-      viewport: window.innerWidth,
-    }
-  })
-  const invalid =
-    geometry.drawerLeft === null ||
-    geometry.saveRight === null ||
-    geometry.drawerLeft < -1 ||
-    geometry.drawerRight > geometry.viewport + 1 ||
-    geometry.saveLeft < -1 ||
-    geometry.saveRight > geometry.viewport + 1
-  results.push({ label: `${viewport.name}-wizard`, ...geometry, invalid })
-  if (invalid) failures.push({ label: `${viewport.name}-wizard`, ...geometry })
-  await page.screenshot({ path: path.join(ARTIFACTS, `${viewport.name}-wizard.png`) })
-  await drawer.getByRole('button', { name: '取消', exact: true }).click()
-  await drawer.waitFor({ state: 'hidden' })
+  await page.waitForURL(/\/allocation\?indicatorId=\d+/)
+  await page.locator('.matrix-card').waitFor()
+  await checkLayout(page, `${viewport.name}-allocation-entry`)
+  const legacyReadonly = (await page.locator('body').innerText()).includes('历史分解数据')
+  if (legacyReadonly) {
+    const editableControls = await page.locator('.add-row-bar:visible, .sticky-bar:visible').count()
+    results.push({ label: `${viewport.name}-legacy-readonly`, editableControls })
+    if (editableControls !== 0) failures.push({ label: `${viewport.name}-legacy-readonly`, editableControls })
+  }
+  await page.screenshot({ path: path.join(ARTIFACTS, `${viewport.name}-allocation-entry.png`) })
+  await page.goBack()
+  await page.locator('.indicator-records').waitFor()
 }
 
 const browser = await chromium.launch({ headless: process.env.SMOKE_HEADFUL !== '1' })
@@ -132,27 +128,63 @@ try {
     await checkLayout(page, `${viewport.name}-plans`)
     await page.screenshot({ path: path.join(ARTIFACTS, `${viewport.name}-plans.png`) })
 
-    const planCard = page.locator(
-      `.plan-card:not(.plan-card--new):has(.plan-name:text-is("${PLAN_NAME}"))`,
-    )
+    const planCard = PLAN_NAME
+      ? page.locator(`.plan-card:not(.plan-card--new):has(.plan-name:text-is("${PLAN_NAME}"))`)
+      : page.locator('.plan-card:not(.plan-card--new)').first()
     if ((await planCard.count()) === 0) {
-      throw new Error(`${viewport.name}: 未找到计划「${PLAN_NAME}」，请确认已加载权威测试数据且计划全名一致`)
+      throw new Error(`${viewport.name}: 未找到可验收计划`)
     }
     await planCard.first().click()
-    await page.waitForURL(/\/plans\/\d+$/)
+    await page.waitForURL(/\/plans\/\d+\/indicators$/)
     const planId = page.url().match(/\/plans\/(\d+)/)?.[1]
     if (!planId) throw new Error(`${viewport.name}: 无法获取计划 ID`)
-    await page.locator('.kpi-row').waitFor()
-    await checkLayout(page, `${viewport.name}-overview`)
+    await openPage(page, `/plans/${planId}`, '.page-title', `${viewport.name}-overview`)
 
     await openPage(page, `/plans/${planId}/indicators`, '.indicator-records', `${viewport.name}-indicators`)
     await page.screenshot({ path: path.join(ARTIFACTS, `${viewport.name}-indicators.png`) })
-    await checkWizard(page, viewport)
+    if (await page.getByRole('button', { name: '计划甘特图', exact: true }).count()) {
+      failures.push({ label: `${viewport.name}-standalone-gantt-entry`, message: '独立甘特图入口未移除' })
+    }
+    await page.getByRole('button', { name: '数据管理', exact: true }).click()
+    await page.locator('.el-dropdown-menu:visible').waitFor()
+    if (await page.getByRole('menuitem', { name: '导出 Excel', exact: true }).count() === 0) {
+      failures.push({ label: `${viewport.name}-indicator-data-menu`, message: '缺少导出 Excel' })
+    }
+    await page.keyboard.press('Escape')
+    await checkAllocationEntry(page, viewport)
+
+    if (await page.getByRole('button', { name: /^(查看详情|详情)$/ }).count() === 0) {
+      await page.locator('.el-table__expand-icon:visible, .indicator-card-expand:visible').first().click()
+    }
+    await page.getByRole('button', { name: /^(查看详情|详情)$/ }).first().click()
+    await page.waitForURL(/\/indicators\/\d+/)
+    await page.locator('.indicator-gantt').first().waitFor()
+    await checkLayout(page, `${viewport.name}-indicator-gantt`)
+    await page.screenshot({ path: path.join(ARTIFACTS, `${viewport.name}-indicator-gantt.png`) })
 
     await openPage(page, `/plans/${planId}/allocation`, '.matrix-card', `${viewport.name}-allocation`)
     await page.screenshot({ path: path.join(ARTIFACTS, `${viewport.name}-allocation.png`) })
     await openPage(page, '/stats', '.stats-filter', `${viewport.name}-stats`)
     await openPage(page, '/workbench', '.kpi-row', `${viewport.name}-workbench`)
+    await openPage(page, '/todos', '.el-tabs', `${viewport.name}-todos`)
+    await openPage(page, '/materials', '.page-title', `${viewport.name}-materials`)
+    await openPage(page, '/reviews', '.page-title', `${viewport.name}-reviews`)
+    await openPage(page, '/adjustments', '.page-title', `${viewport.name}-adjustments`)
+    await openPage(page, '/templates', '.page-title', `${viewport.name}-templates`)
+    await openPage(page, '/logs', '.page-title', `${viewport.name}-logs`)
+    await openPage(page, '/system', '.page-title', `${viewport.name}-system`)
+    for (const tab of ['执行单元', '主要建设方向', '专业群', '用户与角色', '字典', '参数配置', '飞书集成']) {
+      const tabButton = page.getByRole('tab', { name: tab, exact: true })
+      if (await tabButton.count()) {
+        await tabButton.click()
+        await checkLayout(page, `${viewport.name}-system-${tab}`)
+        if (tab === '用户与角色' && await page.locator('.more-dropdown:visible').count()) {
+          await page.locator('.more-dropdown:visible').first().click()
+          await page.locator('.el-dropdown-menu:visible').waitFor()
+          await page.keyboard.press('Escape')
+        }
+      }
+    }
 
     if (pageErrors.length > 0) failures.push({ label: viewport.name, pageErrors })
     results.push({ label: `${viewport.name}-runtime`, pageErrors })

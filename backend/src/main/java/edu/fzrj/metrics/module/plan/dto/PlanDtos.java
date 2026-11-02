@@ -52,13 +52,13 @@ public final class PlanDtos {
         @JsonSerialize(using = ToStringSerializer.class)
         private Long sourcePlanId;
 
-        /** COPY 时是否带分解数据（阶段 2 仅复制结构，字段预留） */
-        private Boolean withAllocation;
+        /** COPY 时是否复制 B 分工结构；不复制下发、接收、填报或审核执行数据 */
+        private Boolean copyAllocations;
 
         private Boolean isReceiverConfirmRequired;
     }
 
-    /** 业务动作请求体（activate / archive / finalize 等）：乐观锁版本号 */
+    /** 业务动作请求体（activate / archive 等）：乐观锁版本号 */
     @Data
     public static class VersionRequest {
         @NotNull(message = "缺少 version（乐观锁版本号）")
@@ -86,9 +86,13 @@ public final class PlanDtos {
             String status,
             String source,
             LocalDateTime finalizedAt,
-            /** 整体完成率（阶段 2 无任务数据，恒为 null，阶段 6 补齐） */
+            /** 当前用户可见范围内，当前统计年度有正目标的已下发任务达标率 */
             BigDecimal completionRate,
-            LocalDateTime createdAt) {
+            LocalDateTime createdAt,
+            Long indicatorCountA,
+            Long indicatorCountAPlus,
+            Long taskCountB,
+            LocalDateTime updatedAt) {
     }
 
     /** 计划详情 */

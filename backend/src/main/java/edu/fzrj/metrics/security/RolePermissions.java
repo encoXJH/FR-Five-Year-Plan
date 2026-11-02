@@ -26,18 +26,21 @@ public final class RolePermissions {
     public static final String AUDIT_LOG_VIEW = "audit-log:view";
     public static final String AUDIT_LOG_EXPORT = "audit-log:export";
     public static final String SYSTEM_MANAGE = "system:manage";
+    public static final String MATERIAL_VIEW = "material:view";
+    public static final String MATERIAL_UPLOAD = "material:upload";
 
     public static final Set<String> ALL = Set.of(
             PLAN_MANAGE, INDICATOR_EDIT, ALLOCATION_EDIT, TASK_DISTRIBUTE, TASK_ACCEPT,
             SUBMISSION_SUBMIT, SUBMISSION_REVIEW, ADJUSTMENT_APPLY, ADJUSTMENT_DECIDE,
-            SETTLEMENT_MANAGE, SCREEN_VIEW, AUDIT_LOG_VIEW, AUDIT_LOG_EXPORT, SYSTEM_MANAGE);
+            SETTLEMENT_MANAGE, SCREEN_VIEW, AUDIT_LOG_VIEW, AUDIT_LOG_EXPORT, SYSTEM_MANAGE,
+            MATERIAL_VIEW, MATERIAL_UPLOAD);
 
     private static final Map<String, Set<String>> ROLE_MAP = Map.of(
             "ADMIN", ALL,
-            "LEADER", Set.of(ADJUSTMENT_DECIDE, SCREEN_VIEW, AUDIT_LOG_VIEW),
+            "LEADER", Set.of(ADJUSTMENT_DECIDE, SCREEN_VIEW, AUDIT_LOG_VIEW, MATERIAL_VIEW),
             "SCHOOL_OWNER", Set.of(INDICATOR_EDIT, ALLOCATION_EDIT, TASK_DISTRIBUTE,
-                    SUBMISSION_REVIEW, ADJUSTMENT_APPLY, ADJUSTMENT_DECIDE),
-            "UNIT_OWNER", Set.of(TASK_ACCEPT, SUBMISSION_SUBMIT, ADJUSTMENT_APPLY, ADJUSTMENT_DECIDE));
+                    SUBMISSION_REVIEW, ADJUSTMENT_APPLY, ADJUSTMENT_DECIDE, MATERIAL_VIEW, MATERIAL_UPLOAD),
+            "UNIT_OWNER", Set.of(SUBMISSION_SUBMIT, ADJUSTMENT_DECIDE, MATERIAL_VIEW, MATERIAL_UPLOAD));
 
     /** 多个角色取权限并集 */
     public static List<String> permissionsOf(List<String> roles) {

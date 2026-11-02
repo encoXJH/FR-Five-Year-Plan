@@ -53,8 +53,8 @@ public class StatsExcelService {
                     List.of("统计项", "值")));
             writer.write(unitRows(byUnit), sheet("单元排名",
                     List.of("排名", "单元编码", "单元名称", "任务数", "已达标", "完成率")));
-            writer.write(indicatorRows(byIndicator), sheet("A 级指标",
-                    List.of("A 编号", "A 名称", "A+ 数", "B 任务数", "已达标", "完成率", "五年累计完成率")));
+            writer.write(indicatorRows(byIndicator), sheet("指标",
+                    List.of("指标编号", "指标名称", "历史记录数", "学院任务数", "已达标", "完成率", "五年累计完成率")));
             writer.write(taskRows, sheet("任务明细",
                     List.of("任务编号", "指标编号", "指标名称", "统计口径", "单位", "单元编码", "单元名称",
                             "年度目标", "完成值", "完成率", "年度状态")));
