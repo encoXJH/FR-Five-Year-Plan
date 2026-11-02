@@ -6,11 +6,7 @@ import BackButton from '@/components/BackButton.vue'
 import ReasonDialog from '@/components/ReasonDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import MilestonePanel from './components/MilestonePanel.vue'
-<<<<<<< HEAD
 import { activatePlan, activatePlanYear, archivePlan, getPlan } from '@/api/plan'
-=======
-import { activatePlan, archivePlan, getPlan } from '@/api/plan'
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 import { finalSettle, getYearSettlement, settleYear, unlockYear } from '@/api/settlement'
 import { completeMakeup, listTaskMakeups } from '@/api/makeup'
 import { useUserStore } from '@/stores/user'
@@ -73,17 +69,12 @@ async function handleActivate(): Promise<void> {
   ElMessage.success('计划已启动')
 }
 
-<<<<<<< HEAD
 // ---------- 年度激活 / 核算 / 解锁 / 五年核算（settlement:manage） ----------
 const activatingYear = ref<number | null>(null)
-=======
-// ---------- 年度核算 / 解锁 / 五年核算（settlement:manage） ----------
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 const settlingYear = ref<number | null>(null)
 const unlockingYear = ref<number | null>(null)
 const finalSettling = ref(false)
 
-<<<<<<< HEAD
 async function handleActivateYear(year: PlanYear): Promise<void> {
   await ElMessageBox.confirm(
     `激活后，${year.year} 年已下发任务的年度状态将转为「进行中」。确认激活？`,
@@ -101,8 +92,6 @@ async function handleActivateYear(year: PlanYear): Promise<void> {
   }
 }
 
-=======
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 async function handleSettleYear(year: PlanYear): Promise<void> {
   await ElMessageBox.confirm(
     `将锁定 ${year.year} 年度数据并生成核算结果：锁定后该年度的填报、审核、分解与调整全部只读，未达标任务将生成「待补做」记录。确认核算？`,
@@ -333,7 +322,6 @@ watch(planId, async (id) => {
               </div>
               <div v-if="canSettle && !isArchived" class="year-actions">
                 <el-button
-<<<<<<< HEAD
                   v-if="year.status === 'NOT_ACTIVATED'"
                   type="primary"
                   size="small"
@@ -344,8 +332,6 @@ watch(planId, async (id) => {
                   激活年度
                 </el-button>
                 <el-button
-=======
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
                   v-if="year.status === 'ACTIVE'"
                   type="warning"
                   size="small"

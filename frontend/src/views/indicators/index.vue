@@ -17,14 +17,10 @@ import { createDirection, listDirections } from '@/api/direction'
 import { deleteIndicator, listIndicators } from '@/api/indicator'
 import { listAllTasks } from '@/api/task'
 import { createExport, pollExport } from '@/api/export'
-<<<<<<< HEAD
 import { getIndicatorTrend, getStatsTree } from '@/api/stats'
 import { listMaterials } from '@/api/material'
 import type { MaterialItem } from '@/api/material'
 import { downloadFile } from '@/api/file'
-=======
-import { getStatsTree } from '@/api/stats'
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 import { getUserOptions } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 import { enumLabel } from '@/utils/enumLabels'
@@ -34,28 +30,17 @@ import {
   formatTargetValue,
   hasQuantitativeFields,
   indexStatsTree,
-<<<<<<< HEAD
   isPercentCaliber,
-=======
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
   parseExpandedIndicatorIds,
   serializeExpandedIndicatorIds,
   yearTargetMap,
 } from '@/utils/indicator'
-<<<<<<< HEAD
 import { formatCount, formatDateTime, formatNumber, formatPercent } from '@/utils/format'
 import { formatFileSize, triggerFileDownload } from '@/utils/file'
 import type { Direction, PlanDetail } from '@/types/plan'
 import type { Indicator, IndicatorTreeNode } from '@/types/indicator'
 import type { IndicatorTrend, StatsTreeNode, TrendYearItem } from '@/types/stats'
 import type { StatCaliber } from '@/types/enums'
-=======
-import { formatPercent } from '@/utils/format'
-import { triggerFileDownload } from '@/utils/file'
-import type { Direction, PlanDetail } from '@/types/plan'
-import type { Indicator, IndicatorTreeNode } from '@/types/indicator'
-import type { StatsTreeNode } from '@/types/stats'
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 import type { IndicatorNature } from '@/types/enums'
 import type { TaskListItem } from '@/types/task'
 import type { UserOption } from '@/types/user'
@@ -428,7 +413,6 @@ async function performToggleExpansion(row: ATableRow): Promise<void> {
   handleExpandChange(row, expanded)
 }
 
-<<<<<<< HEAD
 const INDICATOR_NAME_LIMIT = 15
 
 function shortIndicatorName(name: string): string {
@@ -445,17 +429,6 @@ function toggleExpansion(row: ATableRow): void {
   }, 200))
 }
 
-=======
-function toggleExpansion(row: ATableRow): void {
-  const pending = expandTimers.get(row.id)
-  if (pending) clearTimeout(pending)
-  expandTimers.set(row.id, setTimeout(() => {
-    expandTimers.delete(row.id)
-    void performToggleExpansion(row)
-  }, 200))
-}
-
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 function handleTableExpandChange(row: ATableRow, expanded: boolean): void {
   if (expanded !== expandedIds.has(row.id)) toggleExpansion(row)
 }
@@ -506,7 +479,6 @@ function aStats(indicatorId: string): StatsTreeNode | undefined {
   return statsIndex.value.indicators.get(indicatorId)
 }
 
-<<<<<<< HEAD
 function progressPercentage(value: number | null | undefined): number {
   if (typeof value !== 'number') return 0
   return Math.min(100, Math.max(0, Number((value * 100).toFixed(1))))
@@ -608,8 +580,6 @@ async function downloadMaterial(row: MaterialItem): Promise<void> {
   await downloadFile(row.id, row.fileName, row.size)
 }
 
-=======
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 const aRows = computed(() => tree.value.filter((node) => node.level === 'A'))
 const aConstraintCount = computed(() => aRows.value.filter((node) => node.nature === 'CONSTRAINT').length)
 const aDevelopmentCount = computed(() => aRows.value.filter((node) => node.nature === 'DEVELOPMENT').length)
@@ -975,18 +945,13 @@ onBeforeUnmount(() => {
               </el-table-column>
               <el-table-column label="关键产出指标" min-width="260" class-name="complete-text-cell">
                 <template #default="{ row }">
-<<<<<<< HEAD
                   <el-tooltip :content="row.indicator.name" placement="top" :show-after="200">
                     <button type="button" class="a-name-button" @click="toggleExpansion(row)">{{ shortIndicatorName(row.indicator.name) }}</button>
                   </el-tooltip>
-=======
-                  <button type="button" class="a-name-button" @click="toggleExpansion(row)">{{ row.indicator.name }}</button>
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
                   <div v-if="!row.indicator.isQuantifiable" class="undecomposable-tip">不可量化 · 仅维护基础信息</div>
                   <div v-if="taskErrorIds.has(row.id) && !taskLoadingIds.has(row.id)" class="task-error-state" role="alert">学院任务加载失败，请点击编号重试</div>
                 </template>
               </el-table-column>
-<<<<<<< HEAD
               <el-table-column label="五年进度 / 佐证材料" min-width="330">
                 <template #default="{ row }">
                   <div class="a-progress-entry">
@@ -1071,65 +1036,7 @@ onBeforeUnmount(() => {
                     </el-dropdown>
                     <el-button v-else link type="primary" @click="openRowActions(node.id)">更多<el-icon :size="12"><ArrowDown /></el-icon></el-button>
                   </div>
-=======
-              <template #empty>
-                <el-empty :image-size="80" description="当前方向或筛选条件下没有指标" />
-              </template>
-            </el-table>
-          </template>
 
-          <template #cards>
-            <div class="responsive-card-list indicator-card-list">
-              <article v-for="node in lazyTree" :key="node.id" class="responsive-card indicator-card">
-                <div class="indicator-card-topline">
-                  <button
-                    type="button"
-                    class="indicator-card-code mono indicator-card-code-button"
-                    :aria-label="`${node.indicator.code}：${expandedIds.has(node.id) ? '收起' : '展开'} 学院任务`"
-                    :aria-expanded="expandedIds.has(node.id)"
-                    :aria-busy="taskLoadingIds.has(node.id)"
-                    :data-indicator-id="node.id"
-                    @click="toggleExpansion(node)"
-                  >
-                    {{ expandedIds.has(node.id) ? '▾' : '▸' }} {{ node.indicator.code }}
-                  </button>
-                  <StatusTag kind="IndicatorStatus" :value="node.indicator.status" />
-                </div>
-                <button type="button" class="a-name-button responsive-card__title" @click="toggleExpansion(node)">{{ node.indicator.name }}</button>
-                <div v-if="!node.indicator.isQuantifiable" class="undecomposable-tip">不可量化 · 仅维护基础信息</div>
-                <div v-if="taskErrorIds.has(node.id) && !taskLoadingIds.has(node.id)" class="task-error-state" role="alert">学院任务加载失败，请点击编号重试</div>
-                <el-button
-                  link
-                  type="primary"
-                  class="indicator-card-expand"
-                  :loading="taskLoadingIds.has(node.id)"
-                  @click="toggleExpansion(node)"
-                >
-                  {{ expandedIds.has(node.id) ? '收起学院 B 与量化详情' : '展开学院 B 与量化详情' }}
-                  <el-icon class="expand-icon" :class="{ expanded: expandedIds.has(node.id) }"><ArrowDown /></el-icon>
-                </el-button>
-
-                <div v-if="expandedIds.has(node.id)" class="a-inline-expansion">
-                  <div class="row-actions a-expansion-actions">
-                    <el-button link type="primary" @click="goDetail(node.indicator)">详情</el-button>
-                    <el-button link type="primary" :disabled="!canAllocateRow(node.indicator)" @click="goAllocation(node.indicator)">{{ allocationButtonText }}</el-button>
-                    <el-dropdown
-                      v-if="activeRowActionsId === node.id"
-                      ref="rowActionsDropdownRef"
-                      trigger="click"
-                      @visible-change="handleRowActionsVisible"
-                    >
-                      <el-button link type="primary">更多<el-icon :size="12"><ArrowDown /></el-icon></el-button>
-                      <template #dropdown>
-                        <el-dropdown-menu>
-                          <el-dropdown-item :disabled="!canEditRow(node.indicator)" @click="openEdit(node.indicator)">编辑</el-dropdown-item>
-                          <el-dropdown-item :disabled="!canEditRow(node.indicator)" class="danger-item" @click="handleDelete(node.indicator)"><span class="danger-text">删除</span></el-dropdown-item>
-                        </el-dropdown-menu>
-                      </template>
-                    </el-dropdown>
-                    <el-button v-else link type="primary" @click="openRowActions(node.id)">更多<el-icon :size="12"><ArrowDown /></el-icon></el-button>
-                  </div>
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
                   <div class="a-quant-summary">
                     <div><span>统计口径</span><StatusTag v-if="node.indicator.statCaliber" kind="StatCaliber" :value="node.indicator.statCaliber" /><template v-else>—</template></div>
                     <div><span>五年目标</span><strong>{{ totalTargetDisplay(node.indicator) }}</strong></div>
@@ -1451,7 +1358,6 @@ onBeforeUnmount(() => {
 .row-code-expand:hover, .a-name-button:hover, .indicator-card-code-button:hover { color: var(--el-color-primary); }
 .row-code-expand:focus-visible, .a-name-button:focus-visible, .indicator-card-code-button:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 3px; }
 .a-name-button { display: inline; color: var(--indicator-ink); font-weight: 550; line-height: 22px; }
-<<<<<<< HEAD
 .a-progress-entry { display: grid; grid-template-columns: minmax(160px, 1fr) auto; align-items: center; gap: 12px; }
 .a-progress-button { padding: 5px 7px; border-radius: 5px; cursor: pointer; transition: background-color 0.15s; }
 .a-progress-button:hover { background: var(--el-color-primary-light-9); }
@@ -1478,8 +1384,6 @@ onBeforeUnmount(() => {
 .progress-year-values { text-align: right; color: var(--indicator-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .material-file-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .material-pagination { justify-content: flex-end; margin-top: 16px; }
-=======
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 .undecomposable-tip, .task-error-state { margin-top: 3px; font-size: 12px; }
 .undecomposable-tip { color: var(--indicator-muted); }
 .task-error-state { color: var(--el-color-danger); }

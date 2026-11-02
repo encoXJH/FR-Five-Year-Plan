@@ -7,7 +7,6 @@ import type { StatsOverview } from '@/types/stats'
 import StatusTag from '@/components/StatusTag.vue'
 import { formatCount, formatDateTime, formatPercent } from '@/utils/format'
 
-<<<<<<< HEAD
 const props = withDefaults(defineProps<{
   planId: string
   /** 页面年度筛选；为 null（五年累计）时模块回退到当前自然年 */
@@ -16,13 +15,6 @@ const props = withDefaults(defineProps<{
 }>(), {
   showUploads: true,
 })
-=======
-const props = defineProps<{
-  planId: string
-  /** 页面年度筛选；为 null（五年累计）时模块回退到当前自然年 */
-  year: number | null
-}>()
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
 
 const progressYear = computed(() => props.year ?? new Date().getFullYear())
 const loading = ref(false)
@@ -52,11 +44,7 @@ async function load(): Promise<void> {
   try {
     const [stats, items] = await Promise.all([
       getStatsOverview(props.planId, progressYear.value),
-<<<<<<< HEAD
       props.showUploads ? listYearUploads(props.planId, progressYear.value) : Promise.resolve([]),
-=======
-      listYearUploads(props.planId, progressYear.value),
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
     ])
     overview.value = stats
     uploads.value = items
@@ -65,11 +53,7 @@ async function load(): Promise<void> {
   }
 }
 
-<<<<<<< HEAD
 watch(() => [props.planId, progressYear.value, props.showUploads], () => {
-=======
-watch(() => [props.planId, progressYear.value], () => {
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
   uploadExpanded.value = false
   void load()
 }, { immediate: true })
@@ -106,11 +90,7 @@ watch(() => [props.planId, progressYear.value], () => {
       </div>
     </div>
 
-<<<<<<< HEAD
     <div v-if="showUploads" class="upload-section">
-=======
-    <div class="upload-section">
->>>>>>> 67ea59fc012446865a59fbfd6c079e57e509c4af
       <div class="upload-title">当年已上传指标清单（{{ formatCount(uploads.length) }}）</div>
       <el-table v-if="uploads.length > 0" :data="visibleUploads" border size="small" max-height="360">
         <el-table-column label="指标名称" min-width="240">
