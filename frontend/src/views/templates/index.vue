@@ -13,6 +13,7 @@ import {
 } from '@/api/template'
 import { listPlans, savePlanAsTemplate } from '@/api/plan'
 import { formatDateTime } from '@/utils/format'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import type { PlanCard, PlanTemplate, PlanTemplateDetail } from '@/types/plan'
 
 const loading = ref(false)
@@ -33,12 +34,12 @@ const visibleTemplates = computed<PlanTemplate[]>(() =>
   }),
 )
 
-async function loadTemplates(): Promise<void> {
-  loading.value = true
+async function loadTemplates(silent = false): Promise<void> {
+  if (!silent) loading.value = true
   try {
     templates.value = await listTemplates()
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -188,6 +189,8 @@ async function submitSaveAs(): Promise<void> {
 }
 
 onMounted(loadTemplates)
+
+useAutoRefresh(() => loadTemplates(true))
 </script>
 
 <template>

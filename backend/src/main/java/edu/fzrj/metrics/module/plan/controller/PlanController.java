@@ -46,7 +46,7 @@ public class PlanController {
     @Operation(summary = "新建计划（source：BLANK / TEMPLATE / COPY）", description = "权限：plan:manage")
     @PostMapping
     @PreAuthorize("hasAuthority('plan:manage')")
-    @AuditLog(action = "CREATE", resourceType = "plan", resourceId = "#result.id")
+    @AuditLog(action = "CREATE", resourceType = "plan", resourceId = "#result.id", after = "#result")
     public PlanDtos.Detail create(@Valid @RequestBody PlanDtos.CreateRequest request) {
         return planService.create(request);
     }
@@ -60,7 +60,8 @@ public class PlanController {
     @Operation(summary = "修改计划属性（带 version；起止年份仅草稿可改）", description = "权限：plan:manage")
     @PatchMapping("/{planId}")
     @PreAuthorize("hasAuthority('plan:manage')")
-    @AuditLog(action = "UPDATE", resourceType = "plan", resourceId = "#planId")
+    @AuditLog(action = "UPDATE", resourceType = "plan", resourceId = "#planId",
+            before = "detail(#planId)", after = "#result")
     public PlanDtos.Detail patch(@PathVariable Long planId, @RequestBody JsonNode body) {
         return planService.patch(planId, new PatchHelper(body));
     }
@@ -68,7 +69,8 @@ public class PlanController {
     @Operation(summary = "启动执行（DRAFT → ACTIVE，生成各年度计划年度行）", description = "权限：plan:manage；需带 version")
     @PostMapping("/{planId}/activate")
     @PreAuthorize("hasAuthority('plan:manage')")
-    @AuditLog(action = "UPDATE", resourceType = "plan", resourceId = "#planId")
+    @AuditLog(action = "UPDATE", resourceType = "plan", resourceId = "#planId",
+            before = "detail(#planId)", after = "#result")
     public PlanDtos.Detail activate(@PathVariable Long planId,
                                     @Valid @RequestBody PlanDtos.VersionRequest request) {
         return planService.activate(planId, request.getVersion());
@@ -77,7 +79,8 @@ public class PlanController {
     @Operation(summary = "归档（归档后只读，写操作返回 30002）", description = "权限：plan:manage；需带 version")
     @PostMapping("/{planId}/archive")
     @PreAuthorize("hasAuthority('plan:manage')")
-    @AuditLog(action = "UPDATE", resourceType = "plan", resourceId = "#planId")
+    @AuditLog(action = "UPDATE", resourceType = "plan", resourceId = "#planId",
+            before = "detail(#planId)", after = "#result")
     public PlanDtos.Detail archive(@PathVariable Long planId,
                                    @Valid @RequestBody PlanDtos.VersionRequest request) {
         return planService.archive(planId, request.getVersion());
@@ -88,7 +91,8 @@ public class PlanController {
     @PostMapping("/{planId}/years/{year}/activate")
     @PreAuthorize("hasAuthority('settlement:manage')")
     @edu.fzrj.metrics.common.idempotent.Idempotent
-    @AuditLog(action = "UPDATE", resourceType = "plan", resourceId = "#planId")
+    @AuditLog(action = "UPDATE", resourceType = "plan", resourceId = "#planId",
+            before = "detail(#planId)", after = "#result")
     public PlanDtos.Detail activateYear(@PathVariable Long planId, @PathVariable Integer year,
                                         @Valid @RequestBody PlanDtos.VersionRequest request) {
         return planYearService.activateYear(planId, year, request.getVersion());
@@ -97,7 +101,8 @@ public class PlanController {
     @Operation(summary = "另存为模板（结构快照，不含执行数据）", description = "权限：plan:manage")
     @PostMapping("/{planId}/save-as-template")
     @PreAuthorize("hasAuthority('plan:manage')")
-    @AuditLog(action = "CREATE", resourceType = "template", resourceId = "#planId")
+    @AuditLog(action = "CREATE", resourceType = "template", resourceId = "#result.id",
+            before = "detail(#planId)", after = "#result")
     public PlanDtos.TemplateDetail saveAsTemplate(@PathVariable Long planId,
                                                   @Valid @RequestBody PlanDtos.SaveAsTemplateRequest request) {
         return planService.saveAsTemplate(planId, request);

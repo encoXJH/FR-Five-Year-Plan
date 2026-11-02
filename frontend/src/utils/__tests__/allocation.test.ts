@@ -54,13 +54,13 @@ describe('isPendingAllocationRow', () => {
 })
 
 describe('isSummableCaliber', () => {
-  it('增量 / 存量 / 增长率求和校验', () => {
+  it('仅增量 / 存量做求和校验', () => {
     expect(isSummableCaliber('INCREMENT')).toBe(true)
     expect(isSummableCaliber('STOCK')).toBe(true)
-    expect(isSummableCaliber('GROWTH')).toBe(true)
   })
 
-  it('比率类与是否型不做求和校验', () => {
+  it('增长率、比率类与是否型不做求和校验', () => {
+    expect(isSummableCaliber('GROWTH')).toBe(false)
     expect(isSummableCaliber('RATIO')).toBe(false)
     expect(isSummableCaliber('DIRECT_PERCENT')).toBe(false)
     expect(isSummableCaliber('BOOLEAN')).toBe(false)

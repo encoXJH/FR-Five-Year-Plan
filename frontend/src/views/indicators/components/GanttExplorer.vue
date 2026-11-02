@@ -8,6 +8,7 @@ import { updateMilestone } from '@/api/milestone'
 import { ApiError } from '@/utils/request'
 import { useUserStore } from '@/stores/user'
 import { formatPercent } from '@/utils/format'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import type { GanttMilestone, GanttNode, PlanGantt } from '@/types/gantt'
 
 const props = defineProps<{ planId: string; indicatorId?: string }>()
@@ -31,9 +32,9 @@ const filteredNodes = computed(() => {
   return nodes.filter((node) => matched.has(node.id))
 })
 
-async function load() {
+async function load(silent = false) {
   const current = ++sequence
-  loading.value = true
+  if (!silent) loading.value = true
   error.value = null
   try {
     const result = await getPlanGantt(props.planId, props.indicatorId)
@@ -42,12 +43,13 @@ async function load() {
     selected.value = null
   } catch (cause) {
     if (current !== sequence) return
+    if (silent) return
     data.value = null
     error.value = cause instanceof ApiError
       ? { message: cause.message, code: cause.code, requestId: cause.requestId }
       : { message: cause instanceof Error ? cause.message : '甘特图加载失败，请重试' }
   } finally {
-    if (current === sequence) loading.value = false
+    if (!silent && current === sequence) loading.value = false
   }
 }
 
@@ -80,6 +82,11 @@ async function milestoneDrag(payload: { milestone: GanttMilestone; toYear: numbe
 }
 
 watch(() => [props.planId, props.indicatorId], () => void load(), { immediate: true })
+
+useAutoRefresh(() => load(true), {
+  intervalMs: 60_000,
+  skip: () => saving.value || selected.value !== null,
+})
 </script>
 
 <template>

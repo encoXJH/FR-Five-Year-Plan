@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchEnums } from '@/api/dict'
 import { getDictItems, saveDictItems } from '@/api/system'
 import { useUserStore } from '@/stores/user'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import type { EnumDict } from '@/types/enums'
 import type { DictItem } from '@/types/system'
 
@@ -23,13 +24,13 @@ function activeDictName(): string {
   return CUSTOM_DICTS.find((d) => d.type === activeDictType.value)?.name ?? activeDictType.value
 }
 
-async function loadCustomDict(): Promise<void> {
-  customLoading.value = true
+async function loadCustomDict(silent = false): Promise<void> {
+  if (!silent) customLoading.value = true
   try {
     dictRows.value = (await getDictItems(activeDictType.value)).map((d) => ({ ...d }))
     dictDirty.value = false
   } finally {
-    customLoading.value = false
+    if (!silent) customLoading.value = false
   }
 }
 
@@ -103,8 +104,8 @@ const enumItems = computed(() => {
   return Object.keys(group).map((value) => ({ value, label: group[value] }))
 })
 
-async function loadEnums(): Promise<void> {
-  enumLoading.value = true
+async function loadEnums(silent = false): Promise<void> {
+  if (!silent) enumLoading.value = true
   try {
     enums.value = await fetchEnums()
     userStore.enums = enums.value
@@ -112,7 +113,7 @@ async function loadEnums(): Promise<void> {
       activeEnumType.value = enumTypeNames.value[0] ?? ''
     }
   } finally {
-    enumLoading.value = false
+    if (!silent) enumLoading.value = false
   }
 }
 
@@ -120,6 +121,11 @@ onMounted(() => {
   loadCustomDict()
   loadEnums()
 })
+
+useAutoRefresh(
+  () => Promise.all([loadCustomDict(true), loadEnums(true)]),
+  { skip: () => dictDirty.value },
+)
 </script>
 
 <template>

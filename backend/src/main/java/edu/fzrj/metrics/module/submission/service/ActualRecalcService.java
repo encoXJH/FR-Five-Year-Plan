@@ -54,9 +54,25 @@ public class ActualRecalcService {
         this.planMapper = planMapper;
     }
 
+    /** 审核锁任务年度前先锁聚合节点，统一为 A → 历史 A+ → B，避免跨 B 等待形成循环。 */
+    public void lockAggregationForReview(Long taskYearId) {
+        TaskYear taskYear = taskYearMapper.selectById(taskYearId);
+        if (taskYear == null || taskYear.getDeleted() != 0L) {
+            throw new BizException(ErrorCode.NOT_FOUND, "任务年度不存在");
+        }
+        Indicator indicator = requireIndicator(requireTask(taskYear.getTaskId()).getIndicatorId());
+        if (indicator.getParentId() == null) {
+            lockIndicatorIfAutoSum(indicator);
+            return;
+        }
+        lockIndicatorIfAutoSum(requireIndicator(indicator.getParentId()));
+        lockIndicator(indicator.getId());
+    }
+
     /** 重算某 B 年度并向上刷新；STOCK / GROWTH 补审往年时连续重算至规划末年。 */
     public void recalcTaskYear(Long taskYearId) {
-        TaskYear requestedYear = taskYearMapper.selectById(taskYearId);
+        lockAggregationForReview(taskYearId);
+        TaskYear requestedYear = taskYearMapper.selectByIdForUpdate(taskYearId);
         if (requestedYear == null || requestedYear.getDeleted() != 0L) {
             throw new BizException(ErrorCode.NOT_FOUND, "任务年度不存在");
         }
@@ -73,7 +89,8 @@ public class ActualRecalcService {
                         .ge(TaskYear::getYear, requestedYear.getYear())
                         .le(TaskYear::getYear, plan.getEndYear())
                         .eq(TaskYear::getDeleted, 0L)
-                        .orderByAsc(TaskYear::getYear))
+                        .orderByAsc(TaskYear::getYear)
+                        .last("FOR UPDATE"))
                 : List.of(requestedYear);
         for (TaskYear taskYear : taskYears) {
             recalcOneTaskYear(taskYear, task, indicator, plan, caliber, userId);
@@ -83,21 +100,19 @@ public class ActualRecalcService {
 
     private void recalcOneTaskYear(TaskYear taskYear, Task task, Indicator indicator, Plan plan,
                                    String caliber, Long userId) {
-        List<Submission> approved = submissionMapper.selectList(new LambdaQueryWrapper<Submission>()
+        List<Submission> submissions = submissionMapper.selectList(new LambdaQueryWrapper<Submission>()
                 .eq(Submission::getTaskYearId, taskYear.getId())
-                .eq(Submission::getStatus, "APPROVED")
                 .eq(Submission::getDeleted, 0L)
                 .orderByAsc(Submission::getReviewedAt)
-                .orderByAsc(Submission::getId));
-        List<MetricCalculator.ApprovedValue> values = approved.stream()
+                .orderByAsc(Submission::getId)
+                .last("FOR UPDATE"));
+        List<MetricCalculator.ApprovedValue> values = submissions.stream()
+                .filter(s -> "APPROVED".equals(s.getStatus()))
                 .map(s -> effectiveValue(caliber, s)).toList();
         MetricCalculator.YearResult result = MetricCalculator.yearActual(
                 caliber, values, prevTaskTotal(task.getId(), taskYear.getYear(), plan, indicator));
 
-        boolean hasPending = submissionMapper.selectCount(new LambdaQueryWrapper<Submission>()
-                .eq(Submission::getTaskYearId, taskYear.getId())
-                .eq(Submission::getStatus, "PENDING_REVIEW")
-                .eq(Submission::getDeleted, 0L)) > 0;
+        boolean hasPending = submissions.stream().anyMatch(s -> "PENDING_REVIEW".equals(s.getStatus()));
 
         taskYear.setActualValue(result.actualValue());
         taskYear.setActualNumerator(result.numerator());
@@ -111,7 +126,9 @@ public class ActualRecalcService {
                     : Boolean.TRUE.equals(taskYear.getIsAchieved()) ? "ACHIEVED" : "IN_PROGRESS");
         }
         taskYear.setUpdatedBy(userId);
-        taskYearMapper.updateById(taskYear);
+        if (taskYearMapper.updateById(taskYear) == 0) {
+            throw new BizException(ErrorCode.VERSION_CONFLICT, "任务年度完成值已被他人重算，请刷新后重试");
+        }
     }
 
     // ---------------- 逐级汇总 ----------------
@@ -151,7 +168,9 @@ public class ActualRecalcService {
         return taskYearMapper.selectList(new LambdaQueryWrapper<TaskYear>()
                         .eq(TaskYear::getIndicatorId, indicator.getId())
                         .eq(TaskYear::getYear, year)
-                        .eq(TaskYear::getDeleted, 0L))
+                        .eq(TaskYear::getDeleted, 0L)
+                        .orderByAsc(TaskYear::getId)
+                        .last("FOR UPDATE"))
                 .stream()
                 .map(ty -> new MetricCalculator.YearResult(ty.getActualValue(), ty.getActualNumerator(),
                         ty.getActualDenominator(), ty.getActualTotal(), null, null))
@@ -162,7 +181,8 @@ public class ActualRecalcService {
         IndicatorYearTarget row = yearTargetMapper.selectOne(new LambdaQueryWrapper<IndicatorYearTarget>()
                 .eq(IndicatorYearTarget::getIndicatorId, indicator.getId())
                 .eq(IndicatorYearTarget::getYear, year)
-                .eq(IndicatorYearTarget::getDeleted, 0L));
+                .eq(IndicatorYearTarget::getDeleted, 0L)
+                .last("FOR UPDATE"));
         if (row == null) {
             return MetricCalculator.YearResult.empty();
         }
@@ -175,7 +195,8 @@ public class ActualRecalcService {
         IndicatorYearTarget row = yearTargetMapper.selectOne(new LambdaQueryWrapper<IndicatorYearTarget>()
                 .eq(IndicatorYearTarget::getIndicatorId, indicator.getId())
                 .eq(IndicatorYearTarget::getYear, year)
-                .eq(IndicatorYearTarget::getDeleted, 0L));
+                .eq(IndicatorYearTarget::getDeleted, 0L)
+                .last("FOR UPDATE"));
         if (row == null) {
             return;
         }
@@ -189,7 +210,9 @@ public class ActualRecalcService {
                 indicator.getTargetDirection(), caliber, result, row.getTarget()));
         row.setCalculatedAt(LocalDateTime.now());
         row.setUpdatedBy(userId);
-        yearTargetMapper.updateById(row);
+        if (yearTargetMapper.updateById(row) == 0) {
+            throw new BizException(ErrorCode.VERSION_CONFLICT, "指标年度完成值已被他人重算，请刷新后重试");
+        }
     }
 
     // ---------------- 有效值 / 上年总量 ----------------
@@ -220,7 +243,8 @@ public class ActualRecalcService {
         TaskYear prev = taskYearMapper.selectOne(new LambdaQueryWrapper<TaskYear>()
                 .eq(TaskYear::getTaskId, taskId)
                 .eq(TaskYear::getYear, year - 1)
-                .eq(TaskYear::getDeleted, 0L));
+                .eq(TaskYear::getDeleted, 0L)
+                .last("FOR UPDATE"));
         return prev == null ? null : prev.getActualTotal();
     }
 
@@ -232,8 +256,25 @@ public class ActualRecalcService {
         IndicatorYearTarget prev = yearTargetMapper.selectOne(new LambdaQueryWrapper<IndicatorYearTarget>()
                 .eq(IndicatorYearTarget::getIndicatorId, indicator.getId())
                 .eq(IndicatorYearTarget::getYear, year - 1)
-                .eq(IndicatorYearTarget::getDeleted, 0L));
+                .eq(IndicatorYearTarget::getDeleted, 0L)
+                .last("FOR UPDATE"));
         return prev == null ? null : prev.getActualTotal();
+    }
+
+    private void lockIndicatorIfAutoSum(Indicator indicator) {
+        if ("AUTO_SUM".equals(indicator.getRollupMode())) {
+            lockIndicator(indicator.getId());
+        }
+    }
+
+    private void lockIndicator(Long indicatorId) {
+        Indicator locked = indicatorMapper.selectOne(new LambdaQueryWrapper<Indicator>()
+                .eq(Indicator::getId, indicatorId)
+                .eq(Indicator::getDeleted, 0L)
+                .last("FOR UPDATE"));
+        if (locked == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "指标不存在");
+        }
     }
 
     private Task requireTask(Long taskId) {

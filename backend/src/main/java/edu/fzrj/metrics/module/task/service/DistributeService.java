@@ -77,6 +77,14 @@ public class DistributeService {
         this.planReadScopeService = planReadScopeService;
     }
 
+    /** 下发审计快照：记录任务在下发前后的状态与版本。 */
+    public List<Task> auditSnapshot(Long planId) {
+        return taskMapper.selectList(new LambdaQueryWrapper<Task>()
+                .eq(Task::getPlanId, planId)
+                .eq(Task::getDeleted, 0L)
+                .orderByAsc(Task::getId));
+    }
+
     @Transactional
     public TaskDtos.DistributeResponse distribute(Long planId, TaskDtos.DistributeRequest request) {
         Plan plan = planService.requirePlan(planId);

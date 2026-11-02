@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -17,7 +18,18 @@ import static org.mockito.Mockito.when;
 
 class SignedUrlServiceTest {
 
-    private final SignedUrlService service = new SignedUrlService("test-sign-secret", 10);
+    private static final String SECRET = "test-file-sign-secret-0123456789abcdef0123456789abcdef";
+
+    private final SignedUrlService service = new SignedUrlService(SECRET, 10);
+
+    @Test
+    void 缺失过短或占位密钥拒绝初始化() {
+        String[] invalidSecrets = {null, "", " ", "short",
+                "please-change-me-file-sign-secret-with-enough-length", "${FILE_SIGN_SECRET}"};
+        for (String secret : invalidSecrets) {
+            assertThrows(IllegalStateException.class, () -> new SignedUrlService(secret, 10));
+        }
+    }
 
     @Test
     void 签名可校验通过() {
@@ -70,7 +82,7 @@ class SignedUrlServiceTest {
         SignedUrlService.SignedUrl expected = new SignedUrlService.SignedUrl(
                 "http://localhost:9000/bucket/key?X-Amz-Signature=abc", LocalDateTime.now().plusMinutes(10));
         when(minio.presignGet("2026/10/a.pdf", 10)).thenReturn(expected);
-        SignedUrlService choice = new SignedUrlService("secret", 10, null, provider);
+        SignedUrlService choice = new SignedUrlService(SECRET, 10, null, provider);
         FileInfo file = storedFile("MINIO");
 
         assertSame(expected, choice.sign(file));
@@ -85,7 +97,7 @@ class SignedUrlServiceTest {
         SignedUrlService.SignedUrl expected = new SignedUrlService.SignedUrl(
                 "http://localhost:9000/bucket/key?response-content-disposition=attachment", LocalDateTime.now());
         when(minio.presignGet("2026/10/a.pdf", 10, "a.pdf", true)).thenReturn(expected);
-        SignedUrlService choice = new SignedUrlService("secret", 10, null, provider);
+        SignedUrlService choice = new SignedUrlService(SECRET, 10, null, provider);
 
         assertSame(expected, choice.sign(storedFile("MINIO"), true));
     }
@@ -94,7 +106,7 @@ class SignedUrlServiceTest {
     @SuppressWarnings("unchecked")
     void 切换MINIO后历史LOCAL文件仍使用后端raw签名() {
         ObjectProvider<MinioStorageService> provider = mock(ObjectProvider.class);
-        SignedUrlService choice = new SignedUrlService("secret", 10, null, provider);
+        SignedUrlService choice = new SignedUrlService(SECRET, 10, null, provider);
 
         SignedUrlService.SignedUrl signed = choice.sign(storedFile("LOCAL"));
 

@@ -43,6 +43,7 @@ import {
   type StatsTreeIndex,
 } from '@/utils/indicator'
 import { formatCount, formatDateTime, formatNumber, formatPercent } from '@/utils/format'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import { formatFileSize, triggerFileDownload } from '@/utils/file'
 import type { Direction, PlanDetail } from '@/types/plan'
 import type { Indicator, IndicatorTreeNode } from '@/types/indicator'
@@ -79,6 +80,7 @@ const filters = reactive({
   nature: '' as IndicatorNature | '',
   ownerId: '',
   quantStatus: '' as '' | 'QUANTIFIABLE' | 'NON_QUANTIFIABLE',
+  completionStatus: '' as '' | 'UNFINISHED' | 'FINISHED',
   onlyMine: defaultOnlyMine(),
   keyword: '',
 })
@@ -151,11 +153,11 @@ async function loadTree(): Promise<void> {
   await syncExpandedNodes()
 }
 
-async function loadAll(): Promise<void> {
+async function loadAll(silent = false): Promise<void> {
   const requestedPlanId = planId.value
   if (!requestedPlanId) return
   const requestId = ++planRequestId
-  loading.value = true
+  if (!silent) loading.value = true
   try {
     const detail = await getPlan(requestedPlanId)
     if (requestId !== planRequestId || requestedPlanId !== planId.value) return
@@ -165,8 +167,13 @@ async function loadAll(): Promise<void> {
       loadStatsTree(),
       loadDirections(),
     ])
+    if (silent) {
+      const loadedIds = Object.keys(tasksByIndicator)
+      loadedIds.forEach(invalidateIndicatorTasks)
+      await Promise.all(loadedIds.map((id) => ensureIndicatorTasks(id).catch(() => undefined)))
+    }
   } finally {
-    if (requestId === planRequestId) loading.value = false
+    if (!silent && requestId === planRequestId) loading.value = false
   }
 }
 
@@ -194,6 +201,7 @@ function resetFilters(): void {
   filters.nature = ''
   filters.ownerId = ''
   filters.quantStatus = ''
+  filters.completionStatus = ''
   filters.onlyMine = defaultOnlyMine()
   filters.keyword = ''
   selectedDirectionId.value = ''
@@ -209,6 +217,15 @@ const visibleTree = computed<IndicatorTreeNode[]>(() => {
   }
   if (filters.quantStatus === 'QUANTIFIABLE') nodes = nodes.filter((node) => node.isQuantifiable)
   if (filters.quantStatus === 'NON_QUANTIFIABLE') nodes = nodes.filter((node) => !node.isQuantifiable)
+  if (filters.completionStatus) {
+    const year = new Date().getFullYear()
+    nodes = nodes.filter((node) => {
+      if (!node.isQuantifiable || !hasTargetValue(targetOf(node, year))) return false
+      const stats = aStatsOfYear(node.id, year)
+      const achieved = stats?.achieveStatus === 'ACHIEVED' || stats?.achieveStatus === 'EXCEEDED'
+      return filters.completionStatus === 'FINISHED' ? achieved : !achieved
+    })
+  }
   if (filters.nature) {
     nodes = nodes
       .map((node) => ({
@@ -899,6 +916,8 @@ onBeforeUnmount(() => {
   for (const timer of expandTimers.values()) clearTimeout(timer)
   expandTimers.clear()
 })
+
+useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
 </script>
 
 <template>
@@ -990,10 +1009,10 @@ onBeforeUnmount(() => {
             class="simple-filter__keyword"
             @input="onKeywordInput"
           />
-          <el-select v-model="filters.quantStatus" placeholder="量化状态" class="simple-filter__status">
-            <el-option label="全部状态" value="" />
-            <el-option label="可量化" value="QUANTIFIABLE" />
-            <el-option label="不可量化" value="NON_QUANTIFIABLE" />
+          <el-select v-model="filters.completionStatus" placeholder="今年完成情况" class="simple-filter__status">
+            <el-option label="全部指标" value="" />
+            <el-option label="今年未完成目标" value="UNFINISHED" />
+            <el-option label="今年已完成目标" value="FINISHED" />
           </el-select>
           <el-button type="primary" class="simple-filter__query" @click="applyFilters">查询</el-button>
           <el-popover placement="bottom-end" :width="360" trigger="click">
@@ -1005,6 +1024,12 @@ onBeforeUnmount(() => {
                 <el-select v-model="filters.nature" clearable placeholder="全部性质" style="width: 100%">
                   <el-option :label="enumLabel('IndicatorNature', 'CONSTRAINT', userStore.enums)" value="CONSTRAINT" />
                   <el-option :label="enumLabel('IndicatorNature', 'DEVELOPMENT', userStore.enums)" value="DEVELOPMENT" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="量化状态">
+                <el-select v-model="filters.quantStatus" clearable placeholder="全部状态" style="width: 100%">
+                  <el-option label="可量化" value="QUANTIFIABLE" />
+                  <el-option label="不可量化" value="NON_QUANTIFIABLE" />
                 </el-select>
               </el-form-item>
               <el-form-item label="负责人">
@@ -1590,7 +1615,7 @@ onBeforeUnmount(() => {
   background: var(--indicator-soft);
 }
 .simple-filter__keyword { width: 250px; }
-.simple-filter__status { width: 142px; }
+.simple-filter__status { width: 168px; }
 .simple-filter__query { min-width: 66px; }
 .more-filter-button, .expand-all-button { margin-left: 0; }
 .advanced-filter-form :deep(.el-form-item) { margin-bottom: 14px; }

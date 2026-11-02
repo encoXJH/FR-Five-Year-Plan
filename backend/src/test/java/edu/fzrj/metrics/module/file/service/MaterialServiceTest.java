@@ -12,7 +12,9 @@ import edu.fzrj.metrics.module.file.entity.FileRef;
 import edu.fzrj.metrics.module.file.mapper.FileInfoMapper;
 import edu.fzrj.metrics.module.file.mapper.FileRefMapper;
 import edu.fzrj.metrics.module.file.mapper.MaterialQueryMapper;
+import edu.fzrj.metrics.module.indicator.entity.Direction;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
+import edu.fzrj.metrics.module.indicator.mapper.DirectionMapper;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
 import edu.fzrj.metrics.module.milestone.mapper.MilestoneMapper;
 import edu.fzrj.metrics.module.submission.mapper.SubmissionMapper;
@@ -48,6 +50,7 @@ class MaterialServiceTest {
     @Mock private FileRefMapper fileRefMapper;
     @Mock private FileInfoMapper fileInfoMapper;
     @Mock private IndicatorMapper indicatorMapper;
+    @Mock private DirectionMapper directionMapper;
     @Mock private SubmissionMapper submissionMapper;
     @Mock private AdjustmentMapper adjustmentMapper;
     @Mock private MilestoneMapper milestoneMapper;
@@ -63,6 +66,7 @@ class MaterialServiceTest {
     static void initMybatisLambdaCache() {
         MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(), "");
         TableInfoHelper.initTableInfo(assistant, FileInfo.class);
+        TableInfoHelper.initTableInfo(assistant, Direction.class);
         TableInfoHelper.initTableInfo(assistant, Indicator.class);
         TableInfoHelper.initTableInfo(assistant, edu.fzrj.metrics.module.task.entity.Task.class);
     }
@@ -161,5 +165,45 @@ class MaterialServiceTest {
         assertEquals(1L, result.getTotal());
         assertEquals("A01", result.getItems().get(0).indicator().code());
         verify(fileRefMapper, never()).selectList(any());
+    }
+
+    @Test
+    void 兼任校级和学院负责人时材料范围取并集() {
+        login(new LoginUser(2L, "owner", "兼任负责人", 100L,
+                List.of("SCHOOL_OWNER", "UNIT_OWNER"), List.of("material:view")));
+        when(materialQueryMapper.countMaterials(any())).thenReturn(0L);
+
+        materialService.list(4L, null, null, null, null, null, null, 1, 20);
+
+        ArgumentCaptor<MaterialQuery> captor = ArgumentCaptor.forClass(MaterialQuery.class);
+        verify(materialQueryMapper).countMaterials(captor.capture());
+        assertEquals(2L, captor.getValue().ownerScope());
+        assertEquals(100L, captor.getValue().unitScope());
+    }
+
+    @Test
+    void 兼任校级和学院负责人时指标候选包含负责指标和本单元指标() {
+        login(new LoginUser(2L, "owner", "兼任负责人", 100L,
+                List.of("SCHOOL_OWNER", "UNIT_OWNER"), List.of("material:view")));
+        Indicator owned = indicator(10L, "A01");
+        Indicator unitIndicator = indicator(11L, "A02");
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(owned, unitIndicator), List.of(owned));
+        edu.fzrj.metrics.module.task.entity.Task unitTask = new edu.fzrj.metrics.module.task.entity.Task();
+        unitTask.setTopIndicatorId(11L);
+        when(taskMapper.selectList(any())).thenReturn(List.of(unitTask));
+
+        var result = materialService.accessibleIndicators(4L);
+
+        assertEquals(List.of(10L, 11L), result.stream().map(MaterialDtos.IndicatorOption::id).toList());
+    }
+
+    private Indicator indicator(Long id, String code) {
+        Indicator indicator = new Indicator();
+        indicator.setId(id);
+        indicator.setCode(code);
+        indicator.setName(code + "指标");
+        indicator.setLevel("A");
+        indicator.setDeleted(0L);
+        return indicator;
     }
 }

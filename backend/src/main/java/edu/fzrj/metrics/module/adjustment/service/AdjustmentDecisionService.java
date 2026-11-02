@@ -234,6 +234,42 @@ public class AdjustmentDecisionService {
         }
         rows.sort(Comparator.comparing(r -> r.fromTy().getId()));
 
+        // 普通查询只用于定位行；统一按 task_year id 加锁后重读，确保交叠调整看到生效时最新目标。
+        Set<Long> lockIds = new HashSet<>();
+        for (MoveRow row : rows) {
+            lockIds.add(row.fromTy().getId());
+            lockIds.add(row.toTy().getId());
+        }
+        List<Long> orderedLockIds = new ArrayList<>(lockIds);
+        orderedLockIds.sort(Long::compareTo);
+        Map<Long, TaskYear> lockedYears = new HashMap<>();
+        for (Long id : orderedLockIds) {
+            TaskYear locked = taskYearMapper.selectByIdForUpdate(id);
+            if (locked == null) {
+                throw new BizException(ErrorCode.NOT_FOUND, "任务年度不存在：" + id);
+            }
+            lockedYears.put(id, locked);
+        }
+        for (int i = 0; i < rows.size(); i++) {
+            MoveRow row = rows.get(i);
+            rows.set(i, new MoveRow(row.item(), lockedYears.get(row.fromTy().getId()),
+                    lockedYears.get(row.toTy().getId())));
+        }
+
+        // 以生效时最新目标为基线，接收目标在审批期间被其他调整改变时也能生成真实 after。
+        List<AdjustmentRules.TargetEntry> effectiveBefore = new ArrayList<>();
+        Set<String> snapshotKeys = new HashSet<>();
+        for (MoveRow row : rows) {
+            if (snapshotKeys.add(fromTask.getCode() + "#" + row.fromTy().getYear())) {
+                effectiveBefore.add(new AdjustmentRules.TargetEntry(fromTask.getCode(), null,
+                        row.fromTy().getYear(), row.fromTy().getTarget()));
+            }
+            if (snapshotKeys.add(receiverTask.getCode() + "#" + row.toTy().getYear())) {
+                effectiveBefore.add(new AdjustmentRules.TargetEntry(receiverTask.getCode(), null,
+                        row.toTy().getYear(), row.toTy().getTarget()));
+            }
+        }
+
         for (MoveRow row : rows) {
             AdjustmentItem item = row.item();
             TaskYear fromTy = row.fromTy();
@@ -308,8 +344,8 @@ public class AdjustmentDecisionService {
             }
         }
 
-        // 调整前后快照（before 申请时已写；after 按试算规则重算，与 preview 一致）
-        adjustment.setSnapshotAfter(adjustmentService.writeSnapshot(computeMoveAfter(adjustment, items)));
+        // before 保留申请时基线；after 基于生效时最新目标计算，与实际落库结果一致。
+        adjustment.setSnapshotAfter(adjustmentService.writeSnapshot(computeMoveAfter(effectiveBefore, items)));
 
         // 防御性守恒复核（规则 6.8）：与下发一致，求和口径 ΣB 不得低于指标目标
         List<String> conservation = AdjustmentRules.conservationErrors(caliber, "A+ 目标",
@@ -456,15 +492,9 @@ public class AdjustmentDecisionService {
         row.setCalculatedAt(now);
     }
 
-    /** 移动类 after 快照：申请时 before + 明细移动（与 preview 同规则） */
-    private List<AdjustmentRules.TargetEntry> computeMoveAfter(Adjustment adjustment,
+    /** 移动类 after 快照：生效时最新目标 + 本单明细移动。 */
+    private List<AdjustmentRules.TargetEntry> computeMoveAfter(List<AdjustmentRules.TargetEntry> before,
                                                                List<AdjustmentItem> items) {
-        List<AdjustmentRules.TargetEntry> before = new ArrayList<>();
-        List<AdjustmentDtos.SnapshotEntry> stored = adjustmentService.readSnapshot(adjustment.getSnapshotBefore());
-        if (stored != null) {
-            stored.forEach(e -> before.add(new AdjustmentRules.TargetEntry(e.taskCode(), e.indicatorCode(),
-                    e.year(), e.target())));
-        }
         Map<Long, String> codeByTaskId = new HashMap<>();
         List<AdjustmentRules.MoveItem> moves = new ArrayList<>();
         for (AdjustmentItem item : items) {

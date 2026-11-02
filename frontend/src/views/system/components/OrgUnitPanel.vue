@@ -5,6 +5,7 @@ import { createOrgUnit, listOrgUnitsAdmin, updateOrgUnit } from '@/api/system'
 import { useUserStore } from '@/stores/user'
 import { enumLabel, enumOptions } from '@/utils/enumLabels'
 import { EMPTY_DISPLAY } from '@/utils/format'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import type { OrgUnitAdmin } from '@/types/system'
 
 const userStore = useUserStore()
@@ -13,12 +14,12 @@ const loading = ref(false)
 const rows = ref<OrgUnitAdmin[]>([])
 const typeOptions = enumOptions('OrgUnitType', userStore.enums)
 
-async function load(): Promise<void> {
-  loading.value = true
+async function load(silent = false): Promise<void> {
+  if (!silent) loading.value = true
   try {
     rows.value = await listOrgUnitsAdmin()
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -115,6 +116,8 @@ async function toggleEnabled(row: OrgUnitAdmin): Promise<void> {
 }
 
 onMounted(load)
+
+useAutoRefresh(() => load(true))
 </script>
 
 <template>

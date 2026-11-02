@@ -6,6 +6,7 @@ import { listOrgUnits } from '@/api/orgUnit'
 import type { OrgUnit } from '@/api/orgUnit'
 import { getUserOptions } from '@/api/user'
 import { EMPTY_DISPLAY } from '@/utils/format'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import type { MajorGroup } from '@/types/system'
 import type { UserOption } from '@/types/user'
 
@@ -14,12 +15,12 @@ const rows = ref<MajorGroup[]>([])
 const units = ref<OrgUnit[]>([])
 const userOptions = ref<UserOption[]>([])
 
-async function load(): Promise<void> {
-  loading.value = true
+async function load(silent = false): Promise<void> {
+  if (!silent) loading.value = true
   try {
     rows.value = await listMajorGroups()
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -109,6 +110,8 @@ onMounted(() => {
     })
     .catch(() => undefined)
 })
+
+useAutoRefresh(() => load(true))
 </script>
 
 <template>

@@ -86,6 +86,67 @@ class StatsServiceTest {
     }
 
     @Test
+    void 默认统计年度取当前自然年而不是规划末年() {
+        Plan plan = new Plan();
+        plan.setStartYear(2026);
+        plan.setEndYear(2030);
+
+        Integer resolved = statsService.resolveYear(plan, null);
+
+        assertEquals(Math.max(2026, Math.min(2030, java.time.LocalDate.now().getYear())), resolved);
+    }
+
+    @Test
+    void 手工存量指标使用认定总量计算年度完成率() {
+        Plan plan = new Plan();
+        plan.setId(11L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2026);
+        Indicator a = indicator(1L, null, "A01", "STOCK");
+        a.setRollupMode("MANUAL");
+        a.setTotalTarget(new BigDecimal("100"));
+        IndicatorYearTarget row = target(501L, 1L, "STOCK", "80", "0", "1");
+        row.setTarget(new BigDecimal("100"));
+        row.setManualActualValue(new BigDecimal("80"));
+        row.setActualTotal(new BigDecimal("80"));
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(a));
+        when(yearTargetMapper.selectList(any())).thenReturn(List.of(row));
+
+        StatsDtos.TreeNode result = statsService.tree(11L, 2026, StatsService.ScopeFilter.allData()).get(0);
+
+        assertEquals(0, new BigDecimal("80").compareTo(result.actualTotal()));
+        assertEquals(0, new BigDecimal("0.8").compareTo(result.completionRate()));
+        assertEquals(0, new BigDecimal("0.8").compareTo(result.cumulativeRate()));
+    }
+
+    @Test
+    void 范围统计累计值仅归集可见任务() {
+        Plan plan = new Plan();
+        plan.setId(11L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2026);
+        Indicator a = indicator(1L, null, "A01", "INCREMENT");
+        a.setRollupMode("AUTO_SUM");
+        a.setTotalTarget(BigDecimal.TEN);
+        Task visible = task(101L, 1L, 31L, "A01-C01");
+        TaskYear visibleYear = taskYear(1001L, 101L, 1L, 31L, "INCREMENT", "2", "0", "1");
+        IndicatorYearTarget allSchoolCache = target(501L, 1L, "INCREMENT", "9", "0", "1");
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(a));
+        when(taskMapper.selectList(any())).thenReturn(List.of(visible));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(visibleYear), List.of(visibleYear));
+        when(yearTargetMapper.selectList(any())).thenReturn(List.of(allSchoolCache));
+
+        StatsDtos.TreeNode result = statsService.tree(11L, 2026,
+                new StatsService.ScopeFilter(false, 31L, java.util.Set.of())).get(0);
+
+        assertEquals(0, new BigDecimal("2").compareTo(result.actualValue()));
+        assertEquals(0, new BigDecimal("2").compareTo(result.cumulativeActual()));
+        assertEquals(0, new BigDecimal("0.2").compareTo(result.cumulativeRate()));
+    }
+
+    @Test
     void 趋势返回占比分子分母() {
         LoginUser user = new LoginUser(201L, "admin", "管理员", null, List.of("ADMIN"), List.of());
         SecurityContextHolder.getContext().setAuthentication(

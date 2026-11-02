@@ -17,6 +17,7 @@ import { newIdempotencyKey } from '@/utils/idempotency'
 import { ApiError } from '@/utils/request'
 import { enumLabel } from '@/utils/enumLabels'
 import { formatDateTime } from '@/utils/format'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import { formatFileSize, FILE_CATEGORY_COLORS } from '@/utils/file'
 import {
   canWithdraw,
@@ -40,8 +41,8 @@ const userStore = useUserStore()
 const loading = ref(false)
 const page = ref<PageResult<AdjustmentListItem>>({ items: [], total: 0, page: 1, pageSize: 10 })
 
-async function loadList(): Promise<void> {
-  loading.value = true
+async function loadList(silent = false): Promise<void> {
+  if (!silent) loading.value = true
   try {
     page.value = await listAdjustments({
       scope: 'ALL',
@@ -49,7 +50,7 @@ async function loadList(): Promise<void> {
       pageSize: page.value.pageSize,
     })
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -355,6 +356,8 @@ onMounted(() => {
   const linkedId = typeof route.query.adjustmentId === 'string' ? route.query.adjustmentId : null
   if (linkedId) openDetail({ id: linkedId })
 })
+
+useAutoRefresh(() => loadList(true), { skip: () => drawerVisible.value })
 </script>
 
 <template>

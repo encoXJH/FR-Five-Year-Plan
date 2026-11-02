@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getSettings, updateSettings } from '@/api/system'
+import { shouldApplyRefreshResponse, useAutoRefresh } from '@/utils/autoRefresh'
 import type { SettingItem, SettingPatchItem } from '@/types/system'
 
 /** 参数分组（按 key 前缀；标签优先用后端 description） */
@@ -59,14 +60,22 @@ function hintOf(item: SettingItem): string {
   return ''
 }
 
-async function load(): Promise<void> {
-  loading.value = true
+let loadGeneration = 0
+
+async function load(silent = false): Promise<void> {
+  const generation = ++loadGeneration
+  if (!silent) loading.value = true
   try {
     const result = await getSettings()
+    if (!shouldApplyRefreshResponse({
+      current: generation === loadGeneration,
+      silent,
+      skipping: dirty.value,
+    })) return
     items.value = result.items
     edits.value = {}
   } finally {
-    loading.value = false
+    if (!silent && generation === loadGeneration) loading.value = false
   }
 }
 
@@ -90,6 +99,8 @@ async function save(): Promise<void> {
 }
 
 onMounted(load)
+
+useAutoRefresh(() => load(true), { skip: () => dirty.value })
 </script>
 
 <template>

@@ -58,7 +58,7 @@ public class IndicatorController {
             description = "权限：indicator:edit；code 为空时系统生成（A01 / A01-1）；草稿 A 的 S 归属可暂空，仅 ADMIN 可在创建时指定")
     @PostMapping("/api/v1/plans/{planId}/indicators")
     @PreAuthorize("hasAuthority('indicator:edit')")
-    @AuditLog(action = "CREATE", resourceType = "indicator", resourceId = "#planId")
+    @AuditLog(action = "CREATE", resourceType = "indicator", resourceId = "#result.id", after = "#result")
     public IndicatorDtos.Detail create(@PathVariable Long planId,
                                        @Valid @RequestBody IndicatorDtos.CreateRequest request) {
         return indicatorService.create(planId, request);
@@ -70,7 +70,8 @@ public class IndicatorController {
     @PostMapping("/api/v1/plans/{planId}/indicators/{parentId}/decomposition")
     @PreAuthorize("hasAuthority('indicator:edit') and hasAuthority('allocation:edit')")
     @Idempotent
-    @AuditLog(action = "CREATE", resourceType = "indicator", resourceId = "#result.aPlus.id")
+    @AuditLog(action = "CREATE", resourceType = "indicator", resourceId = "#result.aPlus.id",
+            before = "detail(#parentId)", after = "#result")
     public IndicatorDtos.DecompositionResponse decompose(
             @PathVariable Long planId, @PathVariable Long parentId,
             @Valid @RequestBody IndicatorDtos.DecompositionRequest request) {
@@ -86,7 +87,8 @@ public class IndicatorController {
     @Operation(summary = "修改未下发指标（带 version，冲突 10005；已下发 50003）", description = "权限：indicator:edit")
     @PatchMapping("/api/v1/indicators/{indicatorId}")
     @PreAuthorize("hasAuthority('indicator:edit')")
-    @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId")
+    @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId",
+            before = "detail(#indicatorId)", after = "#result")
     public IndicatorDtos.Detail patch(@PathVariable Long indicatorId, @RequestBody JsonNode body) {
         return indicatorService.patch(indicatorId, new PatchHelper(body));
     }
@@ -95,7 +97,8 @@ public class IndicatorController {
             description = "仅 ADMIN；带 version（冲突 10005）；自身或下属已下发后不可修改")
     @PutMapping("/api/v1/indicators/{indicatorId}/direction")
     @PreAuthorize("hasAuthority('system:manage')")
-    @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId")
+    @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId",
+            before = "detail(#indicatorId)", after = "#result")
     public IndicatorDtos.Detail assignDirection(@PathVariable Long indicatorId,
                                                 @Valid @RequestBody IndicatorDtos.DirectionAssignRequest request) {
         return indicatorService.assignDirection(indicatorId, request);
@@ -104,7 +107,8 @@ public class IndicatorController {
     @Operation(summary = "删除未下发指标（已下发后 40004；有 A+ 子级 40008）", description = "权限：indicator:edit")
     @DeleteMapping("/api/v1/indicators/{indicatorId}")
     @PreAuthorize("hasAuthority('indicator:edit')")
-    @AuditLog(action = "DELETE", resourceType = "indicator", resourceId = "#indicatorId")
+    @AuditLog(action = "DELETE", resourceType = "indicator", resourceId = "#indicatorId",
+            before = "detail(#indicatorId)")
     public void delete(@PathVariable Long indicatorId) {
         indicatorService.delete(indicatorId);
     }
@@ -113,7 +117,8 @@ public class IndicatorController {
             description = "权限：indicator:edit；自身或下属已下发后须发起目标调整")
     @PutMapping("/api/v1/indicators/{indicatorId}/year-targets")
     @PreAuthorize("hasAuthority('indicator:edit')")
-    @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId")
+    @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId",
+            before = "detail(#indicatorId)", after = "#result")
     public IndicatorDtos.Detail putYearTargets(@PathVariable Long indicatorId,
                                                @Valid @RequestBody IndicatorDtos.YearTargetsPutRequest request) {
         return indicatorService.putYearTargets(indicatorId, request);
@@ -125,7 +130,8 @@ public class IndicatorController {
     @PutMapping("/api/v1/indicators/{indicatorId}/year-targets/{year}/manual-value")
     @PreAuthorize("hasAuthority('indicator:edit')")
     @edu.fzrj.metrics.common.idempotent.Idempotent
-    @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId", reason = "#request.note")
+    @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId", reason = "#request.note",
+            before = "detail(#indicatorId)", after = "detail(#indicatorId)")
     public edu.fzrj.metrics.module.indicator.dto.ManualValueDtos.View recognizeManualValue(
             @PathVariable Long indicatorId, @PathVariable Integer year,
             @Valid @RequestBody edu.fzrj.metrics.module.indicator.dto.ManualValueDtos.RecognizeRequest request) {

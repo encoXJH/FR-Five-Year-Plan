@@ -12,6 +12,7 @@ import { useUserStore } from '@/stores/user'
 import { enumLabel, enumOptions } from '@/utils/enumLabels'
 import { formatRelativeTime } from '@/utils/format'
 import { formatDeadline } from '@/utils/task'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import {
   TODO_GROUPS,
   resolveNotificationLink,
@@ -46,8 +47,8 @@ const visibleTodos = computed<TodoItem[]>(() => {
   return sorted.filter((i) => i.type === activeGroup.value)
 })
 
-async function loadTodos(): Promise<void> {
-  todosLoading.value = true
+async function loadTodos(silent = false): Promise<void> {
+  if (!silent) todosLoading.value = true
   try {
     todosResult.value = await getTodos()
     if (!activeGroup.value) {
@@ -55,7 +56,7 @@ async function loadTodos(): Promise<void> {
       activeGroup.value = first?.value ?? ''
     }
   } finally {
-    todosLoading.value = false
+    if (!silent) todosLoading.value = false
   }
 }
 
@@ -76,8 +77,8 @@ const unreadCount = ref(0)
 const notifFilter = reactive({ type: '', page: 1, pageSize: 20 })
 const notificationTypeOptions = computed(() => enumOptions('NotificationType', userStore.enums))
 
-async function loadNotifications(): Promise<void> {
-  notificationsLoading.value = true
+async function loadNotifications(silent = false): Promise<void> {
+  if (!silent) notificationsLoading.value = true
   try {
     const result = await listNotifications({
       type: notifFilter.type || undefined,
@@ -88,7 +89,7 @@ async function loadNotifications(): Promise<void> {
     notificationsTotal.value = result.total
     unreadCount.value = result.unreadCount
   } finally {
-    notificationsLoading.value = false
+    if (!silent) notificationsLoading.value = false
   }
 }
 
@@ -133,6 +134,8 @@ onMounted(() => {
   loadTodos()
   loadNotifications()
 })
+
+useAutoRefresh(() => Promise.all([loadTodos(true), loadNotifications(true)]))
 </script>
 
 <template>

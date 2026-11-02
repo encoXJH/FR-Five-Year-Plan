@@ -192,6 +192,7 @@ public class MilestoneService {
         if (milestone.getTaskId() != null) {
             taskService.requireCurrentTask(milestone.getTaskId());
         }
+        planService.requireNotArchived(planService.requirePlan(milestone.getPlanId()));
         if (version == null) {
             throw new BizException(ErrorCode.PARAM_INVALID, "缺少 version（乐观锁版本号）");
         }

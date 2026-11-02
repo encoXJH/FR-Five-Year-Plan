@@ -53,7 +53,8 @@ public class AdjustmentController {
     @PostMapping("/adjustments")
     @PreAuthorize("hasAuthority('adjustment:apply')")
     @Idempotent
-    @AuditLog(action = "ADJUST_APPLY", resourceType = "adjustment", resourceId = "#result.id", reason = "#request.reason")
+    @AuditLog(action = "ADJUST_APPLY", resourceType = "adjustment", resourceId = "#result.id",
+            reason = "#request.reason", after = "#result")
     public AdjustmentDtos.Detail create(@Valid @RequestBody AdjustmentDtos.CreateRequest request) {
         return adjustmentService.create(request);
     }
@@ -79,7 +80,8 @@ public class AdjustmentController {
     @PreAuthorize("hasAuthority('adjustment:decide')")
     @Idempotent
     @AuditLog(action = "ADJUST_DECIDE", resourceType = "adjustment",
-            resourceId = "#adjustmentId", reason = "#request.comment")
+            resourceId = "#adjustmentId", reason = "#request.comment",
+            before = "detail(#adjustmentId)", after = "#result")
     public AdjustmentDtos.Detail decide(@PathVariable Long adjustmentId,
                                         @Valid @RequestBody AdjustmentDtos.DecisionRequest request) {
         return decisionService.decide(adjustmentId, request);
@@ -90,7 +92,8 @@ public class AdjustmentController {
     @PostMapping("/adjustments/{adjustmentId}/withdraw")
     @PreAuthorize("hasAuthority('adjustment:apply')")
     @Idempotent
-    @AuditLog(action = "WITHDRAW", resourceType = "adjustment", resourceId = "#adjustmentId")
+    @AuditLog(action = "WITHDRAW", resourceType = "adjustment", resourceId = "#adjustmentId",
+            before = "detail(#adjustmentId)", after = "#result")
     public AdjustmentDtos.Detail withdraw(@PathVariable Long adjustmentId,
                                           @Valid @RequestBody PlanDtos.VersionRequest request) {
         return adjustmentService.withdraw(adjustmentId, request.getVersion());

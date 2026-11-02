@@ -359,6 +359,9 @@ public class IndicatorService {
             if (children != null && children > 0) {
                 throw new BizException(ErrorCode.LEVEL_INVALID, "存在下属 A+，不能改为不可量化 A");
             }
+            if (hasPendingDistributionTasks(indicator)) {
+                throw new BizException(ErrorCode.LEVEL_INVALID, "存在待下发 B 草稿，请先删除草稿再改为不可量化 A");
+            }
         }
         if (quantifiable) {
             IndicatorRules.requireQuantitativeDefinition(indicator.getLevel(), indicator.getIsQuantifiable(),
@@ -429,6 +432,9 @@ public class IndicatorService {
         dataScopeService.canAccessIndicatorOwner(effectiveOwnerOf(indicator));
         if (hasDistributedScope(indicator)) {
             throw new BizException(ErrorCode.INDICATOR_DISTRIBUTED);
+        }
+        if (hasPendingDistributionTasks(indicator)) {
+            throw new BizException(ErrorCode.HAS_CHILDREN, "存在待下发 B 草稿，请先删除草稿再删除指标");
         }
         Long children = indicatorMapper.selectCount(new LambdaQueryWrapper<Indicator>()
                 .eq(Indicator::getParentId, indicatorId)
@@ -642,6 +648,13 @@ public class IndicatorService {
         if (hasDistributedScope(indicator)) {
             throw new BizException(ErrorCode.TASK_DISTRIBUTED, "指标或下属任务已下发，修改目标需要发起目标调整");
         }
+    }
+
+    private boolean hasPendingDistributionTasks(Indicator indicator) {
+        Long count = taskMapper.selectCount(taskRelationQuery(indicator)
+                .eq(Task::getStatus, "PENDING_DISTRIBUTION")
+                .eq(Task::getIsHistorical, false));
+        return count != null && count > 0;
     }
 
     public Set<String> existingCodes(Long planId) {

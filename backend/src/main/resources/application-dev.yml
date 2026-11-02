@@ -1,0 +1,5 @@
+app:
+  jwt:
+    secret: local-dev-only-jwt-secret-7f3a9c1e5b8d2046a97c31f0e6b4582d9a74c0e3
+  file:
+    sign-secret: local-dev-only-file-sign-secret-2c6e91a47f03d8b5ac64e729f18b3d0a59ce2746

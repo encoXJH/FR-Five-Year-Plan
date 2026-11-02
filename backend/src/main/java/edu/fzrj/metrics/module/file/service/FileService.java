@@ -136,7 +136,7 @@ public class FileService {
             throw new BizException(ErrorCode.FILE_TOO_LARGE);
         }
         // 秒传
-        FileInfo dup = findBySha256(request.getSha256());
+        FileInfo dup = findBySha256(request.getSha256(), SecurityUtils.getUserId());
         if (dup != null) {
             return new InitResult(null, 0, 0, toResponse(dup), false);
         }
@@ -307,7 +307,7 @@ public class FileService {
             log.error("读取 MINIO 直传文件失败 uploadId={}", session.getUploadId(), e);
             throw new BizException(ErrorCode.INTERNAL_ERROR, "直传文件校验失败");
         }
-        FileInfo dup = findBySha256(sha256);
+        FileInfo dup = findBySha256(sha256, session.getCreatedBy());
         if (dup != null) {
             deleteDirectQuietly(direct, session.getStorageKey());
             finishSession(session);
@@ -360,6 +360,23 @@ public class FileService {
 
     public FileInfoResponse detail(Long fileId) {
         return toResponse(requireReadable(fileId));
+    }
+
+    public FileInfo requireBindable(Long fileId, String bizType, Long bizId) {
+        FileInfo fileInfo = requireFile(fileId);
+        var user = SecurityUtils.getLoginUser();
+        if (user.getRoles().contains("ADMIN")
+                || Objects.equals(user.getUserId(), fileInfo.getUploadedBy())) {
+            return fileInfo;
+        }
+        Long existing = fileRefMapper.selectCount(new LambdaQueryWrapper<FileRef>()
+                .eq(FileRef::getFileId, fileId)
+                .eq(FileRef::getBizType, bizType)
+                .eq(FileRef::getBizId, bizId));
+        if (existing > 0) {
+            return fileInfo;
+        }
+        throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
     }
 
     public FileInfo requireReadable(Long fileId) {
@@ -468,7 +485,7 @@ public class FileService {
             throw new BizException(ErrorCode.PART_INVALID, "整文件 SHA-256 校验失败");
         }
         // 秒传
-        FileInfo dup = findBySha256(sha256);
+        FileInfo dup = findBySha256(sha256, operatorId);
         if (dup != null) {
             try {
                 storageService.delete(storageKey);
@@ -494,7 +511,7 @@ public class FileService {
         fileInfo.setStorageType(fileStorageType);
         fileInfo.setStorageKey(storageKey);
         fileInfo.setSha256(sha256);
-        fileInfo.setTranscodeStatus("VIDEO".equals(category) ? "PROCESSING" : null);
+        fileInfo.setTranscodeStatus("VIDEO".equals(category) ? "SUCCEEDED" : null);
         fileInfo.setUploadedBy(operatorId);
         fileInfo.setUploadedAt(LocalDateTime.now());
         fileInfo.setCreatedBy(operatorId);
@@ -533,12 +550,13 @@ public class FileService {
         }
     }
 
-    private FileInfo findBySha256(String sha256) {
+    private FileInfo findBySha256(String sha256, Long uploadedBy) {
         if (!StringUtils.hasText(sha256)) {
             return null;
         }
         List<FileInfo> list = fileInfoMapper.selectList(new LambdaQueryWrapper<FileInfo>()
                 .eq(FileInfo::getSha256, sha256.toLowerCase())
+                .eq(FileInfo::getUploadedBy, uploadedBy)
                 .eq(FileInfo::getDeleted, 0L)
                 .orderByDesc(FileInfo::getId)
                 .last("LIMIT 1"));

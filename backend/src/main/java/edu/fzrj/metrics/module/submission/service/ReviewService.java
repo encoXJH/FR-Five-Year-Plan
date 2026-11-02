@@ -228,11 +228,14 @@ public class ReviewService {
                 throw new BizException(ErrorCode.CONFIRMED_EXCEEDS_SUBMITTED);
             }
         }
+        actualRecalcService.lockAggregationForReview(submission.getTaskYearId());
         if ("APPROVED".equals(result)) {
             SubmissionDtos.MetricValue candidate = approved != null ? approved
                     : submissionService.valueViewOf(submission);
             annualTargetGuard.checkReview(submission,
                     indicatorService.requireIndicator(submission.getIndicatorId()), candidate);
+        } else {
+            annualTargetGuard.lockForReview(submission);
         }
 
         Long userId = SecurityUtils.getUserId();

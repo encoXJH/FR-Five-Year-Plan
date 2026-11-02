@@ -81,6 +81,18 @@ const isBoolean = computed(() => props.statCaliber === 'BOOLEAN')
 const isPercent = computed(() =>
   props.statCaliber === 'RATIO' || props.statCaliber === 'DIRECT_PERCENT',
 )
+const nonSummableAlertTitle = computed(() => {
+  if (props.statCaliber === 'BOOLEAN') {
+    return '是否型指标不做目标求和校验，每行勾选计划完成年份'
+  }
+  if (props.statCaliber === 'GROWTH') {
+    return '增长率型指标不做目标求和校验，完成值按汇总总量计算增长率'
+  }
+  if (props.statCaliber === 'RATIO') {
+    return '占比型指标不做目标求和校验，完成值按 Σ分子 ÷ Σ分母 汇总'
+  }
+  return '直填百分比型指标不做目标求和校验'
+})
 const indicatorTargets = computed<MatrixTargets>(() => {
   const map: MatrixTargets = {}
   for (const item of props.yearTargets) {
@@ -404,7 +416,11 @@ function applySavedAllocation(allocation: Allocation, notify: boolean): void {
   lastSavedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
   if (notify) {
     ElMessage.success(
-      allocation.isBalanced ? '已保存，各年度合计不低于指标目标' : '已保存草稿（部分年度合计低于指标目标）',
+      !summable.value
+        ? '已保存'
+        : allocation.isBalanced
+          ? '已保存，各年度合计不低于指标目标'
+          : '已保存草稿（部分年度合计低于指标目标）',
     )
   }
   emit('saved', allocation)
@@ -608,9 +624,7 @@ defineExpose({
       type="info"
       :closable="false"
       class="editor-alert"
-      :title="isBoolean
-        ? '是否型指标不做目标求和校验，每行勾选计划完成年份'
-        : '占比 / 直填百分比型指标不做目标求和校验，完成值按 Σ分子 ÷ Σ分母 汇总'"
+      :title="nonSummableAlertTitle"
     />
     <template v-else>
       <el-alert
@@ -907,7 +921,7 @@ defineExpose({
           type="primary"
           plain
           :disabled="!summable"
-          :title="summable ? '按指标各年度目标平均分配给可编辑执行单元' : '占比 / 直填百分比 / 是否型不参与合计，无法自动分配'"
+          :title="summable ? '按指标各年度目标平均分配给可编辑执行单元' : '增长率 / 占比 / 直填百分比 / 是否型不参与合计，无法自动分配'"
           @click="autoDistribute"
         >
           自动分配
@@ -920,7 +934,7 @@ defineExpose({
         <template v-if="dirty">已修改未保存</template>
         <template v-else-if="lastSavedAt">上次保存 {{ lastSavedAt }}</template>
         <template v-else-if="serverBalanced !== null">
-          {{ serverBalanced ? '已保存（平衡）' : '已保存（未平衡）' }}
+          {{ summable ? (serverBalanced ? '已保存（平衡）' : '已保存（未平衡）') : '已保存' }}
         </template>
         <template v-else>保存指标后可单独保存分工草稿</template>
       </span>

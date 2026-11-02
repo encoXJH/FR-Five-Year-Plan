@@ -54,17 +54,24 @@ public class YearUploadService {
                 .orderByDesc(Submission::getSubmittedAt);
         boolean allData = user.getRoles().contains("ADMIN") || user.getRoles().contains("LEADER");
         if (!allData) {
-            if (user.getRoles().contains("SCHOOL_OWNER")) {
-                List<Long> visible = reviewService.ownedIndicatorIdsWithChildren(user.getUserId());
-                if (visible.isEmpty()) {
-                    return List.of();
-                }
-                wrapper.in(Submission::getIndicatorId, visible);
-            } else if (user.getRoles().contains("UNIT_OWNER") && user.getUnitId() != null) {
-                wrapper.eq(Submission::getUnitId, user.getUnitId());
-            } else {
+            List<Long> visible = user.getRoles().contains("SCHOOL_OWNER")
+                    ? reviewService.ownedIndicatorIdsWithChildren(user.getUserId()) : List.of();
+            boolean ownerScope = !visible.isEmpty();
+            boolean unitScope = user.getRoles().contains("UNIT_OWNER") && user.getUnitId() != null;
+            if (!ownerScope && !unitScope) {
                 return List.of();
             }
+            wrapper.and(scope -> {
+                if (ownerScope) {
+                    scope.in(Submission::getIndicatorId, visible);
+                }
+                if (unitScope) {
+                    if (ownerScope) {
+                        scope.or();
+                    }
+                    scope.eq(Submission::getUnitId, user.getUnitId());
+                }
+            });
         }
         List<Submission> submissions = submissionMapper.selectList(wrapper);
         if (submissions.isEmpty()) {

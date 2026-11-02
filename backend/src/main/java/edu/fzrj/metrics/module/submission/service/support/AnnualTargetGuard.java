@@ -36,19 +36,25 @@ public class AnnualTargetGuard {
                 approvedValues(submission, caliber), effectiveValue(caliber, submission));
     }
 
-    /** 审核写入前锁定任务年度，再基于最新已通过记录投影候选值。 */
+    /** 审核写入前锁定任务年度；所有口径都加锁，保证并发审核与缓存重算串行。 */
     public void checkReview(Submission submission, Indicator indicator,
                             SubmissionDtos.MetricValue candidate) {
+        TaskYear taskYear = lockForReview(submission);
         String caliber = submission.getStatCaliber();
         if (!requiresCheck(caliber, indicator.getTargetDirection())) {
             return;
         }
+        assertWithinTarget(caliber, indicator.getTargetDirection(), taskYear.getTarget(),
+                approvedValues(submission, caliber), candidateValue(caliber, candidate));
+    }
+
+    /** 驳回也使用同一锁顺序，避免与通过审核及完成值重算交错。 */
+    public TaskYear lockForReview(Submission submission) {
         TaskYear taskYear = taskYearMapper.selectByIdForUpdate(submission.getTaskYearId());
         if (taskYear == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "任务年度不存在");
         }
-        assertWithinTarget(caliber, indicator.getTargetDirection(), taskYear.getTarget(),
-                approvedValues(submission, caliber), candidateValue(caliber, candidate));
+        return taskYear;
     }
 
     static void assertWithinTarget(String caliber, String direction, BigDecimal target,
@@ -77,7 +83,8 @@ public class AnnualTargetGuard {
                         .ne(Submission::getId, candidate.getId())
                         .eq(Submission::getDeleted, 0L)
                         .orderByAsc(Submission::getReviewedAt)
-                        .orderByAsc(Submission::getId))
+                        .orderByAsc(Submission::getId)
+                        .last("FOR UPDATE"))
                 .stream().map(s -> effectiveValue(caliber, s)).toList();
     }
 

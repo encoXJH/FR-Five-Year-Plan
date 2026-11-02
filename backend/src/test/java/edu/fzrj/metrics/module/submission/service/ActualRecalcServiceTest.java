@@ -1,5 +1,9 @@
 package edu.fzrj.metrics.module.submission.service;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.entity.IndicatorYearTarget;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
@@ -13,7 +17,9 @@ import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.security.LoginUser;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,7 +35,10 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -53,12 +62,20 @@ class ActualRecalcServiceTest {
     @InjectMocks
     private ActualRecalcService actualRecalcService;
 
+    @BeforeAll
+    static void initMybatisLambdaCache() {
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(), "");
+        TableInfoHelper.initTableInfo(assistant, Indicator.class);
+    }
+
     @BeforeEach
     void login() {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(
                         new LoginUser(99L, "admin", "管理员", null,
                                 List.of("ADMIN"), List.of()), null, List.of()));
+        lenient().when(taskYearMapper.updateById(any(TaskYear.class))).thenReturn(1);
+        lenient().when(yearTargetMapper.updateById(any(IndicatorYearTarget.class))).thenReturn(1);
     }
 
     @AfterEach
@@ -92,6 +109,7 @@ class ActualRecalcServiceTest {
         plan.setEndYear(2030);
 
         Submission approved = new Submission();
+        approved.setStatus("APPROVED");
         approved.setApprovedAmount(new BigDecimal("5"));
 
         TaskYear directHistoricalYear = new TaskYear();
@@ -105,11 +123,11 @@ class ActualRecalcServiceTest {
         IndicatorYearTarget aCache = cache(502L, 302L);
 
         when(taskYearMapper.selectById(101L)).thenReturn(currentYear);
+        when(taskYearMapper.selectByIdForUpdate(101L)).thenReturn(currentYear);
         when(taskMapper.selectOne(any())).thenReturn(currentTask);
-        when(indicatorMapper.selectOne(any())).thenReturn(aPlus, a);
+        when(indicatorMapper.selectOne(any())).thenReturn(aPlus, a, a, aPlus, aPlus, a);
         when(planMapper.selectOne(any())).thenReturn(plan);
         when(submissionMapper.selectList(any())).thenReturn(List.of(approved));
-        when(submissionMapper.selectCount(any())).thenReturn(0L);
         when(taskYearMapper.selectList(any()))
                 .thenReturn(List.of(currentYear), List.of(directHistoricalYear));
         when(indicatorMapper.selectList(any())).thenReturn(List.of(aPlus));
@@ -146,6 +164,7 @@ class ActualRecalcServiceTest {
         plan.setStartYear(2026);
         plan.setEndYear(2030);
         Submission approved = new Submission();
+        approved.setStatus("APPROVED");
         approved.setApprovedAmount(new BigDecimal("5"));
 
         IndicatorYearTarget aPlusCache = cache(501L, 301L);
@@ -153,11 +172,11 @@ class ActualRecalcServiceTest {
         IndicatorYearTarget aCache = cache(502L, 302L);
 
         when(taskYearMapper.selectById(101L)).thenReturn(currentYear);
+        when(taskYearMapper.selectByIdForUpdate(101L)).thenReturn(currentYear);
         when(taskMapper.selectOne(any())).thenReturn(currentTask);
         when(indicatorMapper.selectOne(any())).thenReturn(a);
         when(planMapper.selectOne(any())).thenReturn(plan);
         when(submissionMapper.selectList(any())).thenReturn(List.of(approved));
-        when(submissionMapper.selectCount(any())).thenReturn(0L);
         when(taskYearMapper.selectList(any())).thenReturn(List.of(currentYear));
         when(indicatorMapper.selectList(any())).thenReturn(List.of(aPlus));
         when(yearTargetMapper.selectOne(any())).thenReturn(aPlusCache, aCache);
@@ -187,19 +206,21 @@ class ActualRecalcServiceTest {
         plan.setStartYear(2026);
         plan.setEndYear(2030);
         Submission approved2026 = new Submission();
+        approved2026.setStatus("APPROVED");
         approved2026.setApprovedTotal(new BigDecimal("110"));
         Submission approved2027 = new Submission();
+        approved2027.setStatus("APPROVED");
         approved2027.setApprovedTotal(new BigDecimal("132"));
         IndicatorYearTarget cache2026 = cache(501L, 301L);
         IndicatorYearTarget cache2027 = cache(502L, 301L);
         cache2027.setYear(2027);
 
         when(taskYearMapper.selectById(101L)).thenReturn(year2026);
+        when(taskYearMapper.selectByIdForUpdate(101L)).thenReturn(year2026);
         when(taskMapper.selectOne(any())).thenReturn(task);
         when(indicatorMapper.selectOne(any())).thenReturn(indicator);
         when(planMapper.selectOne(any())).thenReturn(plan);
         when(submissionMapper.selectList(any())).thenReturn(List.of(approved2026), List.of(approved2027));
-        when(submissionMapper.selectCount(any())).thenReturn(0L);
         when(taskYearMapper.selectList(any())).thenReturn(
                 List.of(year2026, year2027), List.of(year2026), List.of(year2027));
         when(taskYearMapper.selectOne(any())).thenReturn(year2026);
@@ -220,6 +241,109 @@ class ActualRecalcServiceTest {
             assertDecimalEquals("132", cache2027.getActualValue());
         }
         verify(taskYearMapper, times(2)).updateById(any(TaskYear.class));
+    }
+
+    @Test
+    void 聚合节点锁定后才读取其他B最新完成值() {
+        TaskYear currentYear = taskYear(101L, 2026);
+        TaskYear otherYear = taskYear(102L, 2026);
+        otherYear.setTaskId(202L);
+        otherYear.setActualValue(BigDecimal.ZERO);
+        Task task = new Task();
+        task.setId(201L);
+        task.setIndicatorId(301L);
+        task.setPlanId(401L);
+        Indicator indicator = indicator(301L, null);
+        indicator.setRollupMode("AUTO_SUM");
+        Plan plan = new Plan();
+        plan.setStartYear(2026);
+        plan.setEndYear(2030);
+        Submission approved = new Submission();
+        approved.setStatus("APPROVED");
+        approved.setApprovedAmount(new BigDecimal("5"));
+        IndicatorYearTarget cache = cache(501L, 301L);
+
+        when(taskYearMapper.selectById(101L)).thenReturn(currentYear);
+        when(taskYearMapper.selectByIdForUpdate(101L)).thenReturn(currentYear);
+        when(taskMapper.selectOne(any())).thenReturn(task);
+        when(indicatorMapper.selectOne(any())).thenAnswer(invocation -> {
+            Wrapper<?> wrapper = invocation.getArgument(0);
+            if (wrapper.getSqlSegment().contains("FOR UPDATE")) {
+                otherYear.setActualValue(new BigDecimal("4"));
+            }
+            return indicator;
+        });
+        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(submissionMapper.selectList(any())).thenReturn(List.of(approved));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(currentYear, otherYear));
+        when(indicatorMapper.selectList(any())).thenReturn(List.of());
+        when(yearTargetMapper.selectOne(any())).thenReturn(cache);
+
+        actualRecalcService.recalcTaskYear(101L);
+
+        assertDecimalEquals("9", cache.getActualValue());
+    }
+
+    @Test
+    void 任务年度缓存并发重算失败时返回10005() {
+        TaskYear currentYear = taskYear(101L, 2026);
+        Task task = new Task();
+        task.setId(201L);
+        task.setIndicatorId(301L);
+        task.setPlanId(401L);
+        Indicator indicator = indicator(301L, null);
+        indicator.setRollupMode("MANUAL");
+        Plan plan = new Plan();
+        plan.setStartYear(2026);
+        plan.setEndYear(2030);
+        Submission approved = new Submission();
+        approved.setStatus("APPROVED");
+        approved.setApprovedAmount(new BigDecimal("5"));
+        when(taskYearMapper.selectById(101L)).thenReturn(currentYear);
+        when(taskYearMapper.selectByIdForUpdate(101L)).thenReturn(currentYear);
+        when(taskMapper.selectOne(any())).thenReturn(task);
+        when(indicatorMapper.selectOne(any())).thenReturn(indicator);
+        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(submissionMapper.selectList(any())).thenReturn(List.of(approved));
+        when(taskYearMapper.updateById(any(TaskYear.class))).thenReturn(0);
+
+        BizException error = assertThrows(BizException.class, () -> actualRecalcService.recalcTaskYear(101L));
+
+        assertEquals(10005, error.getErrorCode().getCode());
+        verify(yearTargetMapper, never()).updateById(any(IndicatorYearTarget.class));
+    }
+
+    @Test
+    void 指标年度缓存并发重算失败时返回10005() {
+        TaskYear currentYear = taskYear(101L, 2026);
+        Task task = new Task();
+        task.setId(201L);
+        task.setIndicatorId(301L);
+        task.setPlanId(401L);
+        Indicator indicator = indicator(301L, null);
+        indicator.setRollupMode("AUTO_SUM");
+        Plan plan = new Plan();
+        plan.setStartYear(2026);
+        plan.setEndYear(2030);
+        Submission approved = new Submission();
+        approved.setStatus("APPROVED");
+        approved.setApprovedAmount(new BigDecimal("5"));
+        IndicatorYearTarget cache = cache(501L, 301L);
+        when(taskYearMapper.selectById(101L)).thenReturn(currentYear);
+        when(taskYearMapper.selectByIdForUpdate(101L)).thenReturn(currentYear);
+        when(taskMapper.selectOne(any())).thenReturn(task);
+        when(indicatorMapper.selectOne(any())).thenReturn(indicator);
+        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(submissionMapper.selectList(any())).thenReturn(List.of(approved));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(currentYear));
+        when(indicatorMapper.selectList(any())).thenReturn(List.of());
+        when(yearTargetMapper.selectOne(any())).thenReturn(cache);
+        when(yearTargetMapper.updateById(any(IndicatorYearTarget.class))).thenReturn(0);
+
+        BizException error = assertThrows(BizException.class, () -> actualRecalcService.recalcTaskYear(101L));
+
+        assertEquals(10005, error.getErrorCode().getCode());
+        verify(yearTargetMapper).updateById(cache);
     }
 
     private TaskYear taskYear(Long id, Integer year) {

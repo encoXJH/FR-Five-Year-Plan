@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { Expand, Fold } from '@element-plus/icons-vue'
 import HeaderBar from './HeaderBar.vue'
+import PlanSwitcher from './PlanSwitcher.vue'
 import SideMenu from './SideMenu.vue'
 
 // ---------- 侧栏折叠（UI 规范 5.1），状态持久化到 localStorage ----------
@@ -53,6 +54,7 @@ function closeMenuDrawer(): void {
       </el-aside>
       <el-container class="app-right">
         <el-main class="app-main">
+          <PlanSwitcher />
           <router-view />
         </el-main>
       </el-container>

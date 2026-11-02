@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import edu.fzrj.metrics.common.api.UserRef;
 import edu.fzrj.metrics.common.page.PageQuery;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -26,10 +27,15 @@ public final class SubmissionDtos {
     /** 指标值对象（请求与响应共用；rate / growthRate / increment 为服务端计算的只读字段） */
     @Data
     public static class MetricValue {
+        @DecimalMin(value = "0", message = "本次新增数量不能小于 0")
         private BigDecimal amount;
+        @DecimalMin(value = "0", message = "当前总量不能小于 0")
         private BigDecimal total;
+        @DecimalMin(value = "0", message = "分子不能小于 0")
         private BigDecimal numerator;
+        @DecimalMin(value = "0", inclusive = false, message = "分母必须大于 0")
         private BigDecimal denominator;
+        @DecimalMin(value = "0", message = "百分比不能小于 0")
         private BigDecimal percent;
         private Boolean achieved;
         private BigDecimal rate;

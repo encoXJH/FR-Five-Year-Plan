@@ -117,6 +117,26 @@ class MilestoneServiceTest {
     }
 
     @Test
+    void 已归档计划不能删除里程碑() {
+        login("ADMIN", "indicator:edit");
+        Milestone milestone = indicatorMilestone();
+        milestone.setPlanId(4L);
+        Indicator indicator = indicator(88L);
+        when(milestoneMapper.selectOne(any())).thenReturn(milestone);
+        when(indicatorService.requireIndicator(5L)).thenReturn(indicator);
+        edu.fzrj.metrics.module.plan.entity.Plan plan = new edu.fzrj.metrics.module.plan.entity.Plan();
+        plan.setStatus("ARCHIVED");
+        when(planService.requirePlan(4L)).thenReturn(plan);
+        doThrow(new BizException(edu.fzrj.metrics.common.error.ErrorCode.PLAN_ARCHIVED))
+                .when(planService).requireNotArchived(plan);
+
+        BizException error = assertThrows(BizException.class, () -> milestoneService.delete(10L, 0));
+
+        assertEquals(30002, error.getErrorCode().getCode());
+        verify(milestoneMapper, never()).update(any(), any());
+    }
+
+    @Test
     void 任务级里程碑修改仍校验任务数据范围() {
         login("UNIT_OWNER", "submission:submit");
         Milestone milestone = new Milestone();

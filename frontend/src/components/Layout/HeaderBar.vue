@@ -1,14 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ArrowDown, Bell, Menu, School } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { getUnreadNotificationCount } from '@/api/todo'
-import { listPlans } from '@/api/plan'
-import type { PlanCard } from '@/types/plan'
 import { detectClientEnv } from '@/utils/feishu'
 
-const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
@@ -16,29 +13,6 @@ const emit = defineEmits<{ (e: 'toggle-menu'): void }>()
 
 /** 飞书客户端内不提供「退出登录」（UI 规范 5.1） */
 const isFeishuClient = detectClientEnv(navigator.userAgent) !== 'WEB'
-
-// ---------- 当前计划切换（路由带 planId 时显示） ----------
-const plans = ref<PlanCard[]>([])
-const routePlanId = computed(() =>
-  typeof route.params.planId === 'string' ? route.params.planId : '',
-)
-const currentPlan = computed(() => plans.value.find((p) => p.id === routePlanId.value) ?? null)
-
-async function switchPlan(planId: string): Promise<void> {
-  if (!planId || planId === routePlanId.value) return
-  if (route.name) {
-    await router.replace({
-      name: route.name,
-      params: { ...route.params, planId },
-      query: route.query,
-    })
-  } else {
-    await router.replace({
-      path: route.path.replace(`/plans/${routePlanId.value}`, `/plans/${planId}`),
-      query: route.query,
-    })
-  }
-}
 
 // ---------- 未读消息角标（60s 轮询） ----------
 const POLL_INTERVAL_MS = 60_000
@@ -61,11 +35,6 @@ function goTodos(): void {
 onMounted(() => {
   refreshUnread()
   timer = setInterval(refreshUnread, POLL_INTERVAL_MS)
-  listPlans()
-    .then((list) => {
-      plans.value = list
-    })
-    .catch(() => undefined)
 })
 
 onBeforeUnmount(() => {
@@ -95,35 +64,6 @@ async function handleCommand(command: string): Promise<void> {
       ><Menu /></el-icon>
       <el-icon :size="24" class="brand-logo"><School /></el-icon>
       <span class="brand-name">福州软件职业技术学院 · 五年计划指标管理平台</span>
-      <el-dropdown v-if="routePlanId" trigger="click" @command="switchPlan">
-        <span class="plan-entry">
-          <span class="plan-name">{{ currentPlan?.name ?? '当前计划' }}</span>
-          <el-tag v-if="currentPlan?.status === 'ARCHIVED'" type="info" size="small">
-            已归档
-          </el-tag>
-          <el-icon :size="12"><ArrowDown /></el-icon>
-        </span>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item
-              v-for="p in plans"
-              :key="p.id"
-              :command="p.id"
-              :disabled="p.id === routePlanId"
-            >
-              {{ p.name }}
-              <el-tag
-                v-if="p.status === 'ARCHIVED'"
-                type="info"
-                size="small"
-                class="plan-item-tag"
-              >
-                已归档
-              </el-tag>
-            </el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
     </div>
     <div class="header-right">
       <el-badge
@@ -189,28 +129,6 @@ async function handleCommand(command: string): Promise<void> {
   line-height: 24px;
 }
 
-.plan-entry {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  gap: var(--space-2);
-  color: #ffffff;
-  cursor: pointer;
-  outline: none;
-}
-
-.plan-name {
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 14px;
-}
-
-.plan-item-tag {
-  margin-left: var(--space-2);
-}
-
 .header-right {
   display: flex;
   align-items: center;
@@ -260,7 +178,6 @@ async function handleCommand(command: string): Promise<void> {
   outline: none;
 }
 
-.plan-entry:focus-visible,
 .bell-icon:focus-visible,
 .user-entry:focus-visible,
 .menu-trigger:focus-visible {
@@ -287,10 +204,6 @@ async function handleCommand(command: string): Promise<void> {
   .header-right {
     gap: var(--space-3);
   }
-
-  .plan-name {
-    max-width: 160px;
-  }
 }
 
 @media (max-width: 600px) {
@@ -301,10 +214,6 @@ async function handleCommand(command: string): Promise<void> {
 
   .brand {
     gap: var(--space-2);
-  }
-
-  .plan-name {
-    max-width: 128px;
   }
 }
 </style>

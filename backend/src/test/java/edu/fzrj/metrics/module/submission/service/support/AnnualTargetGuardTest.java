@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -157,6 +158,26 @@ class AnnualTargetGuardTest {
                 () -> guard.checkReview(candidate, indicator(), value));
 
         assertEquals(60007, error.getErrorCode().getCode());
+    }
+
+    @Test
+    void 越小越好与是否型审核也先锁定任务年度() {
+        when(taskYearMapper.selectByIdForUpdate(3L)).thenReturn(taskYear("10"));
+        Submission lower = submission(1);
+        Indicator lowerIndicator = indicator();
+        lowerIndicator.setTargetDirection("LOWER_BETTER");
+        SubmissionDtos.MetricValue amount = new SubmissionDtos.MetricValue();
+        amount.setAmount(BigDecimal.ONE);
+        Submission bool = submission(1);
+        bool.setStatCaliber("BOOLEAN");
+        SubmissionDtos.MetricValue achieved = new SubmissionDtos.MetricValue();
+        achieved.setAchieved(true);
+
+        guard.checkReview(lower, lowerIndicator, amount);
+        guard.checkReview(bool, indicator(), achieved);
+
+        verify(taskYearMapper, times(2)).selectByIdForUpdate(3L);
+        verify(submissionMapper, never()).selectList(any());
     }
 
     private static Submission submission(int amount) {

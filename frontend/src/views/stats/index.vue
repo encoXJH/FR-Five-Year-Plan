@@ -30,6 +30,7 @@ import { formatTargetValue, isPercentCaliber } from '@/utils/indicator'
 import { progressPercentage } from '@/utils/task'
 import { getCurrentPlan, setCurrentPlan } from '@/utils/currentPlan'
 import { aggregateSubjectDimension } from '@/utils/stats'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import { triggerFileDownload } from '@/utils/file'
 import type { PlanCard, PlanDetail } from '@/types/plan'
 import type { IndicatorTreeNode } from '@/types/indicator'
@@ -258,9 +259,9 @@ async function loadPlanContext(): Promise<void> {
 
 let chartFrame: number | null = null
 
-async function loadStats(): Promise<void> {
+async function loadStats(silent = false): Promise<void> {
   if (!planId.value) return
-  loading.value = true
+  if (!silent) loading.value = true
   try {
     const y = year.value ?? undefined
     const [o, u, d, t, indicators] = await Promise.all([
@@ -283,7 +284,7 @@ async function loadStats(): Promise<void> {
       renderComboChart()
     })
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -302,7 +303,7 @@ function handlePlanChange(): void {
   if (selected) setCurrentPlan(selected)
   year.value = null
   syncQuery()
-  loadPlanContext().then(loadStats)
+  loadPlanContext().then(() => loadStats())
 }
 
 function handleYearChange(): void {
@@ -532,6 +533,11 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+})
+
+useAutoRefresh(async () => {
+  await loadPlanContext()
+  await loadStats(true)
 })
 </script>
 

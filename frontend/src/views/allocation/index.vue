@@ -17,6 +17,7 @@ import { distributePlan, getAllocation } from '@/api/allocation'
 import { ApiError } from '@/utils/request'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { enumLabel } from '@/utils/enumLabels'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import { formatTargetValue, sumYearTargets } from '@/utils/indicator'
 import {
   canAssignNewB,
@@ -355,6 +356,14 @@ watch(planId, (id) => {
   if (id) loadAll()
 }, { immediate: true })
 
+async function refreshAllocation(): Promise<void> {
+  if (editorState.value.dirty) return
+  await loadTree()
+  const target = allocatable.value.find((item) => item.id === selectedId.value)
+    ?? allocatable.value[0]
+  if (target) await selectIndicator(target.id, true)
+}
+
 onMounted(() => {
   if (!planId.value) {
     redirectToActivePlan()
@@ -369,6 +378,11 @@ onMounted(() => {
     unitOptions.value = []
     unitFallback.value = true
   })
+})
+
+useAutoRefresh(refreshAllocation, {
+  intervalMs: 60_000,
+  skip: () => editorState.value.dirty || distributing.value || batchDistributing.value,
 })
 </script>
 

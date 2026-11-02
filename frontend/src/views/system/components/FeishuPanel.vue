@@ -8,6 +8,7 @@ import {
   type FeishuSyncSummary,
 } from '@/api/feishu'
 import { newIdempotencyKey } from '@/utils/idempotency'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 
 const loading = ref(false)
 const syncing = ref(false)
@@ -40,13 +41,13 @@ const lastSyncText = computed(() => {
   return parts.length > 0 ? parts.join(' / ') : null
 })
 
-async function load(): Promise<void> {
-  loading.value = true
+async function load(silent = false): Promise<void> {
+  if (!silent) loading.value = true
   try {
     status.value = await fetchFeishuIntegrationStatus()
     statusReady.value = status.value !== null
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -83,6 +84,8 @@ async function handleSync(): Promise<void> {
 }
 
 onMounted(load)
+
+useAutoRefresh(() => load(true))
 </script>
 
 <template>

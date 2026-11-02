@@ -45,6 +45,7 @@ public final class AuditLogDtos {
             String resourceCode,
             String before,
             String after,
+            java.util.List<UserRef> stakeholders,
             String reason,
             String clientType,
             String ip,

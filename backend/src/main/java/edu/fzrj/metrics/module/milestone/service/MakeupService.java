@@ -7,6 +7,7 @@ import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.milestone.dto.MakeupDtos;
 import edu.fzrj.metrics.module.milestone.entity.Makeup;
 import edu.fzrj.metrics.module.milestone.mapper.MakeupMapper;
+import edu.fzrj.metrics.module.plan.service.PlanService;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
@@ -28,13 +29,15 @@ public class MakeupService {
     private final TaskYearMapper taskYearMapper;
     private final TaskService taskService;
     private final DataScopeService dataScopeService;
+    private final PlanService planService;
 
     public MakeupService(MakeupMapper makeupMapper, TaskYearMapper taskYearMapper,
-                         TaskService taskService, DataScopeService dataScopeService) {
+                         TaskService taskService, DataScopeService dataScopeService, PlanService planService) {
         this.makeupMapper = makeupMapper;
         this.taskYearMapper = taskYearMapper;
         this.taskService = taskService;
         this.dataScopeService = dataScopeService;
+        this.planService = planService;
     }
 
     /** 某 B 任务的待补做记录（按数据范围） */
@@ -55,6 +58,7 @@ public class MakeupService {
         Task task = taskService.requireTask(makeup.getTaskId());
         dataScopeService.canAccessUnit(task.getUnitId());
         taskService.requireCurrentTask(task);
+        planService.requireNotArchived(planService.requirePlan(task.getPlanId()));
         if (version == null) {
             throw new BizException(ErrorCode.PARAM_INVALID, "缺少 version（乐观锁版本号）");
         }

@@ -7,6 +7,7 @@ import { getPlan, listPlans } from '@/api/plan'
 import { listUsers } from '@/api/system'
 import { useUserStore } from '@/stores/user'
 import { EMPTY_DISPLAY } from '@/utils/format'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import type { Direction, PlanCard, PlanDetail } from '@/types/plan'
 import type { IndicatorTreeNode } from '@/types/indicator'
 import type { SystemUser } from '@/types/system'
@@ -46,9 +47,9 @@ async function loadIndicators(): Promise<void> {
   for (const row of aRows.value) assignmentDrafts[row.id] = row.directionId ?? null
 }
 
-async function loadAll(): Promise<void> {
+async function loadAll(silent = false): Promise<void> {
   if (!planId.value || !canManage.value) return
-  loading.value = true
+  if (!silent) loading.value = true
   try {
     const [planDetail, directionList] = await Promise.all([
       getPlan(planId.value),
@@ -58,7 +59,7 @@ async function loadAll(): Promise<void> {
     plan.value = planDetail
     directions.value = directionList
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -177,6 +178,10 @@ async function saveAssignment(row: IndicatorTreeNode): Promise<void> {
     assignmentSavingId.value = ''
   }
 }
+
+useAutoRefresh(() => loadAll(true), {
+  skip: () => aRows.value.some((row) => assignmentDirty(row)),
+})
 </script>
 
 <template>

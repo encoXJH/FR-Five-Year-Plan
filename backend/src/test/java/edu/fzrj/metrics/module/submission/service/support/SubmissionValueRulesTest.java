@@ -1,9 +1,14 @@
 package edu.fzrj.metrics.module.submission.service.support;
 
+import edu.fzrj.metrics.module.submission.dto.SubmissionDtos;
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
+import jakarta.validation.ValidatorFactory;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -73,6 +78,52 @@ class SubmissionValueRulesTest {
         assertFalse(SubmissionValueRules.exceedsSubmitted("BOOLEAN",
                 null, null, null, null, null, true,
                 null, null, null, null, null, true));
+    }
+
+    @Test
+    void 填报与认定共用的口径规则拒绝各类型负数并允许合法零值() {
+        assertNotNull(SubmissionValueRules.caliberError("INCREMENT", bd("-1"), null, null, null, null, null));
+        assertNotNull(SubmissionValueRules.caliberError("STOCK", null, bd("-1"), null, null, null, null));
+        assertNotNull(SubmissionValueRules.caliberError("GROWTH", null, bd("-1"), null, null, null, null));
+        assertNotNull(SubmissionValueRules.caliberError("RATIO", null, null, bd("-1"), bd("2"), null, null));
+        assertNotNull(SubmissionValueRules.caliberError("RATIO", null, null, bd("1"), bd("-2"), null, null));
+        assertNotNull(SubmissionValueRules.caliberError("DIRECT_PERCENT", null, null, null, null, bd("-0.1"), null));
+
+        assertNull(SubmissionValueRules.caliberError("INCREMENT", BigDecimal.ZERO, null, null, null, null, null));
+        assertNull(SubmissionValueRules.caliberError("STOCK", null, BigDecimal.ZERO, null, null, null, null));
+        assertNull(SubmissionValueRules.caliberError("GROWTH", null, BigDecimal.ZERO, null, null, null, null));
+        assertNull(SubmissionValueRules.caliberError("RATIO", null, null, BigDecimal.ZERO, bd("2"), null, null));
+        assertNull(SubmissionValueRules.caliberError("DIRECT_PERCENT", null, null, null, null, BigDecimal.ZERO, null));
+        assertNull(SubmissionValueRules.caliberError("BOOLEAN", null, null, null, null, null, false));
+    }
+
+    @Test
+    void 负核减不能只依赖认定值不大于填报值校验() {
+        assertFalse(SubmissionValueRules.exceedsSubmitted("INCREMENT",
+                bd("5"), null, null, null, null, null,
+                bd("-5"), null, null, null, null, null));
+        assertNotNull(SubmissionValueRules.caliberError("INCREMENT",
+                bd("-5"), null, null, null, null, null));
+    }
+
+    @Test
+    void DTO校验原始值下界但不限制计算增长率为负() {
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            Validator validator = factory.getValidator();
+            SubmissionDtos.MetricValue invalid = new SubmissionDtos.MetricValue();
+            invalid.setAmount(bd("-1"));
+            invalid.setTotal(bd("-1"));
+            invalid.setNumerator(bd("-1"));
+            invalid.setDenominator(BigDecimal.ZERO);
+            invalid.setPercent(bd("-0.1"));
+            assertEquals(5, validator.validate(invalid).size());
+
+            SubmissionDtos.MetricValue growth = new SubmissionDtos.MetricValue();
+            growth.setTotal(bd("80"));
+            growth.setGrowthRate(bd("-0.2"));
+            growth.setIncrement(bd("-20"));
+            assertTrue(validator.validate(growth).isEmpty());
+        }
     }
 
     @Test

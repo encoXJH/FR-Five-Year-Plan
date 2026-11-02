@@ -34,7 +34,8 @@ public class SettlementController {
     @PostMapping("/{planId}/years/{year}/settle")
     @PreAuthorize("hasAuthority('settlement:manage')")
     @Idempotent
-    @AuditLog(action = "SETTLE", resourceType = "plan", resourceId = "#planId")
+    @AuditLog(action = "SETTLE", resourceType = "plan", resourceId = "#planId",
+            before = "settlement(#planId, #year)", after = "settlement(#planId, #year)")
     public SettlementDtos.SettleResult settle(@PathVariable Long planId, @PathVariable Integer year,
                                               @Valid @RequestBody SettlementDtos.SettleRequest request) {
         return settlementService.settle(planId, year, request.getVersion());
@@ -52,7 +53,8 @@ public class SettlementController {
     @PostMapping("/{planId}/years/{year}/unlock")
     @PreAuthorize("hasAuthority('settlement:manage')")
     @Idempotent
-    @AuditLog(action = "UNLOCK", resourceType = "plan", resourceId = "#planId", reason = "#request.reason")
+    @AuditLog(action = "UNLOCK", resourceType = "plan", resourceId = "#planId", reason = "#request.reason",
+            before = "settlement(#planId, #year)", after = "settlement(#planId, #year)")
     public SettlementDtos.UnlockResult unlock(@PathVariable Long planId, @PathVariable Integer year,
                                               @Valid @RequestBody SettlementDtos.UnlockRequest request) {
         return settlementService.unlock(planId, year, request.getVersion(), request.getReason());
@@ -63,7 +65,8 @@ public class SettlementController {
     @PostMapping("/{planId}/final-settle")
     @PreAuthorize("hasAuthority('settlement:manage')")
     @Idempotent
-    @AuditLog(action = "SETTLE", resourceType = "plan", resourceId = "#planId")
+    @AuditLog(action = "SETTLE", resourceType = "plan", resourceId = "#planId",
+            before = "auditPlanSnapshot(#planId)", after = "finalSettlement(#planId)")
     public SettlementDtos.FinalSettlementView finalSettle(@PathVariable Long planId,
                                                           @Valid @RequestBody SettlementDtos.SettleRequest request) {
         return settlementService.finalSettle(planId, request.getVersion());

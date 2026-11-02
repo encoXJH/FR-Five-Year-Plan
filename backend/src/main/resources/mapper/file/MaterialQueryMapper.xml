@@ -47,16 +47,23 @@
                 OR LOWER(ti.code) LIKE CONCAT('%', #{query.keyword}, '%')
                 OR LOWER(ti.name) LIKE CONCAT('%', #{query.keyword}, '%'))
         </if>
-        <if test="query.ownerScope != null">
-            AND ti.owner_id = #{query.ownerScope}
-        </if>
-        <if test="query.unitScope != null">
-            AND COALESCE(s.unit_id, su.unit_id) = #{query.unitScope}
-            AND EXISTS (
-                SELECT 1 FROM task scoped_task
-                WHERE scoped_task.top_indicator_id = ti.id
-                    AND scoped_task.unit_id = #{query.unitScope}
-                    AND scoped_task.deleted = 0
+        <if test="query.ownerScope != null or query.unitScope != null">
+            AND (
+            <if test="query.ownerScope != null">
+                ti.owner_id = #{query.ownerScope}
+            </if>
+            <if test="query.ownerScope != null and query.unitScope != null">
+                OR
+            </if>
+            <if test="query.unitScope != null">
+                (COALESCE(s.unit_id, su.unit_id) = #{query.unitScope}
+                AND EXISTS (
+                    SELECT 1 FROM task scoped_task
+                    WHERE scoped_task.top_indicator_id = ti.id
+                        AND scoped_task.unit_id = #{query.unitScope}
+                        AND scoped_task.deleted = 0
+                ))
+            </if>
             )
         </if>
     </sql>

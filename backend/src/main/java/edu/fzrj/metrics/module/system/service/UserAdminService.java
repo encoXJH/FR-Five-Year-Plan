@@ -167,7 +167,9 @@ public class UserAdminService {
             }
         }
         user.setUpdatedBy(SecurityUtils.getUserId());
-        sysUserMapper.updateById(user);
+        if (sysUserMapper.updateById(user) == 0) {
+            throw new BizException(ErrorCode.VERSION_CONFLICT, "用户已被他人修改，请刷新后重试");
+        }
         return toItems(List.of(sysUserMapper.selectById(userId))).get(0);
     }
 
@@ -185,7 +187,9 @@ public class UserAdminService {
         replaceRoles(userId, newRoles);
         // 推进用户版本号（乐观锁语义挂在 sys_user 上）
         user.setUpdatedBy(SecurityUtils.getUserId());
-        sysUserMapper.updateById(user);
+        if (sysUserMapper.updateById(user) == 0) {
+            throw new BizException(ErrorCode.VERSION_CONFLICT, "用户已被他人修改，请刷新后重试");
+        }
         return new SystemDtos.RoleChangeView(
                 toItems(List.of(sysUserMapper.selectById(userId))).get(0), before, List.copyOf(newRoles));
     }
@@ -199,7 +203,9 @@ public class UserAdminService {
         user.setLoginFailCount(0);
         user.setLockedUntil(null);
         user.setUpdatedBy(SecurityUtils.getUserId());
-        sysUserMapper.updateById(user);
+        if (sysUserMapper.updateById(user) == 0) {
+            throw new BizException(ErrorCode.VERSION_CONFLICT, "用户已被他人修改，请刷新后重试");
+        }
         // 重置后强制重新登录：吊销全部 refreshToken
         revokeAllRefreshTokens(userId);
     }

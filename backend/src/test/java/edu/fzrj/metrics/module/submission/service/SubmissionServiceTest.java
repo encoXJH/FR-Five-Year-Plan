@@ -6,9 +6,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.fzrj.metrics.common.datascope.DataScopeService;
 import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
+import edu.fzrj.metrics.module.file.entity.FileInfo;
 import edu.fzrj.metrics.module.file.entity.FileRef;
 import edu.fzrj.metrics.module.file.mapper.FileInfoMapper;
 import edu.fzrj.metrics.module.file.mapper.FileRefMapper;
+import edu.fzrj.metrics.module.file.service.FileService;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.service.IndicatorService;
 import edu.fzrj.metrics.module.plan.entity.Plan;
@@ -70,6 +72,7 @@ class SubmissionServiceTest {
     @Mock private PlanYearMapper planYearMapper;
     @Mock private FileRefMapper fileRefMapper;
     @Mock private FileInfoMapper fileInfoMapper;
+    @Mock private FileService fileService;
     @Mock private OrgUnitMapper orgUnitMapper;
     @Mock private TaskService taskService;
     @Mock private IndicatorService indicatorService;
@@ -87,6 +90,7 @@ class SubmissionServiceTest {
         TableInfoHelper.initTableInfo(assistant, PlanYear.class);
         TableInfoHelper.initTableInfo(assistant, TaskYear.class);
         TableInfoHelper.initTableInfo(assistant, FileRef.class);
+        TableInfoHelper.initTableInfo(assistant, FileInfo.class);
         TableInfoHelper.initTableInfo(assistant, Review.class);
         TableInfoHelper.initTableInfo(assistant, SubmissionHistory.class);
         TableInfoHelper.initTableInfo(assistant, OrgUnit.class);
@@ -254,6 +258,52 @@ class SubmissionServiceTest {
         assertEquals(30002, error.getErrorCode().getCode());
         verify(planYearMapper, never()).selectOne(any());
         verify(submissionMapper, never()).updateById(any(Submission.class));
+    }
+
+    @Test
+    void 填报绑定附件使用集中授权并保存合法引用() {
+        FileInfo file = new FileInfo();
+        file.setStatus("TEMP");
+        when(fileService.requireBindable(7L, "SUBMISSION", 1L)).thenReturn(file);
+
+        submissionService.bindFiles(1L, List.of(7L));
+
+        verify(fileRefMapper).insert(any(FileRef.class));
+        verify(fileInfoMapper).update(any(), any());
+    }
+
+    @Test
+    void 填报绑定授权失败时不创建文件引用() {
+        doThrow(new BizException(ErrorCode.DATA_SCOPE_DENIED))
+                .when(fileService).requireBindable(7L, "SUBMISSION", 1L);
+
+        BizException error = assertThrows(BizException.class,
+                () -> submissionService.bindFiles(1L, List.of(7L)));
+
+        assertEquals(20005, error.getErrorCode().getCode());
+        verify(fileRefMapper, never()).insert(any(FileRef.class));
+        verify(fileInfoMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void 已归档计划不能删除填报草稿() {
+        Submission submission = new Submission();
+        submission.setId(1L);
+        submission.setPlanId(4L);
+        submission.setTaskId(2L);
+        submission.setUnitId(10L);
+        submission.setStatus("DRAFT");
+        when(submissionMapper.selectOne(any())).thenReturn(submission);
+        when(dataScopeService.isUnitScope(any())).thenReturn(true);
+        Plan plan = new Plan();
+        plan.setStatus("ARCHIVED");
+        when(planService.requirePlan(4L)).thenReturn(plan);
+        doThrow(new BizException(ErrorCode.PLAN_ARCHIVED)).when(planService).requireNotArchived(plan);
+
+        BizException error = assertThrows(BizException.class, () -> submissionService.delete(1L));
+
+        assertEquals(30002, error.getErrorCode().getCode());
+        verify(fileRefMapper, never()).delete(any());
     }
 
     private void loginAdmin() {

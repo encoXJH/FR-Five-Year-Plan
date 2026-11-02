@@ -26,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -87,9 +88,11 @@ public class MaterialService {
         if (!user.getRoles().contains("ADMIN") && !user.getRoles().contains("LEADER")) {
             if (user.getRoles().contains("SCHOOL_OWNER")) {
                 ownerScope = user.getUserId();
-            } else if (user.getRoles().contains("UNIT_OWNER") && user.getUnitId() != null) {
+            }
+            if (user.getRoles().contains("UNIT_OWNER") && user.getUnitId() != null) {
                 unitScope = user.getUnitId();
-            } else {
+            }
+            if (ownerScope == null && unitScope == null) {
                 return new PageResult<>(List.of(), 0L, safePage, safePageSize);
             }
         }
@@ -170,22 +173,23 @@ public class MaterialService {
                             .eq(Indicator::getDeleted, 0L))
                     .stream().map(Indicator::getId).collect(Collectors.toSet());
         }
+        Set<Long> visibleIds = new HashSet<>();
         if (user.getRoles().contains("SCHOOL_OWNER")) {
-            return indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
+            indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
                             .eq(Indicator::getLevel, "A")
                             .eq(Indicator::getOwnerId, user.getUserId())
                             .eq(planId != null, Indicator::getPlanId, planId)
                             .eq(Indicator::getDeleted, 0L))
-                    .stream().map(Indicator::getId).collect(Collectors.toSet());
+                    .stream().map(Indicator::getId).forEach(visibleIds::add);
         }
         if (user.getRoles().contains("UNIT_OWNER") && user.getUnitId() != null) {
-            return taskMapper.selectList(new LambdaQueryWrapper<Task>()
+            taskMapper.selectList(new LambdaQueryWrapper<Task>()
                             .eq(Task::getUnitId, user.getUnitId())
                             .eq(planId != null, Task::getPlanId, planId)
                             .eq(Task::getDeleted, 0L))
-                    .stream().map(Task::getTopIndicatorId).filter(Objects::nonNull).collect(Collectors.toSet());
+                    .stream().map(Task::getTopIndicatorId).filter(Objects::nonNull).forEach(visibleIds::add);
         }
-        return Set.of();
+        return visibleIds;
     }
 
 }

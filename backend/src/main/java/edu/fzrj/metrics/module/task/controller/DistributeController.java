@@ -31,9 +31,14 @@ public class DistributeController {
     @PostMapping("/api/v1/plans/{planId}/distribute")
     @PreAuthorize("hasAuthority('task:distribute')")
     @Idempotent
-    @AuditLog(action = "DISTRIBUTE", resourceType = "plan", resourceId = "#planId")
+    @AuditLog(action = "DISTRIBUTE", resourceType = "plan", resourceId = "#planId",
+            before = "auditSnapshot(#planId)", after = "auditSnapshot(#planId)")
     public TaskDtos.DistributeResponse distribute(@PathVariable Long planId,
                                                   @Valid @RequestBody TaskDtos.DistributeRequest request) {
         return distributeService.distribute(planId, request);
+    }
+
+    public Object auditSnapshot(Long planId) {
+        return distributeService.auditSnapshot(planId);
     }
 }

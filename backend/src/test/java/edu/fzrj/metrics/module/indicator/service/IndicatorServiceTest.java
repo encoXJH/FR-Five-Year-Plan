@@ -2,8 +2,10 @@ package edu.fzrj.metrics.module.indicator.service;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.fzrj.metrics.common.datascope.DataScopeService;
 import edu.fzrj.metrics.common.exception.BizException;
+import edu.fzrj.metrics.common.util.PatchHelper;
 import edu.fzrj.metrics.module.indicator.dto.IndicatorDtos;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.entity.IndicatorYearTarget;
@@ -180,6 +182,39 @@ class IndicatorServiceTest {
         assertEquals(1, roots.get(0).children().size());
         assertEquals(2L, roots.get(0).children().get(0).id());
         verify(planReadScopeService).requireVisible(plan);
+    }
+
+    @Test
+    void 删除指标时存在待下发B草稿则拒绝并保留全部数据() {
+        Indicator indicator = indicator(1L, null, "A", "A01", "DRAFT", "10", "AUTO_SUM");
+        when(indicatorMapper.selectOne(any())).thenReturn(indicator);
+        when(planService.requirePlan(11L)).thenReturn(plan());
+        when(indicatorMapper.selectCount(any())).thenReturn(0L);
+        when(taskMapper.selectCount(any())).thenReturn(0L, 1L);
+
+        BizException error = assertThrows(BizException.class, () -> indicatorService.delete(1L));
+
+        assertEquals(40008, error.getErrorCode().getCode());
+        verify(indicatorMapper, never()).updateById(any(Indicator.class));
+        verify(yearTargetMapper, never()).selectList(any());
+    }
+
+    @Test
+    void 改为不可量化时存在待下发B草稿则拒绝并保留年度目标() throws Exception {
+        Indicator indicator = indicator(1L, null, "A", "A01", "DRAFT", "10", "AUTO_SUM");
+        indicator.setVersion(1);
+        when(indicatorMapper.selectOne(any())).thenReturn(indicator);
+        when(planService.requirePlan(11L)).thenReturn(plan());
+        when(indicatorMapper.selectCount(any())).thenReturn(0L, 0L);
+        when(taskMapper.selectCount(any())).thenReturn(0L, 1L);
+        PatchHelper patch = new PatchHelper(new ObjectMapper()
+                .readTree("{\"isQuantifiable\":false,\"version\":1}"));
+
+        BizException error = assertThrows(BizException.class, () -> indicatorService.patch(1L, patch));
+
+        assertEquals(40006, error.getErrorCode().getCode());
+        verify(indicatorMapper, never()).updateById(any(Indicator.class));
+        verify(yearTargetMapper, never()).selectList(any());
     }
 
     private static Plan plan() {

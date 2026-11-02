@@ -17,6 +17,7 @@ import { ApiError } from '@/utils/request'
 import { formatDateTime, formatPercent, formatRelativeTime } from '@/utils/format'
 import { FILE_CATEGORY_COLORS, formatFileSize } from '@/utils/file'
 import { percentToDisplay, percentToStore } from '@/utils/allocation'
+import { shouldApplyRefreshResponse, useAutoRefresh } from '@/utils/autoRefresh'
 import {
   approvedReduction,
   buildMetricValue,
@@ -106,10 +107,20 @@ function currentQuery() {
   }
 }
 
-async function loadList(keepSelection = false, autoSelect = true): Promise<void> {
-  listLoading.value = true
+let listLoadGeneration = 0
+
+async function loadList(keepSelection = false, autoSelect = true, silent = false): Promise<void> {
+  const generation = ++listLoadGeneration
+  const selectionAtStart = selectedId.value
+  if (!silent) listLoading.value = true
   try {
-    page.value = await listPendingReviews(currentQuery())
+    const result = await listPendingReviews(currentQuery())
+    if (!shouldApplyRefreshResponse({
+      current: generation === listLoadGeneration && selectedId.value === selectionAtStart,
+      silent,
+      skipping: reviewFormDirty.value,
+    })) return
+    page.value = result
     const previous = keepSelection ? selectedId.value : null
     checkedIds.value = []
     const items = page.value.items
@@ -117,14 +128,14 @@ async function loadList(keepSelection = false, autoSelect = true): Promise<void>
       ?? (autoSelect ? items[0]?.id ?? null : null)
     selectedId.value = next
     if (next) {
-      await loadDetail(next)
+      await loadDetail(next, silent)
     } else {
       detail.value = null
       detailLoadError.value = null
       history.value = []
     }
   } finally {
-    listLoading.value = false
+    if (!silent && generation === listLoadGeneration) listLoading.value = false
   }
 }
 
@@ -168,28 +179,43 @@ const detailRemarkParts = computed(() => parseSubmissionRemark(detail.value?.rem
 /** 材料列表（防御后端省略字段） */
 const detailFiles = computed(() => detail.value?.files ?? [])
 
-async function loadDetail(id: string): Promise<void> {
-  detailLoading.value = true
+let detailLoadGeneration = 0
+
+async function loadDetail(id: string, silent = false): Promise<void> {
+  const generation = ++detailLoadGeneration
+  if (!silent) detailLoading.value = true
   detailLoadError.value = null
   try {
     const data = await getSubmission(id)
+    if (!shouldApplyRefreshResponse({
+      current: generation === detailLoadGeneration && selectedId.value === id,
+      silent,
+      skipping: reviewFormDirty.value,
+    })) return
     detail.value = data
     initReviewForm(data)
     const taskId = data.task?.id
-    history.value = taskId ? await listSubmissions(taskId) : []
-    // 内嵌预览面板（UI 规范 7.7）：有材料时自动预览第一份
+    const submissionHistory = taskId ? await listSubmissions(taskId) : []
+    if (generation !== detailLoadGeneration || selectedId.value !== id) return
+    history.value = submissionHistory
+    // 内嵌预览面板（UI 规范 7.7）：有材料时自动预览第一份；自动刷新时保留用户当前预览
     const files = data.files ?? []
-    previewFileId.value = files.length > 0 ? files[0].id : null
+    if (!silent || !files.some((file) => file.id === previewFileId.value)) {
+      previewFileId.value = files.length > 0 ? files[0].id : null
+    }
   } catch (error) {
-    detail.value = null
-    history.value = []
-    previewFileId.value = null
+    if (generation !== detailLoadGeneration || selectedId.value !== id || (silent && reviewFormDirty.value)) return
+    if (!silent) {
+      detail.value = null
+      history.value = []
+      previewFileId.value = null
+    }
     detailLoadError.value = {
       message: error instanceof ApiError && error.message ? error.message : '填报详情加载失败，请重试',
       requestId: error instanceof ApiError ? error.requestId : '',
     }
   } finally {
-    detailLoading.value = false
+    if (!silent && generation === detailLoadGeneration) detailLoading.value = false
   }
 }
 
@@ -220,6 +246,19 @@ function initReviewForm(data: SubmissionDetail): void {
   reviewForm.comment = ''
   reviewForm.reason = ''
 }
+
+/** 审核表单已改动：自动刷新时跳过，避免覆盖认定值或审核意见 */
+const reviewFormDirty = computed(() => {
+  const value = detail.value?.value
+  if (!value) return false
+  return (reviewForm.amount ?? null) !== (value.amount ?? null)
+    || (reviewForm.total ?? null) !== (value.total ?? null)
+    || (reviewForm.numerator ?? null) !== (value.numerator ?? null)
+    || (reviewForm.denominator ?? null) !== (value.denominator ?? null)
+    || (reviewForm.percent ?? null) !== (percentToDisplay(value.percent) ?? null)
+    || reviewForm.comment.trim() !== ''
+    || reviewForm.reason.trim() !== ''
+})
 
 const approvedValue = computed(() =>
   buildMetricValue(caliber.value, {
@@ -508,6 +547,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
 })
+
+useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.value })
 </script>
 
 <template>

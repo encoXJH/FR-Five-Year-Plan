@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import BackButton from '@/components/BackButton.vue'
 import YearProgressPanel from '@/views/stats/components/YearProgressPanel.vue'
@@ -12,6 +12,8 @@ import type { IndicatorTreeNode } from '@/types/indicator'
 import type { StatCaliber } from '@/types/enums'
 import { EMPTY_DISPLAY, formatCount, formatNumber, formatPercent } from '@/utils/format'
 import { formatTargetValue, isPercentCaliber } from '@/utils/indicator'
+import { useAutoRefresh } from '@/utils/autoRefresh'
+import { useUserStore } from '@/stores/user'
 
 interface TrendWithDirection extends IndicatorTrend {
   directionName: string
@@ -27,7 +29,10 @@ interface DirectionProgress {
 }
 
 const route = useRoute()
+const router = useRouter()
+const userStore = useUserStore()
 const planId = typeof route.params.planId === 'string' ? route.params.planId : ''
+const canViewIndicatorProgress = computed(() => !userStore.isUnitOwnerOnly)
 
 const loading = ref(false)
 const planName = ref('')
@@ -112,9 +117,9 @@ function directionStatus(direction: DirectionProgress): 'success' | undefined {
     : undefined
 }
 
-async function load(): Promise<void> {
-  if (!planId) return
-  loading.value = true
+async function load(silent = false): Promise<void> {
+  if (!canViewIndicatorProgress.value || !planId) return
+  if (!silent) loading.value = true
   try {
     const [plan, tree, indicatorTree, stats] = await Promise.all([
       getPlan(planId),
@@ -147,19 +152,21 @@ async function load(): Promise<void> {
         targetDirection: targetDirectionById.get(result.value.indicatorId) ?? null,
       }))
       .sort((a, b) => a.code.localeCompare(b.code, 'zh-CN', { numeric: true }))
-    if (trends.value.length < aNodes.length) {
+    if (!silent && trends.value.length < aNodes.length) {
       ElMessage.warning('部分指标进度加载失败，可刷新重试')
     }
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
 onMounted(load)
+
+useAutoRefresh(() => load(true), { intervalMs: 60_000 })
 </script>
 
 <template>
-  <div v-loading="loading" class="indicator-progress-page">
+  <div v-if="canViewIndicatorProgress" v-loading="loading" class="indicator-progress-page">
     <BackButton />
     <div class="page-header">
       <div>
@@ -310,6 +317,12 @@ onMounted(load)
       </div>
     </section>
   </div>
+  <el-result v-else icon="warning" title="暂无访问权限">
+    <template #sub-title>你没有访问该页面的权限，如有疑问请联系平台管理员</template>
+    <template #extra>
+      <el-button type="primary" @click="router.push(userStore.homePath)">返回首页</el-button>
+    </template>
+  </el-result>
 </template>
 
 <style scoped>

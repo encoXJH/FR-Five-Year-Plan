@@ -15,6 +15,7 @@ import edu.fzrj.metrics.module.file.entity.FileInfo;
 import edu.fzrj.metrics.module.file.entity.FileRef;
 import edu.fzrj.metrics.module.file.mapper.FileInfoMapper;
 import edu.fzrj.metrics.module.file.mapper.FileRefMapper;
+import edu.fzrj.metrics.module.file.service.FileService;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.service.IndicatorService;
 import edu.fzrj.metrics.module.plan.entity.Plan;
@@ -40,6 +41,7 @@ import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.module.task.service.TaskService;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -77,6 +79,7 @@ public class SubmissionService {
     private final PlanYearMapper planYearMapper;
     private final FileRefMapper fileRefMapper;
     private final FileInfoMapper fileInfoMapper;
+    private final FileService fileService;
     private final OrgUnitMapper orgUnitMapper;
     private final TaskService taskService;
     private final IndicatorService indicatorService;
@@ -89,8 +92,8 @@ public class SubmissionService {
     public SubmissionService(SubmissionMapper submissionMapper, SubmissionHistoryMapper historyMapper,
                              ReviewMapper reviewMapper, TaskYearMapper taskYearMapper,
                              PlanYearMapper planYearMapper, FileRefMapper fileRefMapper,
-                             FileInfoMapper fileInfoMapper, OrgUnitMapper orgUnitMapper,
-                             TaskService taskService, IndicatorService indicatorService,
+                             FileInfoMapper fileInfoMapper, @Lazy FileService fileService,
+                             OrgUnitMapper orgUnitMapper, TaskService taskService, IndicatorService indicatorService,
                              PlanService planService, DataScopeService dataScopeService,
                              UserRefResolver userRefResolver, ObjectMapper objectMapper,
                              AnnualTargetGuard annualTargetGuard) {
@@ -101,6 +104,7 @@ public class SubmissionService {
         this.planYearMapper = planYearMapper;
         this.fileRefMapper = fileRefMapper;
         this.fileInfoMapper = fileInfoMapper;
+        this.fileService = fileService;
         this.orgUnitMapper = orgUnitMapper;
         this.taskService = taskService;
         this.indicatorService = indicatorService;
@@ -240,6 +244,7 @@ public class SubmissionService {
     public void delete(Long submissionId) {
         Submission submission = requireSubmission(submissionId);
         requireSubmitter(submission.getUnitId(), null);
+        planService.requireNotArchived(planService.requirePlan(submission.getPlanId()));
         taskService.requireCurrentTask(submission.getTaskId());
         if (!"DRAFT".equals(submission.getStatus())) {
             throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "只有草稿可以删除");
@@ -424,13 +429,13 @@ public class SubmissionService {
 
     // ---------------- 文件 ----------------
 
-    private void bindFiles(Long submissionId, List<Long> fileIds) {
+    void bindFiles(Long submissionId, List<Long> fileIds) {
         if (fileIds == null || fileIds.isEmpty()) {
             return;
         }
         int sort = 0;
         for (Long fileId : new LinkedHashSet<>(fileIds)) {
-            FileInfo fileInfo = requireFile(fileId);
+            FileInfo fileInfo = fileService.requireBindable(fileId, FILE_BIZ_TYPE, submissionId);
             FileRef ref = new FileRef();
             ref.setBizType(FILE_BIZ_TYPE);
             ref.setBizId(submissionId);
@@ -485,16 +490,6 @@ public class SubmissionService {
                         .eq(FileRef::getBizId, submissionId)
                         .orderByAsc(FileRef::getSort))
                 .stream().map(FileRef::getFileId).toList();
-    }
-
-    private FileInfo requireFile(Long fileId) {
-        FileInfo fileInfo = fileInfoMapper.selectOne(new LambdaQueryWrapper<FileInfo>()
-                .eq(FileInfo::getId, fileId)
-                .eq(FileInfo::getDeleted, 0L));
-        if (fileInfo == null) {
-            throw new BizException(ErrorCode.FILE_NOT_FOUND);
-        }
-        return fileInfo;
     }
 
     // ---------------- 视图组装（审核模块复用） ----------------

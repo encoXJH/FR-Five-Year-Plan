@@ -43,7 +43,7 @@ const routes: RouteRecordRaw[] = [
         path: 'plans/:planId/indicators',
         name: 'PlanIndicators',
         component: () => import('@/views/indicators/index.vue'),
-        meta: { title: '指标总表' },
+        meta: { title: '指标总表', hideForRolesOnly: ['UNIT_OWNER'] },
       },
       {
         path: 'plans/:planId/gantt',
@@ -54,14 +54,14 @@ const routes: RouteRecordRaw[] = [
         path: 'plans/:planId/indicator-progress',
         name: 'IndicatorProgress',
         component: () => import('@/views/indicators/progress.vue'),
-        meta: { title: '指标进度可视化' },
+        meta: { title: '指标进度可视化', hideForRolesOnly: ['UNIT_OWNER'] },
       },
       {
         // P04 指标总表（无计划上下文时提示先选计划）
         path: 'indicators',
         name: 'Indicators',
         component: () => import('@/views/indicators/index.vue'),
-        meta: { title: '指标总表' },
+        meta: { title: '指标总表', hideForRolesOnly: ['UNIT_OWNER'] },
       },
       {
         // P05 指标详情

@@ -30,10 +30,23 @@ public class SignedUrlService {
                             @Value("${app.file.signed-url-expire-minutes}") long expireMinutes,
                             FileInfoMapper fileInfoMapper,
                             ObjectProvider<MinioStorageService> minioStorageProvider) {
-        this.signSecret = signSecret;
+        this.signSecret = requireStrongSecret(signSecret);
         this.expireMinutes = expireMinutes;
         this.fileInfoMapper = fileInfoMapper;
         this.minioStorageProvider = minioStorageProvider;
+    }
+
+    private static String requireStrongSecret(String secret) {
+        String value = secret == null ? "" : secret.trim();
+        String lower = value.toLowerCase(java.util.Locale.ROOT);
+        boolean placeholder = lower.contains("please-change-me") || lower.contains("change-me")
+                || lower.contains("changeme") || lower.contains("replace-me")
+                || lower.contains("your-secret") || lower.contains("placeholder")
+                || lower.startsWith("${");
+        if (value.getBytes(StandardCharsets.UTF_8).length < 32 || placeholder) {
+            throw new IllegalStateException("文件签名密钥缺失、过短或仍为占位值，请通过 FILE_SIGN_SECRET 配置至少 32 字节的随机密钥");
+        }
+        return value;
     }
 
     public SignedUrlService(String signSecret, long expireMinutes) {

@@ -24,8 +24,22 @@ public class JwtService {
 
     public JwtService(@Value("${app.jwt.secret}") String secret,
                       @Value("${app.jwt.access-expire-minutes}") long accessExpireMinutes) {
-        this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        String validatedSecret = requireStrongSecret(secret);
+        this.key = Keys.hmacShaKeyFor(validatedSecret.getBytes(StandardCharsets.UTF_8));
         this.accessExpireMillis = accessExpireMinutes * 60_000L;
+    }
+
+    private static String requireStrongSecret(String secret) {
+        String value = secret == null ? "" : secret.trim();
+        String lower = value.toLowerCase(java.util.Locale.ROOT);
+        boolean placeholder = lower.contains("please-change-me") || lower.contains("change-me")
+                || lower.contains("changeme") || lower.contains("replace-me")
+                || lower.contains("your-secret") || lower.contains("placeholder")
+                || lower.startsWith("${");
+        if (value.getBytes(StandardCharsets.UTF_8).length < 32 || placeholder) {
+            throw new IllegalStateException("JWT 密钥缺失、过短或仍为占位值，请通过 JWT_SECRET 配置至少 32 字节的随机密钥");
+        }
+        return value;
     }
 
     public String createAccessToken(Long userId, String name, List<String> roles) {

@@ -12,6 +12,7 @@ import { listIndicators } from '@/api/indicator'
 import { useUserStore } from '@/stores/user'
 import { enumOptions } from '@/utils/enumLabels'
 import { formatDate } from '@/utils/format'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import type { CreateMilestoneRequest, Milestone } from '@/types/milestone'
 import type { MilestoneStatus } from '@/types/enums'
 
@@ -73,23 +74,23 @@ const sortedMilestones = computed(() =>
   [...milestones.value].sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '')),
 )
 
-async function loadMilestones(): Promise<void> {
+async function loadMilestones(silent = false): Promise<void> {
   const indicatorId = selectedIndicatorId.value
   const sequence = ++milestoneLoadSequence
   if (!indicatorId) {
     milestones.value = []
     return
   }
-  loading.value = true
+  if (!silent) loading.value = true
   try {
     const result = await listMilestones({ indicatorId })
     if (sequence === milestoneLoadSequence && indicatorId === selectedIndicatorId.value) {
       milestones.value = result
     }
   } catch {
-    if (sequence === milestoneLoadSequence) milestones.value = []
+    if (!silent && sequence === milestoneLoadSequence) milestones.value = []
   } finally {
-    if (sequence === milestoneLoadSequence) loading.value = false
+    if (!silent && sequence === milestoneLoadSequence) loading.value = false
   }
 }
 
@@ -210,6 +211,8 @@ async function removeMilestone(item: Milestone): Promise<void> {
 watch(() => props.planId, () => {
   void loadIndicatorOptions()
 }, { immediate: true })
+
+useAutoRefresh(() => loadMilestones(true), { skip: () => dialogVisible.value })
 </script>
 
 <template>

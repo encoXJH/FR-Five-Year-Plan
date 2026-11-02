@@ -22,20 +22,41 @@ public final class SubmissionValueRules {
                                       BigDecimal numerator, BigDecimal denominator,
                                       BigDecimal percent, Boolean achieved) {
         return switch (caliber) {
-            case "INCREMENT" -> requireOnly(amount != null, "amount（本次新增数量）必填",
-                    total, numerator, denominator, percent, achieved);
-            case "STOCK", "GROWTH" -> requireOnly(total != null, "total（当前总量）必填",
-                    amount, numerator, denominator, percent, achieved);
+            case "INCREMENT" -> {
+                String error = requireOnly(amount != null, "amount（本次新增数量）必填",
+                        total, numerator, denominator, percent, achieved);
+                if (error == null && amount.compareTo(BigDecimal.ZERO) < 0) {
+                    error = "amount（本次新增数量）不能小于 0";
+                }
+                yield error;
+            }
+            case "STOCK", "GROWTH" -> {
+                String error = requireOnly(total != null, "total（当前总量）必填",
+                        amount, numerator, denominator, percent, achieved);
+                if (error == null && total.compareTo(BigDecimal.ZERO) < 0) {
+                    error = "total（当前总量）不能小于 0";
+                }
+                yield error;
+            }
             case "RATIO" -> {
                 String error = requireOnly(numerator != null && denominator != null,
                         "numerator（分子）与 denominator（分母）必填", amount, total, percent, achieved);
+                if (error == null && numerator.compareTo(BigDecimal.ZERO) < 0) {
+                    error = "numerator（分子）不能小于 0";
+                }
                 if (error == null && denominator.compareTo(BigDecimal.ZERO) <= 0) {
                     error = "denominator（分母）必须大于 0";
                 }
                 yield error;
             }
-            case "DIRECT_PERCENT" -> requireOnly(percent != null, "percent（百分比，小数）必填",
-                    amount, total, numerator, denominator, achieved);
+            case "DIRECT_PERCENT" -> {
+                String error = requireOnly(percent != null, "percent（百分比，小数）必填",
+                        amount, total, numerator, denominator, achieved);
+                if (error == null && percent.compareTo(BigDecimal.ZERO) < 0) {
+                    error = "percent（百分比，小数）不能小于 0";
+                }
+                yield error;
+            }
             case "BOOLEAN" -> requireOnly(achieved != null, "achieved（是否完成）必填",
                     amount, total, numerator, denominator, percent);
             default -> "未知统计口径：" + caliber;

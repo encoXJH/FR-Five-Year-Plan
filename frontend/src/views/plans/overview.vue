@@ -10,6 +10,7 @@ import { activatePlan, activatePlanYear, archivePlan, getPlan } from '@/api/plan
 import { finalSettle, getYearSettlement, settleYear, unlockYear } from '@/api/settlement'
 import { completeMakeup, listTaskMakeups } from '@/api/makeup'
 import { useUserStore } from '@/stores/user'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { formatPercent } from '@/utils/format'
 import { setCurrentPlan } from '@/utils/currentPlan'
@@ -49,13 +50,13 @@ const planYears = computed<number[]>(() => {
   return list
 })
 
-async function loadPlan(): Promise<void> {
-  loading.value = true
+async function loadPlan(silent = false): Promise<void> {
+  if (!silent) loading.value = true
   try {
     plan.value = await getPlan(planId.value)
     if (plan.value) setCurrentPlan(plan.value)
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -173,18 +174,18 @@ const settlementYear = ref<number | null>(null)
 const settlement = ref<YearSettlement | null>(null)
 const settlementLoading = ref(false)
 
-async function loadSettlement(): Promise<void> {
+async function loadSettlement(silent = false): Promise<void> {
   if (settlementYear.value == null) {
     settlement.value = null
     return
   }
-  settlementLoading.value = true
+  if (!silent) settlementLoading.value = true
   try {
     settlement.value = await getYearSettlement(planId.value, settlementYear.value)
   } catch {
-    settlement.value = null
+    if (!silent) settlement.value = null
   } finally {
-    settlementLoading.value = false
+    if (!silent) settlementLoading.value = false
   }
 }
 
@@ -251,6 +252,8 @@ watch(planId, async (id) => {
   settlementYear.value = lockedYears.value[0] ?? null
   await loadSettlement()
 }, { immediate: true })
+
+useAutoRefresh(() => Promise.all([loadPlan(true), loadSettlement(true)]))
 </script>
 
 <template>

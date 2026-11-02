@@ -1,6 +1,7 @@
 package edu.fzrj.metrics.module.file.service;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.fzrj.metrics.common.error.ErrorCode;
@@ -36,6 +37,7 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -133,6 +135,82 @@ class FileServiceTest {
         when(fileInfoMapper.selectOne(any())).thenReturn(file);
 
         assertSame(file, fileService.requireReadable(1L));
+    }
+
+    @Test
+    void 本人上传的临时或已绑定文件都可绑定() {
+        when(fileInfoMapper.selectOne(any()))
+                .thenReturn(file("TEMP", 99L), file("BOUND", 99L));
+
+        assertNotNull(fileService.requireBindable(1L, "SUBMISSION", 51L));
+        assertNotNull(fileService.requireBindable(1L, "SUBMISSION", 52L));
+        verify(fileRefMapper, never()).selectCount(any());
+    }
+
+    @Test
+    void 相同内容按上传者去重并可绑定新业务() throws Exception {
+        byte[] content = "%PDF-1.4\nshared".getBytes(StandardCharsets.UTF_8);
+        MockMultipartFile upload = new MockMultipartFile(
+                "file", "shared.pdf", "application/pdf", content);
+        when(fileInfoMapper.selectList(any())).thenReturn(List.of());
+        doAnswer(invocation -> {
+            invocation.getArgument(0, InputStream.class).readAllBytes();
+            return null;
+        }).when(storageService).save(any(), any(), anyLong());
+        doAnswer(invocation -> {
+            invocation.getArgument(0, FileInfo.class).setId(2L);
+            return 1;
+        }).when(fileInfoMapper).insert(any(FileInfo.class));
+
+        FileInfoResponse response = fileService.upload(upload, "SUBMISSION_ATTACHMENT");
+
+        assertEquals(2L, response.getId());
+        ArgumentCaptor<FileInfo> fileCaptor = ArgumentCaptor.forClass(FileInfo.class);
+        verify(fileInfoMapper).insert(fileCaptor.capture());
+        assertEquals(99L, fileCaptor.getValue().getUploadedBy());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Wrapper<FileInfo>> queryCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(fileInfoMapper).selectList(queryCaptor.capture());
+        assertTrue(queryCaptor.getValue().getSqlSegment().contains("uploaded_by"));
+        when(fileInfoMapper.selectOne(any())).thenReturn(fileCaptor.getValue());
+        assertSame(fileCaptor.getValue(), fileService.requireBindable(2L, "SUBMISSION", 51L));
+    }
+
+    @Test
+    void 他人临时或已绑定文件都不能借新业务绑定() {
+        when(fileInfoMapper.selectOne(any()))
+                .thenReturn(file("TEMP", 88L), file("BOUND", 88L));
+        when(fileRefMapper.selectCount(any())).thenReturn(0L);
+
+        BizException tempError = assertThrows(BizException.class,
+                () -> fileService.requireBindable(1L, "SUBMISSION", 51L));
+        BizException boundError = assertThrows(BizException.class,
+                () -> fileService.requireBindable(1L, "ADJUSTMENT", 52L));
+
+        assertEquals(20005, tempError.getErrorCode().getCode());
+        assertEquals(20005, boundError.getErrorCode().getCode());
+    }
+
+    @Test
+    void 非上传人可保留同一业务已有文件引用() {
+        FileInfo file = file("BOUND", 88L);
+        when(fileInfoMapper.selectOne(any())).thenReturn(file);
+        when(fileRefMapper.selectCount(any())).thenReturn(1L);
+
+        assertSame(file, fileService.requireBindable(1L, "SUBMISSION", 51L));
+    }
+
+    @Test
+    void 管理员可以绑定他人文件() {
+        LoginUser admin = new LoginUser(100L, "admin", "管理员", null,
+                List.of("ADMIN"), List.of());
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(admin, null, List.of()));
+        FileInfo file = file("BOUND", 88L);
+        when(fileInfoMapper.selectOne(any())).thenReturn(file);
+
+        assertSame(file, fileService.requireBindable(1L, "ADJUSTMENT", 52L));
+        verify(fileRefMapper, never()).selectCount(any());
     }
 
     @Test
@@ -342,6 +420,31 @@ class FileServiceTest {
         assertEquals(ErrorCode.PART_INVALID.getCode(), error.getErrorCode().getCode());
         verify(directStorageService).delete(session.getStorageKey());
         verify(fileInfoMapper, never()).insert(any(FileInfo.class));
+    }
+
+    @Test
+    void 新视频无需转码即可用原文件预览() throws Exception {
+        byte[] content = new byte[]{0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70,
+                0x69, 0x73, 0x6f, 0x6d, 0, 0, 0, 0};
+        MockMultipartFile upload = new MockMultipartFile(
+                "file", "material.mp4", "video/mp4", content);
+        when(fileInfoMapper.selectList(any())).thenReturn(List.of());
+        doAnswer(invocation -> {
+            invocation.getArgument(0, InputStream.class).readAllBytes();
+            return null;
+        }).when(storageService).save(any(), any(), anyLong());
+        doAnswer(invocation -> {
+            invocation.getArgument(0, FileInfo.class).setId(1L);
+            return 1;
+        }).when(fileInfoMapper).insert(any(FileInfo.class));
+
+        FileInfoResponse response = fileService.upload(upload, "SUBMISSION_ATTACHMENT");
+
+        assertEquals("VIDEO", response.getCategory());
+        assertEquals("SUCCEEDED", response.getTranscodeStatus());
+        ArgumentCaptor<FileInfo> captor = ArgumentCaptor.forClass(FileInfo.class);
+        verify(fileInfoMapper).insert(captor.capture());
+        assertEquals("SUCCEEDED", captor.getValue().getTranscodeStatus());
     }
 
     private static MultipartInitRequest multipartRequest() {

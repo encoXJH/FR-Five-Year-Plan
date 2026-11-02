@@ -12,6 +12,7 @@ import type { OrgUnit } from '@/api/orgUnit'
 import { useUserStore } from '@/stores/user'
 import { formatPercent } from '@/utils/format'
 import { formatTargetValue } from '@/utils/indicator'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import { canWriteTask, formatDeadline, primaryTaskIndicator } from '@/utils/task'
 import { canApplyForTask } from '@/utils/adjustment'
 import type { PageResult } from '@/types/api'
@@ -86,12 +87,12 @@ function currentQuery(extra: Partial<TaskQuery> = {}): TaskQuery {
   }
 }
 
-async function loadTasks(): Promise<void> {
-  loading.value = true
+async function loadTasks(silent = false): Promise<void> {
+  if (!silent) loading.value = true
   try {
     page.value = await listTasks(currentQuery({ page: page.value.page, pageSize: page.value.pageSize }))
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -235,6 +236,13 @@ onMounted(() => {
       .catch(() => undefined)
   }
 })
+
+useAutoRefresh(
+  async () => {
+    await Promise.all([loadTasks(true), loadKpi()])
+  },
+  { skip: () => drawerVisible.value },
+)
 </script>
 
 <template>

@@ -21,6 +21,7 @@ import { ApiError } from '@/utils/request'
 import { formatGrowth, formatPercent } from '@/utils/format'
 import { formatTargetValue } from '@/utils/indicator'
 import { percentToDisplay, percentToStore } from '@/utils/allocation'
+import { shouldApplyRefreshResponse, useAutoRefresh } from '@/utils/autoRefresh'
 import {
   buildMetricValue,
   computeRatio,
@@ -153,6 +154,12 @@ const editingId = ref<string | null>(null)
 const editingVersion = ref(0)
 const dirty = ref(false)
 
+/** 新上传或移除的材料尚未保存，自动刷新需暂停，避免重置 fileIds 导致材料丢失 */
+const fileIdsDirty = computed(() => {
+  const bound = initialFiles.value.map((file) => file.id)
+  return fileIds.value.length !== bound.length || fileIds.value.some((id) => !bound.includes(id))
+})
+
 function markDirty(): void {
   if (formReadonly.value || yearLocked.value) return
   dirty.value = true
@@ -243,18 +250,28 @@ const percentAchieved = computed(() => {
 })
 
 // ---------- 加载 ----------
-async function reload(): Promise<void> {
-  loading.value = true
-  loadFailed.value = false
+let reloadGeneration = 0
+
+async function reload(silent = false): Promise<void> {
+  const generation = ++reloadGeneration
+  if (!silent) {
+    loading.value = true
+    loadFailed.value = false
+  }
   try {
     const [detail, list] = await Promise.all([getTask(taskId), listSubmissions(taskId)])
+    if (!shouldApplyRefreshResponse({
+      current: generation === reloadGeneration,
+      silent,
+      skipping: dirty.value || fileIdsDirty.value,
+    })) return
     task.value = detail
     submissions.value = list
     populate()
   } catch {
-    loadFailed.value = true
+    if (!silent && generation === reloadGeneration) loadFailed.value = true
   } finally {
-    loading.value = false
+    if (!silent && generation === reloadGeneration) loading.value = false
   }
 }
 
@@ -436,6 +453,8 @@ onBeforeRouteLeave(async () => {
 })
 
 onMounted(reload)
+
+useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.value })
 </script>
 
 <template>

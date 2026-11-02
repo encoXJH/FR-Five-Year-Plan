@@ -13,6 +13,7 @@ import type { OrgUnit } from '@/api/orgUnit'
 import { useUserStore } from '@/stores/user'
 import { enumLabel, enumOptions } from '@/utils/enumLabels'
 import { EMPTY_DISPLAY, formatDateTime } from '@/utils/format'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import ReasonDialog from '@/components/ReasonDialog.vue'
 import type { Role } from '@/types/enums'
 import type { SystemUser } from '@/types/system'
@@ -33,8 +34,8 @@ const filters = reactive({
 
 const roleOptions = computed(() => enumOptions('Role', userStore.enums))
 
-async function load(): Promise<void> {
-  loading.value = true
+async function load(silent = false): Promise<void> {
+  if (!silent) loading.value = true
   try {
     const result = await listUsers({
       keyword: filters.keyword.trim() || undefined,
@@ -45,7 +46,7 @@ async function load(): Promise<void> {
     rows.value = result.items
     total.value = result.total
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -230,6 +231,8 @@ onMounted(() => {
     })
     .catch(() => undefined)
 })
+
+useAutoRefresh(() => load(true))
 </script>
 
 <template>

@@ -9,6 +9,7 @@ import IndicatorEditDrawer from './components/IndicatorEditDrawer.vue'
 import { getIndicator } from '@/api/indicator'
 import { getPlan } from '@/api/plan'
 import { useUserStore } from '@/stores/user'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import { hasQuantitativeFields } from '@/utils/indicator'
 import type { IndicatorDetail } from '@/types/indicator'
 import type { PlanDetail } from '@/types/plan'
@@ -76,11 +77,13 @@ function runPrimaryAction(): void {
 
 let loadSequence = 0
 
-async function loadAll(): Promise<void> {
+async function loadAll(silent = false): Promise<void> {
   const sequence = ++loadSequence
-  loading.value = true
-  indicator.value = null
-  plan.value = null
+  if (!silent) {
+    loading.value = true
+    indicator.value = null
+    plan.value = null
+  }
   try {
     const detail = await getIndicator(indicatorId.value)
     if (sequence !== loadSequence) return
@@ -98,13 +101,15 @@ async function loadAll(): Promise<void> {
     if (sequence !== loadSequence) return
     plan.value = planDetail
   } finally {
-    if (sequence === loadSequence) loading.value = false
+    if (!silent && sequence === loadSequence) loading.value = false
   }
 }
 
 watch(indicatorId, (id) => {
   if (id) void loadAll()
 }, { immediate: true })
+
+useAutoRefresh(() => loadAll(true), { skip: () => drawerVisible.value })
 </script>
 
 <template>

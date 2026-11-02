@@ -22,6 +22,7 @@ import edu.fzrj.metrics.module.file.entity.FileInfo;
 import edu.fzrj.metrics.module.file.entity.FileRef;
 import edu.fzrj.metrics.module.file.mapper.FileInfoMapper;
 import edu.fzrj.metrics.module.file.mapper.FileRefMapper;
+import edu.fzrj.metrics.module.file.service.FileService;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.entity.IndicatorYearTarget;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
@@ -48,6 +49,7 @@ import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.module.task.service.TaskService;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -93,6 +95,7 @@ public class AdjustmentService {
     private final UserRoleMapper userRoleMapper;
     private final FileRefMapper fileRefMapper;
     private final FileInfoMapper fileInfoMapper;
+    private final FileService fileService;
     private final NotificationMapper notificationMapper;
     private final TaskService taskService;
     private final IndicatorService indicatorService;
@@ -108,8 +111,8 @@ public class AdjustmentService {
                              IndicatorYearTargetMapper yearTargetMapper, PlanYearMapper planYearMapper,
                              OrgUnitMapper orgUnitMapper, SysUserMapper sysUserMapper,
                              UserRoleMapper userRoleMapper, FileRefMapper fileRefMapper,
-                             FileInfoMapper fileInfoMapper, NotificationMapper notificationMapper,
-                             TaskService taskService, IndicatorService indicatorService,
+                             FileInfoMapper fileInfoMapper, @Lazy FileService fileService,
+                             NotificationMapper notificationMapper, TaskService taskService, IndicatorService indicatorService,
                              PlanService planService, OrgUnitAdminService orgUnitAdminService,
                              DataScopeService dataScopeService, UserRefResolver userRefResolver,
                              ObjectMapper objectMapper) {
@@ -126,6 +129,7 @@ public class AdjustmentService {
         this.userRoleMapper = userRoleMapper;
         this.fileRefMapper = fileRefMapper;
         this.fileInfoMapper = fileInfoMapper;
+        this.fileService = fileService;
         this.notificationMapper = notificationMapper;
         this.taskService = taskService;
         this.indicatorService = indicatorService;
@@ -946,11 +950,12 @@ public class AdjustmentService {
     }
 
     public Map<Integer, BigDecimal> indicatorTargets(Long indicatorId) {
-        return yearTargetMapper.selectList(new LambdaQueryWrapper<IndicatorYearTarget>()
-                        .eq(IndicatorYearTarget::getIndicatorId, indicatorId)
-                        .eq(IndicatorYearTarget::getDeleted, 0L))
-                .stream().collect(Collectors.toMap(IndicatorYearTarget::getYear,
-                        IndicatorYearTarget::getTarget, (a, b) -> a));
+        List<IndicatorYearTarget> rows = yearTargetMapper.selectList(new LambdaQueryWrapper<IndicatorYearTarget>()
+                .eq(IndicatorYearTarget::getIndicatorId, indicatorId)
+                .eq(IndicatorYearTarget::getDeleted, 0L));
+        Map<Integer, BigDecimal> targets = new HashMap<>();
+        rows.forEach(row -> targets.put(row.getYear(), row.getTarget()));
+        return targets;
     }
 
     // ---------------- 冻结 ----------------
@@ -1177,18 +1182,13 @@ public class AdjustmentService {
 
     // ---------------- 文件 ----------------
 
-    private void bindFiles(Long adjustmentId, List<Long> fileIds) {
+    void bindFiles(Long adjustmentId, List<Long> fileIds) {
         if (fileIds == null || fileIds.isEmpty()) {
             return;
         }
         int sort = 0;
         for (Long fileId : new LinkedHashSet<>(fileIds)) {
-            FileInfo fileInfo = fileInfoMapper.selectOne(new LambdaQueryWrapper<FileInfo>()
-                    .eq(FileInfo::getId, fileId)
-                    .eq(FileInfo::getDeleted, 0L));
-            if (fileInfo == null) {
-                throw new BizException(ErrorCode.FILE_NOT_FOUND);
-            }
+            FileInfo fileInfo = fileService.requireBindable(fileId, FILE_BIZ_TYPE, adjustmentId);
             FileRef ref = new FileRef();
             ref.setBizType(FILE_BIZ_TYPE);
             ref.setBizId(adjustmentId);

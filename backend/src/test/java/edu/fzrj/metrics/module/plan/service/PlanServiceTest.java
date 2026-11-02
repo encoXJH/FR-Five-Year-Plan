@@ -272,6 +272,7 @@ class PlanServiceTest {
         TaskYear sourceYear = taskYear(100L, "ACHIEVED");
         sourceYear.setYear(2026);
         sourceYear.setActualValue(new BigDecimal("10"));
+        when(planMapper.selectOne(any())).thenReturn(draftPlan());
         when(indicatorMapper.selectList(any())).thenReturn(List.of(sourceIndicator), List.of(targetIndicator));
         when(taskMapper.selectList(any())).thenReturn(List.of(sourceTask));
         when(taskYearMapper.selectList(any())).thenReturn(List.of(sourceYear));
@@ -297,6 +298,119 @@ class PlanServiceTest {
         assertEquals("NOT_ACTIVATED", copiedYear.getYearStatus());
         assertEquals(0, new BigDecimal("10").compareTo(copiedYear.getTarget()));
         assertNull(copiedYear.getActualValue());
+    }
+
+    @Test
+    void 模板跨周期按相对年份复制全部指标年度目标() {
+        Plan targetPlan = draftPlan();
+        targetPlan.setId(2L);
+        targetPlan.setStartYear(2031);
+        targetPlan.setEndYear(2035);
+        TemplateContent content = new TemplateContent();
+        content.setStartYear(2026);
+        content.setEndYear(2030);
+        TemplateContent.IndicatorNode node = indicatorNode("A", "A01");
+        node.getYearTargets().put(2026, new BigDecimal("1"));
+        node.getYearTargets().put(2030, new BigDecimal("5"));
+        content.getUnassignedIndicators().add(node);
+
+        planService.instantiate(targetPlan, content);
+
+        ArgumentCaptor<IndicatorYearTarget> targets = ArgumentCaptor.forClass(IndicatorYearTarget.class);
+        verify(yearTargetMapper, times(2)).insert(targets.capture());
+        assertEquals(List.of(2031, 2035), targets.getAllValues().stream()
+                .map(IndicatorYearTarget::getYear).toList());
+        assertEquals(0, new BigDecimal("1").compareTo(targets.getAllValues().get(0).getTarget()));
+        assertEquals(0, new BigDecimal("5").compareTo(targets.getAllValues().get(1).getTarget()));
+    }
+
+    @Test
+    void 模板周期长度不一致时拒绝实例化且不写入指标() {
+        Plan targetPlan = draftPlan();
+        targetPlan.setStartYear(2031);
+        targetPlan.setEndYear(2034);
+        TemplateContent content = new TemplateContent();
+        content.setStartYear(2026);
+        content.setEndYear(2030);
+        TemplateContent.IndicatorNode node = indicatorNode("A", "A01");
+        node.getYearTargets().put(2026, BigDecimal.ONE);
+        content.getUnassignedIndicators().add(node);
+
+        BizException error = assertThrows(BizException.class, () -> planService.instantiate(targetPlan, content));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        verify(indicatorMapper, never()).insert(any(Indicator.class));
+        verify(yearTargetMapper, never()).insert(any(IndicatorYearTarget.class));
+    }
+
+    @Test
+    void 复制计划跨周期按相对年份复制全部B年度目标() {
+        Plan sourcePlan = draftPlan();
+        Plan targetPlan = draftPlan();
+        targetPlan.setId(2L);
+        targetPlan.setStartYear(2031);
+        targetPlan.setEndYear(2035);
+        Indicator sourceIndicator = indicator(10L, null, "A");
+        sourceIndicator.setCode("A01");
+        Indicator targetIndicator = indicator(20L, null, "A");
+        targetIndicator.setCode("A01");
+        Task sourceTask = task(100L);
+        sourceTask.setPlanId(1L);
+        sourceTask.setIndicatorId(10L);
+        sourceTask.setTopIndicatorId(10L);
+        sourceTask.setCode("A01-C01");
+        TaskYear firstYear = taskYear(100L, "ACHIEVED");
+        firstYear.setYear(2026);
+        firstYear.setTarget(BigDecimal.ONE);
+        TaskYear lastYear = taskYear(100L, "ACHIEVED");
+        lastYear.setYear(2030);
+        lastYear.setTarget(new BigDecimal("5"));
+        when(planMapper.selectOne(any())).thenReturn(sourcePlan);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(sourceIndicator), List.of(targetIndicator));
+        when(taskMapper.selectList(any())).thenReturn(List.of(sourceTask));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(firstYear, lastYear));
+        doAnswer(invocation -> {
+            invocation.getArgument(0, Task.class).setId(200L);
+            return 1;
+        }).when(taskMapper).insert(any(Task.class));
+
+        planService.copyAllocations(1L, targetPlan, 99L);
+
+        ArgumentCaptor<TaskYear> years = ArgumentCaptor.forClass(TaskYear.class);
+        verify(taskYearMapper, times(2)).insert(years.capture());
+        assertEquals(List.of(2031, 2035), years.getAllValues().stream().map(TaskYear::getYear).toList());
+        assertEquals(0, BigDecimal.ONE.compareTo(years.getAllValues().get(0).getTarget()));
+        assertEquals(0, new BigDecimal("5").compareTo(years.getAllValues().get(1).getTarget()));
+        assertTrue(years.getAllValues().stream().allMatch(year -> "NOT_ACTIVATED".equals(year.getYearStatus())));
+    }
+
+    @Test
+    void 复制计划周期长度不一致时拒绝且不生成B草稿() {
+        Plan sourcePlan = draftPlan();
+        Plan targetPlan = draftPlan();
+        targetPlan.setId(2L);
+        targetPlan.setStartYear(2031);
+        targetPlan.setEndYear(2034);
+        Indicator sourceIndicator = indicator(10L, null, "A");
+        sourceIndicator.setCode("A01");
+        Indicator targetIndicator = indicator(20L, null, "A");
+        targetIndicator.setCode("A01");
+        Task sourceTask = task(100L);
+        sourceTask.setIndicatorId(10L);
+        sourceTask.setTopIndicatorId(10L);
+        TaskYear sourceYear = taskYear(100L, "ACHIEVED");
+        sourceYear.setYear(2026);
+        when(planMapper.selectOne(any())).thenReturn(sourcePlan);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(sourceIndicator), List.of(targetIndicator));
+        when(taskMapper.selectList(any())).thenReturn(List.of(sourceTask));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(sourceYear));
+
+        BizException error = assertThrows(BizException.class,
+                () -> planService.copyAllocations(1L, targetPlan, 99L));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        verify(taskMapper, never()).insert(any(Task.class));
+        verify(taskYearMapper, never()).insert(any(TaskYear.class));
     }
 
     private static Plan draftPlan() {

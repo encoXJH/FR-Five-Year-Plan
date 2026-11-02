@@ -214,6 +214,8 @@ public class PlanService {
                 planReadScopeService.requireVisible(source);
                 plan.setSourcePlanId(source.getId());
                 content = snapshot(source.getId());
+                content.setStartYear(source.getStartYear());
+                content.setEndYear(source.getEndYear());
             }
             default -> throw new BizException(ErrorCode.PARAM_INVALID, "source 只支持 BLANK / TEMPLATE / COPY");
         }
@@ -445,6 +447,11 @@ public class PlanService {
         if (containsAPlus) {
             throw new BizException(ErrorCode.LEVEL_INVALID, "模板包含历史 A+，新流程不能实例化该层级");
         }
+        boolean hasYearTargets = roots.stream().anyMatch(node -> !node.getYearTargets().isEmpty()
+                || node.getChildren().stream().anyMatch(child -> !child.getYearTargets().isEmpty()));
+        if (hasYearTargets) {
+            requireReliableYearMapping(content.getStartYear(), content.getEndYear(), plan);
+        }
         Long userId = SecurityUtils.getUserId();
         for (TemplateContent.DirectionNode directionNode : content.getDirections()) {
             Direction direction = new Direction();
@@ -480,28 +487,29 @@ public class PlanService {
             for (TemplateContent.IndicatorNode aNode : directionNode.getIndicators()) {
                 Indicator a = toIndicator(plan.getId(), direction.getId(), null, aNode, userId);
                 indicatorMapper.insert(a);
-                insertYearTargets(a.getId(), aNode.getYearTargets(), plan, userId);
+                insertYearTargets(a.getId(), aNode.getYearTargets(), plan, content, userId);
                 for (TemplateContent.IndicatorNode apNode : aNode.getChildren()) {
                     Indicator ap = toIndicator(plan.getId(), direction.getId(), a.getId(), apNode, userId);
                     indicatorMapper.insert(ap);
-                    insertYearTargets(ap.getId(), apNode.getYearTargets(), plan, userId);
+                    insertYearTargets(ap.getId(), apNode.getYearTargets(), plan, content, userId);
                 }
             }
         }
         for (TemplateContent.IndicatorNode aNode : content.getUnassignedIndicators()) {
             Indicator a = toIndicator(plan.getId(), null, null, aNode, userId);
             indicatorMapper.insert(a);
-            insertYearTargets(a.getId(), aNode.getYearTargets(), plan, userId);
+            insertYearTargets(a.getId(), aNode.getYearTargets(), plan, content, userId);
             for (TemplateContent.IndicatorNode apNode : aNode.getChildren()) {
                 Indicator ap = toIndicator(plan.getId(), null, a.getId(), apNode, userId);
                 indicatorMapper.insert(ap);
-                insertYearTargets(ap.getId(), apNode.getYearTargets(), plan, userId);
+                insertYearTargets(ap.getId(), apNode.getYearTargets(), plan, content, userId);
             }
         }
     }
 
     /** 复制 B 分工结构到同编码的新指标；所有执行状态重置，不复制任何完成或审批数据。 */
     void copyAllocations(Long sourcePlanId, Plan targetPlan, Long userId) {
+        Plan sourcePlan = requirePlan(sourcePlanId);
         Map<Long, Indicator> sourceIndicators = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
                         .eq(Indicator::getPlanId, sourcePlanId)
                         .eq(Indicator::getDeleted, 0L))
@@ -521,6 +529,9 @@ public class PlanService {
                         .in(TaskYear::getTaskId, sourceTasks.stream().map(Task::getId).toList())
                         .eq(TaskYear::getDeleted, 0L))
                 .stream().collect(Collectors.groupingBy(TaskYear::getTaskId));
+        if (yearsByTask.values().stream().anyMatch(years -> !years.isEmpty())) {
+            requireReliableYearMapping(sourcePlan.getStartYear(), sourcePlan.getEndYear(), targetPlan);
+        }
         for (Task source : sourceTasks) {
             Long indicatorId = mappedIndicatorId(sourceIndicators, targetIndicatorIds, source.getIndicatorId());
             Long topIndicatorId = mappedIndicatorId(sourceIndicators, targetIndicatorIds, source.getTopIndicatorId());
@@ -537,12 +548,10 @@ public class PlanService {
             target.setUpdatedBy(userId);
             taskMapper.insert(target);
             for (TaskYear sourceYear : yearsByTask.getOrDefault(source.getId(), List.of())) {
-                if (sourceYear.getYear() < targetPlan.getStartYear() || sourceYear.getYear() > targetPlan.getEndYear()) {
-                    continue;
-                }
                 TaskYear targetYear = new TaskYear();
                 targetYear.setTaskId(target.getId());
-                targetYear.setYear(sourceYear.getYear());
+                targetYear.setYear(mapYear(sourceYear.getYear(), sourcePlan.getStartYear(),
+                        sourcePlan.getEndYear(), targetPlan));
                 targetYear.setPlanId(targetPlan.getId());
                 targetYear.setIndicatorId(indicatorId);
                 targetYear.setUnitId(source.getUnitId());
@@ -601,18 +610,30 @@ public class PlanService {
     }
 
     private void insertYearTargets(Long indicatorId, Map<Integer, java.math.BigDecimal> yearTargets,
-                                   Plan plan, Long userId) {
+                                   Plan plan, TemplateContent content, Long userId) {
         for (Map.Entry<Integer, java.math.BigDecimal> entry : yearTargets.entrySet()) {
-            if (entry.getKey() < plan.getStartYear() || entry.getKey() > plan.getEndYear()) {
-                continue;
-            }
             IndicatorYearTarget row = new IndicatorYearTarget();
             row.setIndicatorId(indicatorId);
-            row.setYear(entry.getKey());
+            row.setYear(mapYear(entry.getKey(), content.getStartYear(), content.getEndYear(), plan));
             row.setTarget(entry.getValue());
             row.setCreatedBy(userId);
             row.setUpdatedBy(userId);
             yearTargetMapper.insert(row);
+        }
+    }
+
+    private int mapYear(Integer sourceYear, Integer sourceStartYear, Integer sourceEndYear, Plan targetPlan) {
+        requireReliableYearMapping(sourceStartYear, sourceEndYear, targetPlan);
+        if (sourceYear == null || sourceYear < sourceStartYear || sourceYear > sourceEndYear) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "来源年度目标超出原规划期，无法完整复制：" + sourceYear);
+        }
+        return targetPlan.getStartYear() + sourceYear - sourceStartYear;
+    }
+
+    private void requireReliableYearMapping(Integer sourceStartYear, Integer sourceEndYear, Plan targetPlan) {
+        if (sourceStartYear == null || sourceEndYear == null || sourceEndYear < sourceStartYear
+                || sourceEndYear - sourceStartYear != targetPlan.getEndYear() - targetPlan.getStartYear()) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "来源与目标规划期长度不一致或来源周期缺失，无法完整复制年度目标");
         }
     }
 

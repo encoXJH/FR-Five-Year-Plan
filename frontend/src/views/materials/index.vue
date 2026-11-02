@@ -15,6 +15,7 @@ import MaterialUploader from '@/views/submission/components/MaterialUploader.vue
 import FilePreviewDrawer from '@/components/FilePreviewDrawer.vue'
 import { useUserStore } from '@/stores/user'
 import { formatDateTime } from '@/utils/format'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import { FILE_CATEGORY_COLORS, formatFileSize } from '@/utils/file'
 import type { TaskListItem } from '@/types/task'
 import type { PlanCard } from '@/types/plan'
@@ -125,12 +126,12 @@ function currentUnitId(): string {
   return selectedTaskId.value ? selectedTaskUnitId.value : filters.unitId
 }
 
-async function loadIndicators(): Promise<void> {
-  navLoading.value = true
+async function loadIndicators(silent = false): Promise<void> {
+  if (!silent) navLoading.value = true
   try {
     indicators.value = await listMaterialIndicators(planId.value || undefined)
   } finally {
-    navLoading.value = false
+    if (!silent) navLoading.value = false
   }
 }
 
@@ -171,7 +172,7 @@ async function handlePlanChange(): Promise<void> {
   await loadIndicators()
 }
 
-async function loadList(): Promise<void> {
+async function loadList(silent = false): Promise<void> {
   const sequence = ++listRequestSequence
   if (!selectedIndicatorId.value) {
     rows.value = []
@@ -179,7 +180,7 @@ async function loadList(): Promise<void> {
     loading.value = false
     return
   }
-  loading.value = true
+  if (!silent) loading.value = true
   try {
     const result = await listMaterials({
       planId: planId.value || undefined,
@@ -196,7 +197,7 @@ async function loadList(): Promise<void> {
     rows.value = result.items
     total.value = result.total
   } finally {
-    if (sequence === listRequestSequence) loading.value = false
+    if (!silent && sequence === listRequestSequence) loading.value = false
   }
 }
 
@@ -384,6 +385,11 @@ onMounted(async () => {
     filters.unitId = queryString(route.query.unitId)
   }
   await loadList()
+})
+
+useAutoRefresh(async () => {
+  await loadIndicators(true)
+  await loadList(true)
 })
 </script>
 

@@ -98,9 +98,9 @@ export function isPendingAllocationRow(row: Pick<MatrixRow, 'isHistorical' | 'ta
     && (row.taskStatus === null || row.taskStatus === 'PENDING_DISTRIBUTION')
 }
 
-/** 是否需要做「B 合计 = A+ 目标」求和校验（比率 / 是否型不校验，PRD 4.5） */
+/** 是否需要做「B 合计 ≥ A 目标」求和校验（增长率 / 比率 / 是否型不校验，PRD 4.5） */
 export function isSummableCaliber(caliber: StatCaliber): boolean {
-  return caliber === 'INCREMENT' || caliber === 'STOCK' || caliber === 'GROWTH'
+  return caliber === 'INCREMENT' || caliber === 'STOCK'
 }
 
 export interface AutoDistributeResult {
@@ -113,7 +113,7 @@ export interface AutoDistributeResult {
 /**
  * 自动分配：把指标各年度目标扣除只读行后，平均写入可编辑行；余数逐行摊入，保证合计精确。
  * 只读行（历史 / 已下发）保持原值，继续参与合计；不修改任何行的负责人。
- * @param scale 分配刻度：增量型传 1（整数），存量 / 增长率传 100（两位小数）
+ * @param scale 分配刻度：增量型传 1（整数），存量型传 100（两位小数）
  */
 export function distributeYearTargetsEvenly(
   rows: MatrixRow[],

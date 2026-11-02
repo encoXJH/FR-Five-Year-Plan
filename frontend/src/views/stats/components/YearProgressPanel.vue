@@ -6,6 +6,7 @@ import type { YearUploadItem } from '@/api/submission'
 import type { StatsOverview } from '@/types/stats'
 import StatusTag from '@/components/StatusTag.vue'
 import { formatCount, formatDateTime, formatPercent } from '@/utils/format'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 
 const props = withDefaults(defineProps<{
   planId: string
@@ -34,13 +35,13 @@ const progressPercentage = computed(() => completionRate.value === null
   ? 0
   : Math.min(100, Number((completionRate.value * 100).toFixed(1))))
 
-async function load(): Promise<void> {
+async function load(silent = false): Promise<void> {
   if (!props.planId) {
     overview.value = null
     uploads.value = []
     return
   }
-  loading.value = true
+  if (!silent) loading.value = true
   try {
     const [stats, items] = await Promise.all([
       getStatsOverview(props.planId, progressYear.value),
@@ -49,7 +50,7 @@ async function load(): Promise<void> {
     overview.value = stats
     uploads.value = items
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -57,6 +58,8 @@ watch(() => [props.planId, progressYear.value, props.showUploads], () => {
   uploadExpanded.value = false
   void load()
 }, { immediate: true })
+
+useAutoRefresh(() => load(true), { intervalMs: 60_000 })
 </script>
 
 <template>

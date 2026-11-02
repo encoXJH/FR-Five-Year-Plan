@@ -45,14 +45,14 @@ springdoc:
 # 应用自定义配置
 app:
   jwt:
-    secret: ${JWT_SECRET:please-change-me-to-a-random-64-char-string-for-production}
+    secret: ${JWT_SECRET:}
     access-expire-minutes: ${JWT_ACCESS_EXPIRE_MINUTES:120}
     refresh-expire-days: ${JWT_REFRESH_EXPIRE_DAYS:7}
   file:
     storage-type: ${FILE_STORAGE_TYPE:LOCAL}
     storage-dir: ${FILE_STORAGE_DIR:./data/files}
     signed-url-expire-minutes: ${FILE_SIGNED_URL_EXPIRE_MINUTES:10}
-    sign-secret: ${FILE_SIGN_SECRET:please-change-me-file-sign-secret}
+    sign-secret: ${FILE_SIGN_SECRET:}
     kkfileview-url: ${KKFILEVIEW_URL:}
     minio:
       endpoint: ${MINIO_ENDPOINT:http://localhost:9000}

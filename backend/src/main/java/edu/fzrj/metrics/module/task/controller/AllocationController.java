@@ -38,7 +38,8 @@ public class AllocationController {
             description = "权限：allocation:edit；需带 version；不可下分 A 只允许一个承接单元")
     @PutMapping("/api/v1/indicators/{indicatorId}/allocation")
     @PreAuthorize("hasAuthority('allocation:edit')")
-    @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId")
+    @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId",
+            before = "get(#indicatorId)", after = "#result")
     public TaskDtos.AllocationView put(@PathVariable Long indicatorId,
                                        @Valid @RequestBody TaskDtos.AllocationPutRequest request) {
         return allocationService.putAllocation(indicatorId, request);

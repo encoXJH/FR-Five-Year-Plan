@@ -68,7 +68,10 @@ public class SettingService {
             SysSetting setting = current.get(item.getKey());
             setting.setSettingValue(item.getValue());
             setting.setUpdatedBy(operator);
-            sysSettingMapper.updateById(setting);
+            if (sysSettingMapper.updateById(setting) == 0) {
+                throw new BizException(ErrorCode.VERSION_CONFLICT,
+                        "参数 " + item.getKey() + " 已被他人修改，请刷新后重试");
+            }
         }
         return new SystemDtos.SettingListView(list().items(), before, after);
     }

@@ -9,6 +9,7 @@ import edu.fzrj.metrics.module.adjustment.entity.ApprovalStep;
 import edu.fzrj.metrics.module.adjustment.mapper.AdjustmentItemMapper;
 import edu.fzrj.metrics.module.adjustment.mapper.AdjustmentMapper;
 import edu.fzrj.metrics.module.adjustment.mapper.ApprovalStepMapper;
+import edu.fzrj.metrics.module.adjustment.service.support.AdjustmentRules;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorYearTargetMapper;
 import edu.fzrj.metrics.module.indicator.service.IndicatorService;
@@ -26,6 +27,7 @@ import edu.fzrj.metrics.security.LoginUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -208,14 +210,14 @@ class AdjustmentDecisionServiceTest {
         fromYear.setFrozenAmount(BigDecimal.ONE);
         fromYear.setYearStatus("ADJUSTING");
         fromYear.setStatusBeforeAdjusting("IN_PROGRESS");
-        TaskYear toYear = taskYear(1002L, 102L, "0");
+        // 审批期间另一笔调整已把接收目标改为 5，本单 after 必须反映最新值 6。
+        TaskYear toYear = taskYear(1002L, 102L, "5");
         when(adjustmentService.taskYearOf(101L, 2026)).thenReturn(fromYear);
         when(adjustmentService.taskYearOf(102L, 2026)).thenReturn(toYear);
+        when(taskYearMapper.selectByIdForUpdate(1001L)).thenReturn(fromYear);
+        when(taskYearMapper.selectByIdForUpdate(1002L)).thenReturn(toYear);
         when(taskYearMapper.updateById(any(TaskYear.class))).thenReturn(1);
         when(taskYearMapper.selectList(any())).thenReturn(List.of(fromYear));
-        when(adjustmentService.readSnapshot(adjustment.getSnapshotBefore())).thenReturn(List.of(
-                new AdjustmentDtos.SnapshotEntry("A01-C01", null, 2026, new BigDecimal("2")),
-                new AdjustmentDtos.SnapshotEntry("A01-C02", null, 2026, BigDecimal.ZERO)));
         when(taskService.requireTask(101L)).thenReturn(fromTask);
         when(taskService.requireTask(102L)).thenReturn(receiverTask);
         when(adjustmentService.writeSnapshot(anyList())).thenReturn("[]");
@@ -225,8 +227,14 @@ class AdjustmentDecisionServiceTest {
 
         assertEquals("IN_PROGRESS", receiverTask.getStatus());
         assertEquals(0, BigDecimal.ONE.compareTo(fromYear.getTarget()));
-        assertEquals(0, BigDecimal.ONE.compareTo(toYear.getTarget()));
+        assertEquals(0, new BigDecimal("6").compareTo(toYear.getTarget()));
         verify(taskMapper).updateById(receiverTask);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<AdjustmentRules.TargetEntry>> snapshot = ArgumentCaptor.forClass(List.class);
+        verify(adjustmentService).writeSnapshot(snapshot.capture());
+        AdjustmentRules.TargetEntry receiverSnapshot = snapshot.getValue().stream()
+                .filter(e -> "A01-C02".equals(e.taskCode())).findFirst().orElseThrow();
+        assertEquals(0, new BigDecimal("6").compareTo(receiverSnapshot.target()));
     }
 
     private static TaskYear taskYear(Long id, Long taskId, String target) {

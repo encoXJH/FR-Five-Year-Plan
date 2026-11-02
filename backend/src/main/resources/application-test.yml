@@ -1,0 +1,5 @@
+app:
+  jwt:
+    secret: local-test-only-jwt-secret-91c4e7a20f6b483dace5927f10d836b45e09a731c6f8d224
+  file:
+    sign-secret: local-test-only-file-sign-secret-4a08c2e6957b41d3f60c9a127e5b830d46f2a791c5e40863

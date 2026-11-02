@@ -13,8 +13,11 @@ import edu.fzrj.metrics.module.adjustment.entity.ApprovalStep;
 import edu.fzrj.metrics.module.adjustment.mapper.AdjustmentItemMapper;
 import edu.fzrj.metrics.module.adjustment.mapper.AdjustmentMapper;
 import edu.fzrj.metrics.module.adjustment.mapper.ApprovalStepMapper;
+import edu.fzrj.metrics.module.file.entity.FileInfo;
+import edu.fzrj.metrics.module.file.entity.FileRef;
 import edu.fzrj.metrics.module.file.mapper.FileInfoMapper;
 import edu.fzrj.metrics.module.file.mapper.FileRefMapper;
+import edu.fzrj.metrics.module.file.service.FileService;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.entity.IndicatorYearTarget;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
@@ -58,6 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -92,6 +96,8 @@ class AdjustmentServiceTest {
     @Mock
     private FileInfoMapper fileInfoMapper;
     @Mock
+    private FileService fileService;
+    @Mock
     private NotificationMapper notificationMapper;
     @Mock
     private TaskService taskService;
@@ -120,6 +126,8 @@ class AdjustmentServiceTest {
         TableInfoHelper.initTableInfo(assistant, IndicatorYearTarget.class);
         TableInfoHelper.initTableInfo(assistant, Task.class);
         TableInfoHelper.initTableInfo(assistant, TaskYear.class);
+        TableInfoHelper.initTableInfo(assistant, FileInfo.class);
+        TableInfoHelper.initTableInfo(assistant, FileRef.class);
     }
 
     @AfterEach
@@ -363,6 +371,45 @@ class AdjustmentServiceTest {
 
         assertEquals(40006, error.getErrorCode().getCode());
         verify(taskMapper, never()).insert(any(Task.class));
+    }
+
+    @Test
+    void 调整绑定附件使用集中授权并保存合法引用() {
+        FileInfo file = new FileInfo();
+        file.setStatus("TEMP");
+        when(fileService.requireBindable(7L, "ADJUSTMENT", 1L)).thenReturn(file);
+
+        adjustmentService.bindFiles(1L, List.of(7L));
+
+        verify(fileRefMapper).insert(any(FileRef.class));
+        verify(fileInfoMapper).update(any(), any());
+    }
+
+    @Test
+    void 调整绑定授权失败时不创建文件引用() {
+        doThrow(new BizException(ErrorCode.DATA_SCOPE_DENIED))
+                .when(fileService).requireBindable(7L, "ADJUSTMENT", 1L);
+
+        BizException error = assertThrows(BizException.class,
+                () -> adjustmentService.bindFiles(1L, List.of(7L)));
+
+        assertEquals(20005, error.getErrorCode().getCode());
+        verify(fileRefMapper, never()).insert(any(FileRef.class));
+        verify(fileInfoMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void 是否型空年度目标保留为空值而不抛空指针() {
+        IndicatorYearTarget row = new IndicatorYearTarget();
+        row.setIndicatorId(5L);
+        row.setYear(2026);
+        row.setTarget(null);
+        when(yearTargetMapper.selectList(any())).thenReturn(List.of(row));
+
+        Map<Integer, BigDecimal> result = adjustmentService.indicatorTargets(5L);
+
+        assertTrue(result.containsKey(2026));
+        assertEquals(null, result.get(2026));
     }
 
     private static void adminLogin() {

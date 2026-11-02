@@ -142,7 +142,7 @@ public class StatsService {
 
     // ---------------- 年度解析 ----------------
 
-    /** 解析统计年度：缺省取当前激活年度（无激活取最近锁定年度，再无取起始年）；超出起止 10001 */
+    /** 解析统计年度：缺省取服务器当前自然年，并按计划起止年份收敛；超出起止 10001 */
     public Integer resolveYear(Plan plan, Integer year) {
         if (year != null) {
             if (year < plan.getStartYear() || year > plan.getEndYear()) {
@@ -150,16 +150,8 @@ public class StatsService {
             }
             return year;
         }
-        List<PlanYear> years = planYearMapper.selectList(new LambdaQueryWrapper<PlanYear>()
-                .eq(PlanYear::getPlanId, plan.getId())
-                .eq(PlanYear::getDeleted, 0L));
-        Integer resolved = years.stream().filter(y -> "ACTIVE".equals(y.getStatus()))
-                .map(PlanYear::getYear).max(Integer::compareTo).orElse(null);
-        if (resolved == null) {
-            resolved = years.stream().filter(y -> "LOCKED".equals(y.getStatus()))
-                    .map(PlanYear::getYear).max(Integer::compareTo).orElse(null);
-        }
-        return resolved == null ? plan.getStartYear() : resolved;
+        int currentYear = LocalDate.now().getYear();
+        return Math.max(plan.getStartYear(), Math.min(plan.getEndYear(), currentYear));
     }
 
     // ---------------- 总览 ----------------
@@ -214,7 +206,7 @@ public class StatsService {
                 ctx.indicators().values().stream()
                         .filter(i -> i.getParentId() == null && Boolean.TRUE.equals(i.getIsQuantifiable()))
                         .filter(i -> indicatorVisible(i, scope, ctx))
-                        .map(i -> cumulativeOfIndicator(i, ctx).rate())
+                        .map(i -> cumulativeOfIndicator(i, ctx, scope).rate())
                         .toList());
         return new StatsDtos.Overview(plan.getId(), resolvedYear, timeProgress,
                 StatsAggregator.rate(achieved, countable.size()), cumulativeCompletionRate,
@@ -381,7 +373,7 @@ public class StatsService {
                     .sorted(Comparator.comparing(n -> n.unit() == null ? "" : n.unit().code(),
                             Comparator.nullsFirst(String::compareTo)))
                     .toList();
-            result.add(aNode(a, resolvedYear, plan, ctx, aPlusResults,
+            result.add(aNode(a, resolvedYear, plan, ctx, scope, aPlusResults,
                     taskYearsByIndicator.getOrDefault(a.getId(), List.of()), leaves));
         }
         return result;
@@ -404,12 +396,12 @@ public class StatsService {
     }
 
     /** A 节点：AUTO_SUM 合并直承 B 与 legacy A+；MANUAL 仍取人工认定值。 */
-    private StatsDtos.TreeNode aNode(Indicator a, int year, Plan plan, PlanContext ctx,
+    private StatsDtos.TreeNode aNode(Indicator a, int year, Plan plan, PlanContext ctx, ScopeFilter scope,
                                      List<MetricCalculator.YearResult> aPlusResults,
                                      List<TaskYear> ownTaskYears,
                                      List<StatsDtos.TreeNode> leaves) {
         BigDecimal target = yearTarget(ctx, a.getId(), year);
-        CumulativeCalculator.Cumulative cumulative = cumulativeOfIndicator(a, ctx);
+        CumulativeCalculator.Cumulative cumulative = cumulativeOfIndicator(a, ctx, scope);
         BigDecimal actualValue;
         BigDecimal actualTotal;
         BigDecimal completionRate;
@@ -418,9 +410,9 @@ public class StatsService {
             IndicatorYearTarget row = yearTargetRow(ctx, a.getId(), year);
             actualValue = row == null ? null : row.getManualActualValue();
             actualTotal = row == null ? null : row.getActualTotal();
-            MetricCalculator.YearResult manual = actualValue == null
+            MetricCalculator.YearResult manual = actualValue == null && actualTotal == null
                     ? MetricCalculator.YearResult.empty()
-                    : new MetricCalculator.YearResult(actualValue, null, null, null, null, null);
+                    : new MetricCalculator.YearResult(actualValue, null, null, actualTotal, null, null);
             completionRate = MetricCalculator.completionRate(a.getStatCaliber(), manual, target);
             achieveStatus = MetricCalculator.achieveStatus(a.getTargetDirection(), a.getStatCaliber(), manual, target);
         } else {
@@ -599,10 +591,32 @@ public class StatsService {
         return task != null && !Boolean.TRUE.equals(task.getIsHistorical());
     }
 
-    /** 指标五年累计进度（AUTO_SUM 读各年缓存；MANUAL 的 A 优先取人工认定值） */
-    private CumulativeCalculator.Cumulative cumulativeOfIndicator(Indicator indicator, PlanContext ctx) {
+    /** 指标五年累计进度：范围视图按可见 B 重新归集，MANUAL 仍取人工认定缓存。 */
+    private CumulativeCalculator.Cumulative cumulativeOfIndicator(Indicator indicator, PlanContext ctx,
+                                                                  ScopeFilter scope) {
         boolean manual = "MANUAL".equals(indicator.getRollupMode());
         Plan plan = ctx.plan();
+        if (!scope.all() && !manual) {
+            List<TaskYear> visibleYears = ctx.taskYearsByTask().values().stream()
+                    .flatMap(List::stream)
+                    .filter(ty -> {
+                        Task task = ctx.tasks().get(ty.getTaskId());
+                        return indicator.getId().equals(ty.getIndicatorId())
+                                || task != null && indicator.getId().equals(task.getTopIndicatorId());
+                    })
+                    .toList();
+            List<MetricCalculator.YearResult> scopedResults = new ArrayList<>();
+            BigDecimal previousTotal = indicator.getBaselineValue();
+            for (int y = plan.getStartYear(); y <= plan.getEndYear(); y++) {
+                int currentYear = y;
+                MetricCalculator.YearResult result = MetricCalculator.rollup(indicator.getStatCaliber(),
+                        toYearResults(visibleYears.stream().filter(ty -> ty.getYear() == currentYear).toList()),
+                        previousTotal);
+                scopedResults.add(result);
+                previousTotal = result.total();
+            }
+            return CumulativeCalculator.of(indicator.getStatCaliber(), scopedResults, indicator.getTotalTarget());
+        }
         List<MetricCalculator.YearResult> years = new ArrayList<>();
         for (int y = plan.getStartYear(); y <= plan.getEndYear(); y++) {
             IndicatorYearTarget row = yearTargetRow(ctx, indicator.getId(), y);

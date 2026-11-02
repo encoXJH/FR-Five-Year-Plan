@@ -18,6 +18,7 @@ import {
   EMPTY_DISPLAY,
 } from '@/utils/format'
 import { resolveNotificationLink, resolveTodoLink, todoGroupLabel } from '@/utils/todo'
+import { useAutoRefresh } from '@/utils/autoRefresh'
 import { clearCurrentPlan, getCurrentPlan, setCurrentPlan } from '@/utils/currentPlan'
 import type { CreatePlanRequest, PlanCard, PlanTemplate } from '@/types/plan'
 import type { PlanSource, PlanStatus } from '@/types/enums'
@@ -43,8 +44,8 @@ const visiblePlans = computed(() =>
   }),
 )
 
-async function loadPlans(): Promise<void> {
-  loading.value = true
+async function loadPlans(silent = false): Promise<void> {
+  if (!silent) loading.value = true
   try {
     const loadedPlans = await listPlans()
     plans.value = loadedPlans
@@ -54,7 +55,7 @@ async function loadPlans(): Promise<void> {
       currentPlanId.value = ''
     }
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -273,7 +274,7 @@ async function loadTodos(): Promise<void> {
     const result = await getTodos()
     topTodos.value = result.items.slice(0, 5)
   } catch {
-    topTodos.value = []
+    // 保留上次数据，等待下一轮刷新
   }
 }
 
@@ -290,7 +291,7 @@ async function loadNotifications(): Promise<void> {
     const result = await listNotifications({ page: 1, pageSize: 5 })
     topNotifications.value = result.items
   } catch {
-    topNotifications.value = []
+    // 保留上次数据，等待下一轮刷新
   }
 }
 
@@ -310,6 +311,8 @@ async function openNotification(item: NotificationItem): Promise<void> {
   }
   router.push(link)
 }
+
+useAutoRefresh(() => Promise.all([loadPlans(true), loadTodos(), loadNotifications()]))
 </script>
 
 <template>

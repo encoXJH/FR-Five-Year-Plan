@@ -2,6 +2,8 @@ package edu.fzrj.metrics.module.audit.service;
 
 import com.alibaba.excel.EasyExcel;
 import com.alibaba.excel.ExcelWriter;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import edu.fzrj.metrics.common.api.PageResult;
@@ -12,7 +14,9 @@ import edu.fzrj.metrics.module.audit.dto.AuditLogDtos;
 import edu.fzrj.metrics.module.audit.entity.AuditLog;
 import edu.fzrj.metrics.module.audit.mapper.AuditLogMapper;
 import edu.fzrj.metrics.module.system.entity.OrgUnit;
+import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
+import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -25,6 +29,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -42,10 +47,15 @@ public class AuditLogService {
 
     private final AuditLogMapper auditLogMapper;
     private final OrgUnitMapper orgUnitMapper;
+    private final SysUserMapper sysUserMapper;
+    private final ObjectMapper objectMapper;
 
-    public AuditLogService(AuditLogMapper auditLogMapper, OrgUnitMapper orgUnitMapper) {
+    public AuditLogService(AuditLogMapper auditLogMapper, OrgUnitMapper orgUnitMapper,
+                           SysUserMapper sysUserMapper, ObjectMapper objectMapper) {
         this.auditLogMapper = auditLogMapper;
         this.orgUnitMapper = orgUnitMapper;
+        this.sysUserMapper = sysUserMapper;
+        this.objectMapper = objectMapper;
     }
 
     // ---------------- 查询 ----------------
@@ -63,8 +73,9 @@ public class AuditLogService {
         }
         Page<AuditLog> result = auditLogMapper.selectPage(page, wrapper);
         Map<Long, OrgUnit> unitMap = unitMapOf(result.getRecords());
+        Map<Long, SysUser> stakeholderMap = stakeholderMapOf(result.getRecords());
         List<AuditLogDtos.LogItem> items = result.getRecords().stream()
-                .map(log -> toItem(log, unitMap))
+                .map(log -> toItem(log, unitMap, stakeholderMap))
                 .toList();
         return new PageResult<>(items, result.getTotal(), query.getPage(), query.getPageSize());
     }
@@ -82,6 +93,7 @@ public class AuditLogService {
         wrapper.orderByAsc(AuditLog::getOccurredAt).last("LIMIT " + EXPORT_MAX_ROWS);
         List<AuditLog> logs = auditLogMapper.selectList(wrapper);
         Map<Long, OrgUnit> unitMap = unitMapOf(logs);
+        Map<Long, SysUser> stakeholderMap = stakeholderMapOf(logs);
 
         List<List<Object>> rows = logs.stream().map(log -> {
             List<Object> row = new ArrayList<>();
@@ -97,6 +109,10 @@ public class AuditLogService {
             row.add(log.getResourceCode() == null ? "" : log.getResourceCode());
             row.add(log.getBeforeJson() == null ? "" : log.getBeforeJson());
             row.add(log.getAfterJson() == null ? "" : log.getAfterJson());
+            row.add(stakeholdersOf(log, stakeholderMap).stream()
+                    .map(user -> user.name() == null ? String.valueOf(user.id())
+                            : user.name() + "(" + user.id() + ")")
+                    .collect(Collectors.joining("、")));
             row.add(log.getReason() == null ? "" : log.getReason());
             row.add(log.getClientType() == null ? "" : log.getClientType());
             row.add(log.getIp() == null ? "" : log.getIp());
@@ -106,7 +122,7 @@ public class AuditLogService {
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         List<String> head = List.of("时间", "操作人", "操作人ID", "角色", "所属单元", "动作",
-                "资源类型", "资源ID", "资源编号", "变更前", "变更后", "原因", "客户端", "IP", "请求ID");
+                "资源类型", "资源ID", "资源编号", "变更前", "变更后", "相关干系人", "原因", "客户端", "IP", "请求ID");
         try (ExcelWriter writer = EasyExcel.write(out).build()) {
             List<List<String>> headRows = head.stream().map(List::of).collect(Collectors.toList());
             writer.write(rows, EasyExcel.writerSheet("操作日志").head(headRows).build());
@@ -154,7 +170,8 @@ public class AuditLogService {
         }
     }
 
-    private AuditLogDtos.LogItem toItem(AuditLog log, Map<Long, OrgUnit> unitMap) {
+    private AuditLogDtos.LogItem toItem(AuditLog log, Map<Long, OrgUnit> unitMap,
+                                        Map<Long, SysUser> stakeholderMap) {
         OrgUnit unit = log.getUnitId() == null ? null : unitMap.get(log.getUnitId());
         return new AuditLogDtos.LogItem(
                 log.getId(), log.getOccurredAt(),
@@ -163,8 +180,40 @@ public class AuditLogService {
                 log.getUnitId() == null ? null
                         : new AuditLogDtos.UnitRef(log.getUnitId(), unit == null ? null : unit.getName()),
                 log.getAction(), log.getResourceType(), log.getResourceId(), log.getResourceCode(),
-                log.getBeforeJson(), log.getAfterJson(), log.getReason(),
+                log.getBeforeJson(), log.getAfterJson(), stakeholdersOf(log, stakeholderMap), log.getReason(),
                 log.getClientType(), log.getIp(), log.getRequestId());
+    }
+
+    private List<UserRef> stakeholdersOf(AuditLog log, Map<Long, SysUser> stakeholderMap) {
+        return stakeholderIds(log).stream()
+                .map(id -> {
+                    SysUser user = stakeholderMap.get(id);
+                    return new UserRef(id, user == null ? null : user.getName());
+                })
+                .toList();
+    }
+
+    private Map<Long, SysUser> stakeholderMapOf(List<AuditLog> logs) {
+        Set<Long> ids = logs.stream()
+                .flatMap(log -> stakeholderIds(log).stream())
+                .collect(Collectors.toSet());
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return sysUserMapper.selectBatchIds(ids).stream()
+                .collect(Collectors.toMap(SysUser::getId, Function.identity()));
+    }
+
+    private List<Long> stakeholderIds(AuditLog log) {
+        if (!StringUtils.hasText(log.getStakeholderIds())) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(log.getStakeholderIds(), new TypeReference<>() {
+            });
+        } catch (Exception ignored) {
+            return List.of();
+        }
     }
 
     private Map<Long, OrgUnit> unitMapOf(List<AuditLog> logs) {

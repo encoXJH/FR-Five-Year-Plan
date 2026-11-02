@@ -3,6 +3,10 @@ package edu.fzrj.metrics.module.stats.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
+import edu.fzrj.metrics.module.adjustment.entity.Adjustment;
+import edu.fzrj.metrics.module.adjustment.entity.AdjustmentItem;
+import edu.fzrj.metrics.module.adjustment.mapper.AdjustmentItemMapper;
+import edu.fzrj.metrics.module.adjustment.mapper.AdjustmentMapper;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.entity.IndicatorYearTarget;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
@@ -11,6 +15,8 @@ import edu.fzrj.metrics.module.milestone.entity.Makeup;
 import edu.fzrj.metrics.module.milestone.mapper.MakeupMapper;
 import edu.fzrj.metrics.module.notify.entity.Notification;
 import edu.fzrj.metrics.module.notify.mapper.NotificationMapper;
+import edu.fzrj.metrics.module.notify.service.support.ReminderRules;
+import edu.fzrj.metrics.module.plan.dto.PlanDtos;
 import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.plan.entity.PlanYear;
 import edu.fzrj.metrics.module.plan.mapper.PlanYearMapper;
@@ -36,6 +42,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.Year;
 import java.util.ArrayList;
@@ -65,6 +72,8 @@ public class SettlementService {
     private final IndicatorMapper indicatorMapper;
     private final IndicatorYearTargetMapper yearTargetMapper;
     private final SubmissionMapper submissionMapper;
+    private final AdjustmentMapper adjustmentMapper;
+    private final AdjustmentItemMapper adjustmentItemMapper;
     private final MakeupMapper makeupMapper;
     private final NotificationMapper notificationMapper;
     private final OrgUnitMapper orgUnitMapper;
@@ -75,7 +84,8 @@ public class SettlementService {
     public SettlementService(PlanService planService, PlanYearMapper planYearMapper,
                              TaskMapper taskMapper, TaskYearMapper taskYearMapper,
                              IndicatorMapper indicatorMapper, IndicatorYearTargetMapper yearTargetMapper,
-                             SubmissionMapper submissionMapper, MakeupMapper makeupMapper,
+                             SubmissionMapper submissionMapper, AdjustmentMapper adjustmentMapper,
+                             AdjustmentItemMapper adjustmentItemMapper, MakeupMapper makeupMapper,
                              NotificationMapper notificationMapper, OrgUnitMapper orgUnitMapper,
                              UserRefResolver userRefResolver, StatsService statsService,
                              @Lazy ScreenService screenService) {
@@ -86,12 +96,19 @@ public class SettlementService {
         this.indicatorMapper = indicatorMapper;
         this.yearTargetMapper = yearTargetMapper;
         this.submissionMapper = submissionMapper;
+        this.adjustmentMapper = adjustmentMapper;
+        this.adjustmentItemMapper = adjustmentItemMapper;
         this.makeupMapper = makeupMapper;
         this.notificationMapper = notificationMapper;
         this.orgUnitMapper = orgUnitMapper;
         this.userRefResolver = userRefResolver;
         this.statsService = statsService;
         this.screenService = screenService;
+    }
+
+    /** 五年核算审计快照：记录核算前计划状态及五年核算时间。 */
+    public PlanDtos.Detail auditPlanSnapshot(Long planId) {
+        return planService.detail(planId);
     }
 
     // ---------------- 年度核算 ----------------
@@ -112,6 +129,8 @@ public class SettlementService {
         if (!"ACTIVE".equals(planYear.getStatus())) {
             throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "该年度尚未激活，不能核算");
         }
+        requireSettlementDeadline(plan, year);
+        requireNoPendingAdjustment(planId, year);
         Long pendingCount = submissionMapper.selectCount(new LambdaQueryWrapper<Submission>()
                 .eq(Submission::getPlanId, planId)
                 .eq(Submission::getYear, year)
@@ -273,6 +292,9 @@ public class SettlementService {
         Plan plan = planService.requirePlan(planId);
         planService.requireNotArchived(plan);
         planService.requireVersion(plan.getVersion(), version);
+        if (plan.getFinalSettledAt() != null) {
+            throw new BizException(ErrorCode.PLAN_STATUS_INVALID, "五年核算已完成，不能单独解锁年度");
+        }
         PlanYear planYear = requirePlanYear(planId, year);
         if (!"LOCKED".equals(planYear.getStatus())) {
             throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "该年度未核算锁定，无需解锁");
@@ -495,9 +517,10 @@ public class SettlementService {
             IndicatorYearTarget row = rowByIndicator.get(a.getId());
             if ("MANUAL".equals(a.getRollupMode())) {
                 BigDecimal manual = row == null ? null : row.getManualActualValue();
-                MetricCalculator.YearResult manualResult = manual == null
+                BigDecimal actualTotal = row == null ? null : row.getActualTotal();
+                MetricCalculator.YearResult manualResult = manual == null && actualTotal == null
                         ? MetricCalculator.YearResult.empty()
-                        : new MetricCalculator.YearResult(manual, null, null, null, null, null);
+                        : new MetricCalculator.YearResult(manual, null, null, actualTotal, null, null);
                 upsertSettledCache(a, year, manualResult, row, userId, now);
                 continue;
             }
@@ -651,6 +674,40 @@ public class SettlementService {
                     s.getApprovedAchieved() != null ? s.getApprovedAchieved() : s.getAchieved());
             default -> throw new BizException(ErrorCode.INTERNAL_ERROR, "未知统计口径：" + caliber);
         };
+    }
+
+    private void requireSettlementDeadline(Plan plan, Integer year) {
+        LocalDate deadline = ReminderRules.deadlineOf(year, plan.getSettleDeadline());
+        if (deadline == null) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "计划的年度核算截止日无效");
+        }
+        if (LocalDate.now().isBefore(deadline)) {
+            throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID,
+                    "未到 " + deadline + " 年度核算截止日，不能提前核算");
+        }
+    }
+
+    private void requireNoPendingAdjustment(Long planId, Integer year) {
+        List<Adjustment> pending = adjustmentMapper.selectList(new LambdaQueryWrapper<Adjustment>()
+                .eq(Adjustment::getPlanId, planId)
+                .in(Adjustment::getStatus, List.of("PENDING_OWNER_REVIEW",
+                        "PENDING_RECEIVER_CONFIRM", "PENDING_LEADER_APPROVAL"))
+                .eq(Adjustment::getDeleted, 0L)
+                .select(Adjustment::getId));
+        if (pending.isEmpty()) {
+            return;
+        }
+        boolean involved = adjustmentItemMapper.selectList(new LambdaQueryWrapper<AdjustmentItem>()
+                        .in(AdjustmentItem::getAdjustmentId, pending.stream().map(Adjustment::getId).toList())
+                        .eq(AdjustmentItem::getDeleted, 0L)
+                        .and(w -> w.eq(AdjustmentItem::getFromYear, year)
+                                .or().eq(AdjustmentItem::getToYear, year))
+                        .select(AdjustmentItem::getId))
+                .size() > 0;
+        if (involved) {
+            throw new BizException(ErrorCode.ADJUST_IN_PROGRESS,
+                    "该年度存在审批中的调整，请先完成审批或撤回后再核算锁定");
+        }
     }
 
     private PlanYear requirePlanYear(Long planId, Integer year) {

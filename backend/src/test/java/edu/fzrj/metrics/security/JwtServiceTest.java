@@ -16,6 +16,15 @@ class JwtServiceTest {
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     @Test
+    void 缺失过短或占位密钥拒绝初始化() {
+        String[] invalidSecrets = {null, "", " ", "short",
+                "please-change-me-to-a-random-64-char-string-for-production", "${JWT_SECRET}"};
+        for (String secret : invalidSecrets) {
+            assertThrows(IllegalStateException.class, () -> new JwtService(secret, 120));
+        }
+    }
+
+    @Test
     void 签发并解析成功() {
         JwtService jwtService = new JwtService(SECRET, 120);
         String token = jwtService.createAccessToken(1234567890123456789L, "张三", List.of("ADMIN"));
