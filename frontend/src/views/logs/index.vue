@@ -13,12 +13,7 @@ import { enumLabel, enumOptions } from '@/utils/enumLabels'
 import { formatDateTimeFull } from '@/utils/format'
 import { useAutoRefresh } from '@/utils/autoRefresh'
 import { newIdempotencyKey } from '@/utils/idempotency'
-import {
-  diffObjects,
-  formatDiffValue,
-  parseSnapshot,
-  prettyJsonString,
-} from '@/utils/jsonDiff'
+import { buildAuditDetail } from '@/utils/auditDetail'
 
 const userStore = useUserStore()
 const loading = ref(false)
@@ -94,8 +89,8 @@ function roleText(roles: string | null): string {
   return roles.split(',').map((role) => enumLabel('Role', role, userStore.enums)).join('、')
 }
 
-function logDiff(row: AuditLogItem) {
-  return diffObjects(parseSnapshot(row.before), parseSnapshot(row.after))
+function logDetail(row: AuditLogItem) {
+  return buildAuditDetail(row)
 }
 
 async function copyRequestId(requestId: string): Promise<void> {
@@ -245,26 +240,33 @@ useAutoRefresh(() => loadLogs(true), { intervalMs: 60_000 })
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="log-detail">
-            <template v-if="logDiff(row).length > 0">
-              <div class="detail-title">字段差异</div>
-              <div v-for="entry in logDiff(row)" :key="entry.field" class="diff-row">
-                <span class="mono diff-field">{{ entry.field }}</span>
-                <span class="diff-before">{{ formatDiffValue(entry.before) }}</span>
-                <span>→</span>
-                <span class="diff-after">{{ formatDiffValue(entry.after) }}</span>
+            <div class="detail-summary">{{ logDetail(row).summary }}</div>
+            <template v-if="logDetail(row).changes.length > 0">
+              <div class="detail-title">具体变更</div>
+              <div class="change-table">
+                <div class="change-row change-head">
+                  <span>字段</span>
+                  <span>变更前</span>
+                  <span>变更后</span>
+                </div>
+                <div v-for="entry in logDetail(row).changes" :key="entry.field" class="change-row">
+                  <span class="change-field">{{ entry.label }}</span>
+                  <span class="change-before">{{ entry.before }}</span>
+                  <span class="change-after">{{ entry.after }}</span>
+                </div>
               </div>
             </template>
-            <div class="snapshot-grid">
-              <div>
-                <div class="detail-title">变更前 JSON</div>
-                <pre>{{ prettyJsonString(row.before) || '—' }}</pre>
+            <template v-else-if="logDetail(row).facts.length > 0">
+              <div class="detail-title">操作内容</div>
+              <div class="fact-list">
+                <div v-for="(fact, index) in logDetail(row).facts" :key="`${fact.label}-${index}`" class="fact-row">
+                  <span class="fact-label">{{ fact.label }}</span>
+                  <span class="fact-value">{{ fact.value }}</span>
+                </div>
               </div>
-              <div>
-                <div class="detail-title">变更后 JSON</div>
-                <pre>{{ prettyJsonString(row.after) || '—' }}</pre>
-              </div>
-            </div>
-            <div v-if="row.reason" class="reason"><strong>原因：</strong>{{ row.reason }}</div>
+            </template>
+            <div v-if="logDetail(row).note" class="detail-note">{{ logDetail(row).note }}</div>
+            <div v-if="row.reason" class="reason"><strong>原因或意见：</strong>{{ row.reason }}</div>
           </div>
         </template>
       </el-table-column>
@@ -353,51 +355,93 @@ useAutoRefresh(() => loadLogs(true), { intervalMs: 60_000 })
   padding: var(--space-3) var(--space-6);
 }
 
+.detail-summary {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--el-fill-color-light);
+  border-left: 3px solid var(--el-color-primary);
+  border-radius: var(--el-border-radius-base);
+  font-weight: 600;
+  line-height: 1.6;
+}
+
 .detail-title {
   margin-bottom: var(--space-2);
   font-weight: 600;
 }
 
-.diff-row {
-  display: flex;
-  gap: var(--space-2);
-  align-items: baseline;
-  margin-bottom: var(--space-1);
+.change-table {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--el-border-radius-base);
+  overflow: hidden;
+}
+
+.change-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   font-size: 12px;
+  border-top: 1px solid var(--el-border-color-lighter);
 }
 
-.diff-field {
-  min-width: 180px;
+.change-row:first-child {
+  border-top: none;
 }
 
-.diff-before {
-  color: var(--el-color-danger);
-  text-decoration: line-through;
-}
-
-.diff-after {
-  color: var(--el-color-success);
+.change-head {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
   font-weight: 600;
 }
 
-.snapshot-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4);
-  margin-top: var(--space-4);
+.change-field {
+  font-weight: 600;
 }
 
-pre {
-  max-height: 280px;
-  margin: 0;
-  padding: var(--space-3);
-  overflow: auto;
-  background: var(--el-fill-color-light);
-  border-radius: var(--el-border-radius-base);
-  font-family: var(--app-font-mono);
-  font-size: 12px;
-  white-space: pre-wrap;
+.change-before {
+  color: var(--el-color-danger);
+  text-decoration: line-through;
   word-break: break-all;
+}
+
+.change-after {
+  color: var(--el-color-success);
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.fact-list {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--el-border-radius-base);
+  overflow: hidden;
+}
+
+.fact-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  font-size: 12px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.fact-row:first-child {
+  border-top: none;
+}
+
+.fact-label {
+  font-weight: 600;
+}
+
+.fact-value {
+  word-break: break-all;
+}
+
+.detail-note {
+  margin-top: var(--space-2);
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .reason {
