@@ -167,7 +167,7 @@ class PlanServiceTest {
     }
 
     @Test
-    void 计划卡片只统计可见指标任务并计算完成率() {
+    void 计划卡片按可见A指标计算五年累计完成率() {
         LocalDateTime createdAt = LocalDateTime.of(2026, 1, 1, 8, 0);
         Plan plan = new Plan();
         plan.setId(1L);
@@ -177,23 +177,29 @@ class PlanServiceTest {
         plan.setStatus("ACTIVE");
         plan.setSource("BLANK");
         plan.setCreatedAt(createdAt);
-        List<Task> tasks = List.of(task(101L), task(102L));
+        Task firstTask = task(101L);
+        firstTask.setIndicatorId(10L);
+        firstTask.setTopIndicatorId(10L);
+        Task secondTask = task(102L);
+        secondTask.setIndicatorId(10L);
+        secondTask.setTopIndicatorId(10L);
+        List<Task> tasks = List.of(firstTask, secondTask);
         Indicator a = indicator(10L, null, "A");
+        a.setIsQuantifiable(true);
+        a.setStatCaliber("INCREMENT");
+        a.setTotalTarget(new BigDecimal("100"));
         Indicator aPlus = indicator(11L, 10L, "A_PLUS");
         Indicator unrelated = indicator(12L, null, "A");
-        PlanYear activeYear = new PlanYear();
-        activeYear.setYear(2027);
-        activeYear.setStatus("ACTIVE");
-        TaskYear achieved = taskYear(101L, "ACHIEVED");
-        TaskYear unachieved = taskYear(102L, "NOT_ACHIEVED");
+        TaskYear firstYear = taskYear(101L, 2026, "20");
+        TaskYear secondYear = taskYear(101L, 2027, "20");
+        TaskYear otherYear = taskYear(102L, 2026, "10");
 
         when(planMapper.selectList(any())).thenReturn(List.of(plan));
         when(planReadScopeService.filterVisiblePlans(any())).thenReturn(List.of(plan));
         when(planReadScopeService.visibleTasks(1L)).thenReturn(tasks);
         when(indicatorMapper.selectList(any())).thenReturn(List.of(a, aPlus, unrelated));
         when(planReadScopeService.visibleIndicatorIds(any(), any())).thenReturn(Set.of(10L, 11L));
-        when(planYearMapper.selectList(any())).thenReturn(List.of(activeYear));
-        when(taskYearMapper.selectList(any())).thenReturn(List.of(achieved, unachieved));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(firstYear, secondYear, otherYear));
 
         PlanDtos.ListItem item = planService.list(null).get(0);
 
@@ -439,6 +445,13 @@ class PlanServiceTest {
         task.setStatus("DISTRIBUTED");
         task.setIsHistorical(false);
         return task;
+    }
+
+    private static TaskYear taskYear(Long taskId, Integer year, String actualValue) {
+        TaskYear taskYear = taskYear(taskId, "IN_PROGRESS");
+        taskYear.setYear(year);
+        taskYear.setActualValue(new BigDecimal(actualValue));
+        return taskYear;
     }
 
     private static TaskYear taskYear(Long taskId, String yearStatus) {

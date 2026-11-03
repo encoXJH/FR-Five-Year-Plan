@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import lombok.Data;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -47,5 +48,13 @@ public final class MaterialDtos {
             @NotNull Long indicatorId,
             @NotEmpty List<Long> fileIds
     ) {
+    }
+
+    /** 按关键产出指标统计的材料数量 */
+    @Data
+    public static class IndicatorMaterialCount {
+        @JsonSerialize(using = ToStringSerializer.class)
+        private Long indicatorId;
+        private Long materialCount;
     }
 }

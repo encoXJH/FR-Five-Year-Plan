@@ -393,8 +393,9 @@ useAutoRefresh(() => Promise.all([loadPlans(true), loadTodos(), loadNotification
           :percentage="percentValue(plan.overallCompletionRate)"
           color="#2B5BC0"
         >
-          <span class="rate-text">
-            {{ plan.overallCompletionRate === null ? EMPTY_DISPLAY : formatPercent(plan.overallCompletionRate) }}
+          <span class="rate-text" :class="{ 'rate-text--empty': plan.overallCompletionRate === 0 }">
+            <template v-if="plan.overallCompletionRate === 0">暂无<br>完成数据</template>
+            <template v-else>{{ plan.overallCompletionRate === null ? EMPTY_DISPLAY : formatPercent(plan.overallCompletionRate) }}</template>
           </span>
         </el-progress>
         <div class="plan-stats">
@@ -684,6 +685,14 @@ useAutoRefresh(() => Promise.all([loadPlans(true), loadTodos(), loadNotification
   font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+.rate-text--empty {
+  width: 44px;
+  font-size: 10px;
+  line-height: 12px;
+  text-align: center;
+  white-space: normal;
 }
 
 .plan-stats {

@@ -117,6 +117,13 @@ public class FileController {
         return materialService.accessibleIndicators(planId);
     }
 
+    @Operation(summary = "材料库：按关键产出指标统计材料数量")
+    @GetMapping("/materials/counts")
+    public java.util.List<MaterialDtos.IndicatorMaterialCount> materialCounts(
+            @RequestParam(required = false) Long planId) {
+        return materialService.counts(planId);
+    }
+
     @Operation(summary = "材料库：跨学院材料检索")
     @GetMapping("/materials")
     public PageResult<MaterialDtos.MaterialItem> materials(

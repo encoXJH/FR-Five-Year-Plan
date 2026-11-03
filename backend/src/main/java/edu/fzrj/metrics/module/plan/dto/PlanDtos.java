@@ -86,7 +86,7 @@ public final class PlanDtos {
             String status,
             String source,
             LocalDateTime finalizedAt,
-            /** 当前用户可见范围内，当前统计年度有正目标的已下发任务达标率 */
+            /** 当前用户可见范围内，量化 A 指标五年累计完成率的算术平均 */
             BigDecimal completionRate,
             LocalDateTime createdAt,
             Long indicatorCountA,

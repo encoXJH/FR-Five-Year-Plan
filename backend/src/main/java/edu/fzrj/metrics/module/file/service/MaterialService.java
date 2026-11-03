@@ -83,27 +83,41 @@ public class MaterialService {
         LoginUser user = SecurityUtils.getLoginUser();
         int safePage = Math.max(1, page);
         int safePageSize = Math.min(100, Math.max(1, pageSize));
-        Long ownerScope = null;
-        Long unitScope = null;
-        if (!user.getRoles().contains("ADMIN") && !user.getRoles().contains("LEADER")) {
-            if (user.getRoles().contains("SCHOOL_OWNER")) {
-                ownerScope = user.getUserId();
-            }
-            if (user.getRoles().contains("UNIT_OWNER") && user.getUnitId() != null) {
-                unitScope = user.getUnitId();
-            }
-            if (ownerScope == null && unitScope == null) {
-                return new PageResult<>(List.of(), 0L, safePage, safePageSize);
-            }
+        Long[] scope = resolveScope(user);
+        if (scope == null) {
+            return new PageResult<>(List.of(), 0L, safePage, safePageSize);
         }
         String normalizedKeyword = StringUtils.hasText(keyword) ? keyword.trim().toLowerCase() : null;
         MaterialQuery query = new MaterialQuery(
-                planId, indicatorId, unitId, taskId, year, category, normalizedKeyword, ownerScope, unitScope,
+                planId, indicatorId, unitId, taskId, year, category, normalizedKeyword, scope[0], scope[1],
                 safePageSize, (long) (safePage - 1) * safePageSize);
         long total = materialQueryMapper.countMaterials(query);
         List<MaterialDtos.MaterialItem> items = total == 0 ? List.of() : materialQueryMapper.selectMaterials(query)
                 .stream().map(this::toItem).toList();
         return new PageResult<>(items, total, safePage, safePageSize);
+    }
+
+    /** 按关键产出指标统计材料数量（指标列表内联展示用，避免逐指标请求） */
+    public List<MaterialDtos.IndicatorMaterialCount> counts(Long planId) {
+        Long[] scope = resolveScope(SecurityUtils.getLoginUser());
+        if (scope == null) {
+            return List.of();
+        }
+        return materialQueryMapper.countByIndicator(
+                new MaterialQuery(planId, null, null, null, null, null, null, scope[0], scope[1], 0, 0));
+    }
+
+    /** 返回 [负责人范围, 单元范围]；无任何可见范围时返回 null */
+    private Long[] resolveScope(LoginUser user) {
+        if (user.getRoles().contains("ADMIN") || user.getRoles().contains("LEADER")) {
+            return new Long[]{null, null};
+        }
+        Long ownerScope = user.getRoles().contains("SCHOOL_OWNER") ? user.getUserId() : null;
+        Long unitScope = user.getRoles().contains("UNIT_OWNER") ? user.getUnitId() : null;
+        if (ownerScope == null && unitScope == null) {
+            return null;
+        }
+        return new Long[]{ownerScope, unitScope};
     }
 
     @Transactional

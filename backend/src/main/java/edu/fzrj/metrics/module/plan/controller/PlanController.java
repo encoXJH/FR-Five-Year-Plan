@@ -37,7 +37,7 @@ public class PlanController {
         this.planYearService = planYearService;
     }
 
-    @Operation(summary = "计划列表（首页卡片，不分页；completionRate 阶段 2 恒为 null）")
+    @Operation(summary = "计划列表（首页卡片，不分页；completionRate 为五年累计完成率）")
     @GetMapping
     public List<PlanDtos.ListItem> list(@RequestParam(required = false) String status) {
         return planService.list(status);

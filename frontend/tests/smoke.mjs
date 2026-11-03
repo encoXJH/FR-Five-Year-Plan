@@ -9,7 +9,7 @@
  * 编号夹具：新增/分解表单不开放编号字段，仅在本次创建请求中补 A16；
  * 其余字段及完整流程仍通过真实 UI 操作。
  *
- * 运行：npm run smoke（需后端 :8080 与前端 :5173 已启动）
+ * 运行：npm run smoke（需后端 :8081 与前端 :5173 已启动）
  * 环境变量：SMOKE_BASE_URL（默认 http://localhost:5173）、SMOKE_HEADFUL=1 可视化调试
  *           SMOKE_PATCH_KNOWN_BUGS=1 已确认缺陷补丁模式（见下）
  *

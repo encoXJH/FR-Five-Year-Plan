@@ -18,7 +18,7 @@ import { deleteIndicator, listIndicators } from '@/api/indicator'
 import { listAllTasks } from '@/api/task'
 import { createExport, pollExport } from '@/api/export'
 import { getIndicatorTrend, getStatsTree } from '@/api/stats'
-import { listMaterials } from '@/api/material'
+import { countMaterialsByIndicator, listMaterials } from '@/api/material'
 import type { MaterialItem } from '@/api/material'
 import { downloadFile } from '@/api/file'
 import { getUserOptions } from '@/api/user'
@@ -166,6 +166,7 @@ async function loadAll(silent = false): Promise<void> {
       loadTree(),
       loadStatsTree(),
       loadDirections(),
+      loadMaterialCounts(),
     ])
     if (silent) {
       const loadedIds = Object.keys(tasksByIndicator)
@@ -654,7 +655,9 @@ const materialRows = ref<MaterialItem[]>([])
 const materialTotal = ref(0)
 const materialPage = ref(1)
 const materialPageSize = ref(10)
+const materialCounts = ref<Record<string, number>>({})
 let materialRequestId = 0
+let materialCountRequestId = 0
 
 const previewVisible = ref(false)
 const previewFile = ref<MaterialItem | null>(null)
@@ -676,6 +679,23 @@ async function loadIndicatorMaterials(): Promise<void> {
   } finally {
     if (requestId === materialRequestId) materialLoading.value = false
   }
+}
+
+async function loadMaterialCounts(): Promise<void> {
+  const requestedPlanId = planId.value
+  if (!requestedPlanId) return
+  const requestId = ++materialCountRequestId
+  try {
+    const result = await countMaterialsByIndicator(requestedPlanId)
+    if (requestId !== materialCountRequestId || requestedPlanId !== planId.value) return
+    materialCounts.value = Object.fromEntries(result.map((item) => [item.indicatorId, item.materialCount]))
+  } catch {
+    if (requestId === materialCountRequestId && requestedPlanId === planId.value) materialCounts.value = {}
+  }
+}
+
+function materialCountOf(indicatorId: string): number {
+  return materialCounts.value[indicatorId] ?? 0
 }
 
 function openMaterialDialog(indicator: IndicatorTreeNode): void {
@@ -882,12 +902,14 @@ watch(planId, (id) => {
   statsRequestId += 1
   directionRequestId += 1
   expandAllRequestId += 1
+  materialCountRequestId += 1
   expandAllLoading.value = false
   plan.value = null
   tree.value = []
   statsTree.value = []
   yearStatsIndexes.value = new Map()
   directionList.value = []
+  materialCounts.value = {}
   selectedDirectionId.value = ''
   editMode.value = false
   for (const key of Object.keys(tasksByIndicator)) delete tasksByIndicator[key]
@@ -1172,49 +1194,53 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
                   <div v-if="taskErrorIds.has(row.id) && !taskLoadingIds.has(row.id)" class="task-error-state" role="alert">学院任务加载失败，请点击编号重试</div>
                 </template>
               </el-table-column>
-              <el-table-column label="总进度 / 佐证材料" min-width="300" align="center">
+              <el-table-column label="总进度" min-width="220" align="center" header-align="center">
                 <template #default="{ row }">
-                  <div class="a-total-cell">
+                  <div
+                    v-if="row.indicator.isQuantifiable"
+                    class="a-total-progress"
+                    role="button"
+                    tabindex="0"
+                    :title="`五年累计完成率 ${aTotalText(row.indicator)}；点击查看五年详细进度`"
+                    :aria-label="`查看 ${row.indicator.name} 的五年详细进度`"
+                    @click="openProgressDialog(row.indicator)"
+                    @keydown.enter="openProgressDialog(row.indicator)"
+                    @keydown.space.prevent="openProgressDialog(row.indicator)"
+                  >
                     <div
-                      v-if="row.indicator.isQuantifiable"
-                      class="a-total-progress"
-                      role="button"
-                      tabindex="0"
-                      :title="`五年累计完成率 ${aTotalText(row.indicator)}；点击查看五年详细进度`"
-                      :aria-label="`查看 ${row.indicator.name} 的五年详细进度`"
-                      @click="openProgressDialog(row.indicator)"
-                      @keydown.enter="openProgressDialog(row.indicator)"
-                      @keydown.space.prevent="openProgressDialog(row.indicator)"
+                      class="year-target-track a-total-progress__track"
+                      role="progressbar"
+                      :aria-label="`${row.indicator.code}五年累计完成率`"
+                      :aria-valuenow="aTotalPercent(row.indicator)"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
                     >
                       <div
-                        class="year-target-track a-total-progress__track"
-                        role="progressbar"
-                        :aria-label="`${row.indicator.code}五年累计完成率`"
-                        :aria-valuenow="aTotalPercent(row.indicator)"
-                        aria-valuemin="0"
-                        aria-valuemax="100"
-                      >
-                        <div
-                          class="year-target-fill"
-                          :class="completionLevelClass(aCumulativeLevel(row.indicator))"
-                          :style="{ width: `${aTotalPercent(row.indicator)}%` }"
-                        ></div>
-                      </div>
-                      <span class="a-total-progress__text" :class="completionLevelClass(aCumulativeLevel(row.indicator))">
-                        {{ aTotalText(row.indicator) }}
-                      </span>
+                        class="year-target-fill"
+                        :class="completionLevelClass(aCumulativeLevel(row.indicator))"
+                        :style="{ width: `${aTotalPercent(row.indicator)}%` }"
+                      ></div>
                     </div>
-                    <span v-else class="a-progress-empty">—</span>
-                    <el-button
-                      v-if="row.indicator.isQuantifiable"
-                      link
-                      type="primary"
-                      class="material-link"
-                      @click.stop="openMaterialDialog(row.indicator)"
-                    >
-                      查看佐证材料
-                    </el-button>
+                    <span class="a-total-progress__text" :class="completionLevelClass(aCumulativeLevel(row.indicator))">
+                      {{ aTotalText(row.indicator) }}
+                    </span>
                   </div>
+                  <span v-else class="a-progress-empty">—</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="材料" width="110" align="center" header-align="center">
+                <template #default="{ row }">
+                  <el-button
+                    v-if="row.indicator.isQuantifiable"
+                    link
+                    type="primary"
+                    class="material-count"
+                    :title="`查看佐证材料，共 ${formatCount(materialCountOf(row.indicator.id))} 份`"
+                    @click.stop="openMaterialDialog(row.indicator)"
+                  >
+                    共 {{ formatCount(materialCountOf(row.indicator.id)) }} 份
+                  </el-button>
+                  <span v-else class="a-progress-empty">—</span>
                 </template>
               </el-table-column>
               <template #empty>
@@ -1670,7 +1696,7 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
 .a-name-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .a-name-row .a-name-button { flex: 1 1 auto; min-width: 0; }
 .a-name-delete { flex: 0 0 auto; }
-.a-total-cell { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.material-count { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .a-total-progress { display: flex; align-items: center; justify-content: center; gap: 8px; width: fit-content; max-width: 100%; min-width: 0; margin: 0 auto; cursor: pointer; }
 .a-total-progress:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
 .a-total-progress--card { justify-content: flex-start; width: 100%; margin-top: 8px; cursor: default; }
@@ -1682,7 +1708,6 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
 .a-total-progress__text.completion-value--partial { color: var(--el-color-warning); }
 .a-total-progress__text.completion-value--complete { color: var(--el-color-success); }
 .a-progress-empty { color: var(--indicator-muted); }
-.material-link { white-space: nowrap; }
 .dialog-heading h3 { margin: 0; color: var(--indicator-ink); font-size: 18px; line-height: 26px; }
 .dialog-heading p { margin: 5px 24px 0 0; color: var(--indicator-muted); font-size: 13px; line-height: 20px; }
 .dialog-heading p span { margin-right: 8px; color: var(--el-color-primary); font-weight: 650; font-variant-numeric: tabular-nums; }

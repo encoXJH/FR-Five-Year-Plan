@@ -18,7 +18,8 @@ import edu.fzrj.metrics.module.plan.entity.Template;
 import edu.fzrj.metrics.module.plan.mapper.PlanMapper;
 import edu.fzrj.metrics.module.plan.mapper.PlanYearMapper;
 import edu.fzrj.metrics.module.plan.mapper.TemplateMapper;
-import edu.fzrj.metrics.module.stats.service.support.StatsAggregator;
+import edu.fzrj.metrics.module.stats.service.support.CumulativeCalculator;
+import edu.fzrj.metrics.module.submission.service.support.MetricCalculator;
 import edu.fzrj.metrics.module.system.entity.MajorGroup;
 import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.system.entity.UserRole;
@@ -107,8 +108,7 @@ public class PlanService {
         List<Task> visibleTasks = planReadScopeService.visibleTasks(plan.getId());
         List<Indicator> indicators = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
                 .eq(Indicator::getPlanId, plan.getId())
-                .eq(Indicator::getDeleted, 0L)
-                .select(Indicator::getId, Indicator::getParentId, Indicator::getLevel, Indicator::getOwnerId));
+                .eq(Indicator::getDeleted, 0L));
         java.util.Set<Long> visibleIndicatorIds = planReadScopeService.visibleIndicatorIds(indicators, visibleTasks);
         long indicatorCountA = indicators.stream()
                 .filter(i -> visibleIndicatorIds.contains(i.getId()) && "A".equals(i.getLevel())).count();
@@ -116,41 +116,78 @@ public class PlanService {
                 .filter(i -> visibleIndicatorIds.contains(i.getId()) && "A_PLUS".equals(i.getLevel())).count();
         return new PlanDtos.ListItem(plan.getId(), plan.getName(), plan.getStartYear(), plan.getEndYear(),
                 plan.getBaselineYear(), plan.getStatus(), plan.getSource(), plan.getFinalizedAt(),
-                completionRateOf(plan, visibleTasks), plan.getCreatedAt(), indicatorCountA, indicatorCountAPlus,
+                completionRateOf(plan, visibleTasks, indicators, visibleIndicatorIds), plan.getCreatedAt(),
+                indicatorCountA, indicatorCountAPlus,
                 (long) visibleTasks.size(), plan.getUpdatedAt() == null ? plan.getCreatedAt() : plan.getUpdatedAt());
     }
 
-    /** 整体完成率：当前激活年度（无激活取最近锁定年度，再无取起始年）达标任务数 ÷ 有正目标的任务数 */
-    private java.math.BigDecimal completionRateOf(Plan plan, List<Task> visibleTasks) {
-        List<PlanYear> planYears = planYearMapper.selectList(new LambdaQueryWrapper<PlanYear>()
-                .eq(PlanYear::getPlanId, plan.getId())
-                .eq(PlanYear::getDeleted, 0L));
-        if (planYears.isEmpty()) {
+    /** 整体完成率：可见量化 A 指标五年累计完成率的算术平均；无可见指标时为 null */
+    private java.math.BigDecimal completionRateOf(Plan plan, List<Task> visibleTasks, List<Indicator> indicators,
+                                                  java.util.Set<Long> visibleIndicatorIds) {
+        List<Indicator> rootAs = indicators.stream()
+                .filter(i -> visibleIndicatorIds.contains(i.getId()))
+                .filter(i -> i.getParentId() == null && "A".equals(i.getLevel()))
+                .filter(i -> Boolean.TRUE.equals(i.getIsQuantifiable()))
+                .toList();
+        if (rootAs.isEmpty()) {
             return null;
         }
-        Integer year = planYears.stream().filter(y -> "ACTIVE".equals(y.getStatus()))
-                .map(PlanYear::getYear).max(Integer::compareTo)
-                .orElse(planYears.stream().filter(y -> "LOCKED".equals(y.getStatus()))
-                        .map(PlanYear::getYear).max(Integer::compareTo)
-                        .orElse(plan.getStartYear()));
+
         List<Long> taskIds = visibleTasks.stream()
                 .filter(task -> !"PENDING_DISTRIBUTION".equals(task.getStatus()))
                 .filter(task -> !Boolean.TRUE.equals(task.getIsHistorical()))
                 .map(Task::getId).toList();
-        if (taskIds.isEmpty()) {
-            return null;
+        Map<Long, List<TaskYear>> taskYearsByTask = taskIds.isEmpty() ? Map.of()
+                : taskYearMapper.selectList(new LambdaQueryWrapper<TaskYear>()
+                        .in(TaskYear::getTaskId, taskIds)
+                        .eq(TaskYear::getDeleted, 0L)).stream()
+                .collect(Collectors.groupingBy(TaskYear::getTaskId));
+
+        List<Long> manualIds = rootAs.stream()
+                .filter(i -> "MANUAL".equals(i.getRollupMode()))
+                .map(Indicator::getId).toList();
+        Map<Long, Map<Integer, IndicatorYearTarget>> manualByYear = manualIds.isEmpty() ? Map.of()
+                : yearTargetMapper.selectList(new LambdaQueryWrapper<IndicatorYearTarget>()
+                        .in(IndicatorYearTarget::getIndicatorId, manualIds)
+                        .eq(IndicatorYearTarget::getDeleted, 0L)).stream()
+                .collect(Collectors.groupingBy(IndicatorYearTarget::getIndicatorId,
+                        Collectors.toMap(IndicatorYearTarget::getYear, Function.identity(), (a, b) -> a)));
+
+        List<BigDecimal> rates = new ArrayList<>();
+        for (Indicator a : rootAs) {
+            List<MetricCalculator.YearResult> years = new ArrayList<>();
+            if ("MANUAL".equals(a.getRollupMode())) {
+                Map<Integer, IndicatorYearTarget> byYear = manualByYear.getOrDefault(a.getId(), Map.of());
+                for (int y = plan.getStartYear(); y <= plan.getEndYear(); y++) {
+                    IndicatorYearTarget row = byYear.get(y);
+                    years.add(row == null || row.getManualActualValue() == null
+                            ? MetricCalculator.YearResult.empty()
+                            : new MetricCalculator.YearResult(row.getManualActualValue(), null, null,
+                                    row.getActualTotal(), null, null));
+                }
+            } else {
+                List<TaskYear> rows = visibleTasks.stream()
+                        .filter(task -> a.getId().equals(task.getTopIndicatorId())
+                                || a.getId().equals(task.getIndicatorId()))
+                        .flatMap(task -> taskYearsByTask.getOrDefault(task.getId(), List.of()).stream())
+                        .toList();
+                BigDecimal previousTotal = a.getBaselineValue();
+                for (int y = plan.getStartYear(); y <= plan.getEndYear(); y++) {
+                    int currentYear = y;
+                    MetricCalculator.YearResult result = MetricCalculator.rollup(a.getStatCaliber(),
+                            rows.stream().filter(row -> row.getYear() == currentYear)
+                                    .map(row -> new MetricCalculator.YearResult(row.getActualValue(),
+                                            row.getActualNumerator(), row.getActualDenominator(),
+                                            row.getActualTotal(), null, null))
+                                    .toList(),
+                            previousTotal);
+                    years.add(result);
+                    previousTotal = result.total();
+                }
+            }
+            rates.add(CumulativeCalculator.of(a.getStatCaliber(), years, a.getTotalTarget()).rate());
         }
-        List<TaskYear> rows = taskYearMapper.selectList(new LambdaQueryWrapper<TaskYear>()
-                .in(TaskYear::getTaskId, taskIds)
-                .eq(TaskYear::getYear, year)
-                .eq(TaskYear::getDeleted, 0L));
-        List<TaskYear> countable = rows.stream()
-                .filter(ty -> StatsAggregator.countable(ty.getTarget()))
-                .toList();
-        long achieved = countable.stream()
-                .filter(ty -> StatsAggregator.isAchievedStatus(ty.getYearStatus()))
-                .count();
-        return StatsAggregator.rate(achieved, countable.size());
+        return CumulativeCalculator.avgRate(rates);
     }
 
     public Plan requirePlan(Long planId) {

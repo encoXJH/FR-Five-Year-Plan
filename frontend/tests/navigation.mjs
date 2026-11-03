@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { chromium, firefox, webkit } from 'playwright'
 
 const BASE = process.env.NAV_BASE_URL || 'http://localhost:5173'
-const API = 'http://localhost:8080/api/v1'
+const API = 'http://localhost:8081/api/v1'
 const PLAN_ID = process.env.NAV_PLAN_ID || '2115975164633669633'
 const browsers = { chromium, firefox, webkit }
 const selected = (process.env.NAV_BROWSERS || 'chromium,firefox,webkit').split(',')

@@ -52,6 +52,16 @@ export function listMaterials(params: MaterialQuery): Promise<PageResult<Materia
   return http.get('/files/materials', { ...params })
 }
 
+/** 按关键产出指标统计材料数量（指标列表内联展示） */
+export interface IndicatorMaterialCount {
+  indicatorId: string
+  materialCount: number
+}
+
+export function countMaterialsByIndicator(planId?: string): Promise<IndicatorMaterialCount[]> {
+  return http.get('/files/materials/counts', { planId })
+}
+
 export function bindMaterials(indicatorId: string, fileIds: string[]): Promise<void> {
   return http.post('/files/materials/bind', { indicatorId, fileIds })
 }

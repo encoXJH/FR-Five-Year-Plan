@@ -18,9 +18,9 @@ cp .env.example .env   # 按需修改数据库密码、JWT 密钥等
 # 2. 后端（首次启动 Flyway 自动建表 + 写入种子数据）
 cd backend
 ./mvnw spring-boot:run
-# Swagger UI: http://localhost:8080/swagger-ui.html（生产环境自动关闭）
+# Swagger UI: http://localhost:8081/swagger-ui.html（生产环境自动关闭）
 
-# 3. 前端（另开终端，代理到 8080）
+# 3. 前端（另开终端，代理到 8081）
 cd frontend
 npm install
 npm run dev   # http://localhost:5173

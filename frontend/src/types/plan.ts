@@ -27,7 +27,7 @@ export interface PlanCard {
   endYear: number
   baselineYear: number
   status: PlanStatus
-  /** 整体完成率（小数），null 显示 — */
+  /** 五年累计完成率（小数），null 显示 — */
   overallCompletionRate: number | null
   /** 本年度完成率（小数） */
   yearCompletionRate: number | null

@@ -48,7 +48,7 @@ async function run(name, launcher, options = {}) {
       status: 'ACTIVE', version: 1,
     } },
   }))
-  const auth = await page.request.post('http://localhost:8080/api/v1/auth/login', { data: { username: 'admin', password: 'Test@123456' } })
+  const auth = await page.request.post('http://localhost:8081/api/v1/auth/login', { data: { username: 'admin', password: 'Test@123456' } })
   const tokens = (await auth.json()).data
   await page.addInitScript(([accessToken, refreshToken]) => {
     sessionStorage.setItem('fzsu.accessToken', accessToken)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import BackButton from '@/components/BackButton.vue'
@@ -31,7 +31,7 @@ interface DirectionProgress {
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
-const planId = typeof route.params.planId === 'string' ? route.params.planId : ''
+const planId = computed(() => typeof route.params.planId === 'string' ? route.params.planId : '')
 const canViewIndicatorProgress = computed(() => !userStore.isUnitOwnerOnly)
 
 const loading = ref(false)
@@ -117,16 +117,22 @@ function directionStatus(direction: DirectionProgress): 'success' | undefined {
     : undefined
 }
 
+/** 请求代次：切换计划后丢弃旧计划的在途响应，避免覆盖新计划数据 */
+let loadSeq = 0
+
 async function load(silent = false): Promise<void> {
-  if (!canViewIndicatorProgress.value || !planId) return
+  const currentPlanId = planId.value
+  if (!canViewIndicatorProgress.value || !currentPlanId) return
+  const seq = ++loadSeq
   if (!silent) loading.value = true
   try {
     const [plan, tree, indicatorTree, stats] = await Promise.all([
-      getPlan(planId),
-      getStatsTree(planId),
-      listIndicators(planId).catch(() => [] as IndicatorTreeNode[]),
-      getStatsOverview(planId).catch(() => null),
+      getPlan(currentPlanId),
+      getStatsTree(currentPlanId),
+      listIndicators(currentPlanId).catch(() => [] as IndicatorTreeNode[]),
+      getStatsOverview(currentPlanId).catch(() => null),
     ])
+    if (seq !== loadSeq) return
     planName.value = plan.name
     overview.value = stats
 
@@ -144,6 +150,7 @@ async function load(silent = false): Promise<void> {
     const aNodes = tree.filter((node) => node.level === 'A')
     const targetDirectionById = new Map(aNodes.map((node) => [node.id, node.targetDirection ?? null]))
     const results = await Promise.allSettled(aNodes.map((node) => getIndicatorTrend(node.id)))
+    if (seq !== loadSeq) return
     trends.value = results
       .filter((result): result is PromiseFulfilledResult<IndicatorTrend> => result.status === 'fulfilled')
       .map((result) => ({
@@ -156,11 +163,17 @@ async function load(silent = false): Promise<void> {
       ElMessage.warning('部分指标进度加载失败，可刷新重试')
     }
   } finally {
-    if (!silent) loading.value = false
+    if (seq === loadSeq && !silent) loading.value = false
   }
 }
 
-onMounted(load)
+watch(planId, (next) => {
+  planName.value = ''
+  overview.value = null
+  trends.value = []
+  directionOrder.value = {}
+  if (next) void load()
+}, { immediate: true })
 
 useAutoRefresh(() => load(true), { intervalMs: 60_000 })
 </script>

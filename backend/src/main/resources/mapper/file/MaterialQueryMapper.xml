@@ -96,4 +96,10 @@
         ORDER BY f.uploaded_at DESC, f.id DESC
         LIMIT #{query.limit} OFFSET #{query.offset}
     </select>
+
+    <select id="countByIndicator" resultType="edu.fzrj.metrics.module.file.dto.MaterialDtos$IndicatorMaterialCount">
+        SELECT ti.id AS indicator_id, COUNT(*) AS material_count
+        <include refid="materialFromWhere"/>
+        GROUP BY ti.id
+    </select>
 </mapper>
