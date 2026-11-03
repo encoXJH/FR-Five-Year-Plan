@@ -8,6 +8,7 @@ import edu.fzrj.metrics.common.datascope.DataScopeService;
 import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
+import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.plan.entity.PlanYear;
 import edu.fzrj.metrics.module.plan.mapper.PlanMapper;
 import edu.fzrj.metrics.module.plan.mapper.PlanYearMapper;
@@ -40,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -76,6 +78,7 @@ class TaskServiceTest {
         TableInfoHelper.initTableInfo(assistant, TaskYear.class);
         TableInfoHelper.initTableInfo(assistant, Indicator.class);
         TableInfoHelper.initTableInfo(assistant, OrgUnit.class);
+        TableInfoHelper.initTableInfo(assistant, Plan.class);
         TableInfoHelper.initTableInfo(assistant, PlanYear.class);
     }
 
@@ -113,6 +116,9 @@ class TaskServiceTest {
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
                 new LoginUser(201L, "admin", "管理员", null, List.of("ADMIN"), List.of()), null, List.of()));
         when(dataScopeService.isAllData(any())).thenReturn(true);
+        Plan plan = new Plan();
+        plan.setId(10L);
+        when(planMapper.selectList(any())).thenReturn(List.of(plan));
 
         Task first = task(1L, "A01-1-C01");
         Task second = task(2L, "A01-1-C02");
@@ -155,6 +161,20 @@ class TaskServiceTest {
                 .map(TaskDtos.YearTargetView::year).toList());
         assertEquals(BigDecimal.valueOf(2), result.getItems().get(0).yearTargets().get(1).target());
         verify(settingService, times(1)).getValue("plan.fillDeadline", "12-31");
+    }
+
+    @Test
+    void 已删除计划下的任务不进入列表() {
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new LoginUser(201L, "admin", "管理员", null, List.of("ADMIN"), List.of()), null, List.of()));
+        when(dataScopeService.isAllData(any())).thenReturn(true);
+        when(planMapper.selectList(any())).thenReturn(List.of());
+
+        PageResult<TaskDtos.TaskListItem> result = taskService.page(new TaskDtos.TaskQuery());
+
+        assertEquals(0, result.getTotal());
+        assertEquals(0, result.getItems().size());
+        verify(taskMapper, never()).selectPage(any(), any());
     }
 
     private Task task(Long id, String code) {

@@ -13,7 +13,7 @@ import { useUserStore } from '@/stores/user'
 import { formatPercent } from '@/utils/format'
 import { formatTargetValue } from '@/utils/indicator'
 import { useAutoRefresh } from '@/utils/autoRefresh'
-import { canWriteTask, formatDeadline, primaryTaskIndicator } from '@/utils/task'
+import { averageTaskYearCompletion, canWriteTask, formatDeadline, primaryTaskIndicator } from '@/utils/task'
 import { canApplyForTask } from '@/utils/adjustment'
 import type { PageResult } from '@/types/api'
 import type { TaskListItem, TaskQuery } from '@/types/task'
@@ -126,10 +126,7 @@ async function loadKpi(): Promise<void> {
     ])
     kpi.todo = todo.total
     kpi.review = review.total
-    const rates = batch
-      .map((item) => item.completionRate)
-      .filter((rate): rate is number => typeof rate === 'number')
-    kpi.yearRate = rates.length > 0 ? rates.reduce((sum, rate) => sum + rate, 0) / rates.length : null
+    kpi.yearRate = averageTaskYearCompletion(batch)
     await loadWarnings(batch)
   } catch {
     // KPI 失败不阻塞列表

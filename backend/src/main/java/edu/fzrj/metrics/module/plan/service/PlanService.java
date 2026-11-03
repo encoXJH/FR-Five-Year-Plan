@@ -363,6 +363,22 @@ public class PlanService {
         return toDetail(requirePlan(planId));
     }
 
+    /** 删除草稿或已归档计划：逻辑删除，保留审计与历史执行数据。 */
+    @Transactional
+    public void delete(Long planId, PlanDtos.DeleteRequest request) {
+        Plan plan = requirePlan(planId);
+        planReadScopeService.requireVisible(plan);
+        requireVersion(plan.getVersion(), request.getVersion());
+        if (!"DRAFT".equals(plan.getStatus()) && !"ARCHIVED".equals(plan.getStatus())) {
+            throw new BizException(ErrorCode.PLAN_STATUS_INVALID, "执行中的计划请先归档后再删除");
+        }
+        plan.setDeleted(planId);
+        plan.setUpdatedBy(SecurityUtils.getUserId());
+        if (planMapper.updateById(plan) == 0) {
+            throw versionConflict(planId);
+        }
+    }
+
     /** 另存为模板：结构快照（S 级归属 + 指标定义 + 年度目标），不含执行数据 */
     @Transactional
     public PlanDtos.TemplateDetail saveAsTemplate(Long planId, PlanDtos.SaveAsTemplateRequest request) {

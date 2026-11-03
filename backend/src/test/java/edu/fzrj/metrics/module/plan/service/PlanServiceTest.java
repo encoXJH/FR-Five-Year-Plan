@@ -419,6 +419,70 @@ class PlanServiceTest {
         verify(taskYearMapper, never()).insert(any(TaskYear.class));
     }
 
+    @Test
+    void 已归档计划按版本逻辑删除并保留历史数据() {
+        Plan plan = draftPlan();
+        plan.setStatus("ARCHIVED");
+        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(planMapper.updateById(any(Plan.class))).thenReturn(1);
+        PlanDtos.DeleteRequest request = new PlanDtos.DeleteRequest();
+        request.setVersion(2);
+        request.setReason("清理测试计划");
+
+        planService.delete(1L, request);
+
+        assertEquals(1L, plan.getDeleted());
+        assertEquals(99L, plan.getUpdatedBy());
+        verify(planReadScopeService).requireVisible(plan);
+        verify(planMapper).updateById(plan);
+    }
+
+    @Test
+    void 草稿计划可以逻辑删除() {
+        Plan plan = draftPlan();
+        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(planMapper.updateById(any(Plan.class))).thenReturn(1);
+        PlanDtos.DeleteRequest request = new PlanDtos.DeleteRequest();
+        request.setVersion(2);
+        request.setReason("删除空白草稿");
+
+        planService.delete(1L, request);
+
+        assertEquals(1L, plan.getDeleted());
+    }
+
+    @Test
+    void 执行中计划必须先归档再删除() {
+        Plan plan = draftPlan();
+        plan.setStatus("ACTIVE");
+        when(planMapper.selectOne(any())).thenReturn(plan);
+        PlanDtos.DeleteRequest request = new PlanDtos.DeleteRequest();
+        request.setVersion(2);
+        request.setReason("清理测试计划");
+
+        BizException error = assertThrows(BizException.class, () -> planService.delete(1L, request));
+
+        assertEquals(30001, error.getErrorCode().getCode());
+        assertNull(plan.getDeleted());
+        verify(planMapper, never()).updateById(any(Plan.class));
+    }
+
+    @Test
+    void 删除计划版本冲突时不写入() {
+        Plan plan = draftPlan();
+        plan.setStatus("ARCHIVED");
+        when(planMapper.selectOne(any())).thenReturn(plan);
+        PlanDtos.DeleteRequest request = new PlanDtos.DeleteRequest();
+        request.setVersion(1);
+        request.setReason("清理测试计划");
+
+        BizException error = assertThrows(BizException.class, () -> planService.delete(1L, request));
+
+        assertEquals(10005, error.getErrorCode().getCode());
+        assertNull(plan.getDeleted());
+        verify(planMapper, never()).updateById(any(Plan.class));
+    }
+
     private static Plan draftPlan() {
         Plan plan = new Plan();
         plan.setId(1L);

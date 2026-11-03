@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ApiResponse, FieldError } from '@/types/api'
 import type { RefreshResponse } from '@/types/auth'
 import { detectClientEnv } from '@/utils/feishu'
+import { createUuid } from '@/utils/uuid'
 
 declare module 'axios' {
   interface AxiosRequestConfig {
@@ -151,7 +152,7 @@ service.interceptors.request.use((config) => {
   if (!config.headers['X-Client-Type']) {
     config.headers['X-Client-Type'] = defaultClientType()
   }
-  config.headers['X-Request-Id'] = crypto.randomUUID()
+  config.headers['X-Request-Id'] = createUuid()
   return config
 })
 

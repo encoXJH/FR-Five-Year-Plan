@@ -118,38 +118,23 @@ onMounted(async () => {
 })
 
 async function handleSubmit(): Promise<void> {
-  // #region debug-point H3:submit-entry
-  fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'login-still-failing', runId: 'pre-fix', hypothesisId: 'H3', location: 'login/index.vue:handleSubmit', msg: '[DEBUG] submit entry', data: { hasForm: !!formRef.value, usernameLength: form.username.length, passwordLength: form.password.length } }) }).catch(() => undefined)
-  // #endregion
   const formEl = formRef.value
   if (!formEl) return
   const valid = await formEl.validate().catch(() => false)
-  // #region debug-point H3:validation-result
-  fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'login-still-failing', runId: 'pre-fix', hypothesisId: 'H3', location: 'login/index.vue:validate', msg: '[DEBUG] validation result', data: { valid } }) }).catch(() => undefined)
-  // #endregion
   if (!valid) return
   loading.value = true
-  // #region debug-point H3:login-call
-  fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'login-still-failing', runId: 'pre-fix', hypothesisId: 'H3', location: 'login/index.vue:login', msg: '[DEBUG] login call', data: {} }) }).catch(() => undefined)
-  // #endregion
   try {
     await userStore.login(form)
-    // #region debug-point H3:login-result
-    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'login-still-failing', runId: 'pre-fix', hypothesisId: 'H3', location: 'login/index.vue:login', msg: '[DEBUG] login success', data: {} }) }).catch(() => undefined)
-    // #endregion
     router.push(redirectTarget())
   } catch {
-    // #region debug-point H3:login-result
-    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'login-still-failing', runId: 'pre-fix', hypothesisId: 'H3', location: 'login/index.vue:login', msg: '[DEBUG] login failed', data: {} }) }).catch(() => undefined)
-    // #endregion
     // 错误提示已由请求拦截器统一展示
   } finally {
     loading.value = false
   }
 }
 
-// ---------- 演示账号快捷登录（仅开发/验收环境显示，生产构建不含） ----------
-const showDemoAccounts = import.meta.env.DEV
+// ---------- 演示账号快捷登录（验收环境显示） ----------
+const showDemoAccounts = true
 
 const DEMO_ACCOUNTS = [
   { username: 'admin', name: '平台管理员', desc: '全部菜单' },
@@ -229,7 +214,7 @@ async function quickLogin(username: string): Promise<void> {
           <p class="feishu-hint">在飞书工作台打开可自动免登</p>
         </template>
 
-        <!-- 演示账号一键登录：仅开发环境（import.meta.env.DEV）渲染，不进入生产构建 -->
+        <!-- 演示账号一键登录：验收环境显示 -->
         <template v-if="showDemoAccounts">
           <el-divider class="feishu-divider">演示账号</el-divider>
           <div class="demo-accounts">

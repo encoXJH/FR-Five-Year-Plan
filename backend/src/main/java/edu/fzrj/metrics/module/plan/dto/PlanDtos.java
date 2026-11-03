@@ -65,6 +65,17 @@ public final class PlanDtos {
         private Integer version;
     }
 
+    /** 删除计划：乐观锁版本号 + 敏感操作原因 */
+    @Data
+    public static class DeleteRequest {
+        @NotNull(message = "缺少 version（乐观锁版本号）")
+        private Integer version;
+
+        @NotBlank(message = "删除计划必须填写原因（reason）")
+        @Size(max = 500, message = "原因不能超过 500 字")
+        private String reason;
+    }
+
     /** 另存为模板 */
     @Data
     public static class SaveAsTemplateRequest {

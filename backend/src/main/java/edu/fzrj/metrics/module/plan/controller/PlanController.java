@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -84,6 +85,16 @@ public class PlanController {
     public PlanDtos.Detail archive(@PathVariable Long planId,
                                    @Valid @RequestBody PlanDtos.VersionRequest request) {
         return planService.archive(planId, request.getVersion());
+    }
+
+    @Operation(summary = "删除草稿或已归档计划（逻辑删除）",
+            description = "权限：plan:manage；需带 version 和 reason；执行中的计划须先归档")
+    @DeleteMapping("/{planId}")
+    @PreAuthorize("hasAuthority('plan:manage')")
+    @AuditLog(action = "DELETE", resourceType = "plan", resourceId = "#planId", reason = "#request.reason",
+            before = "detail(#planId)")
+    public void delete(@PathVariable Long planId, @Valid @RequestBody PlanDtos.DeleteRequest request) {
+        planService.delete(planId, request);
     }
 
     @Operation(summary = "激活年度（激活后才能填报；该年已下发任务的年度状态置为进行中；重复激活幂等）",

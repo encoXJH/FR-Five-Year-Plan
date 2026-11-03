@@ -66,6 +66,11 @@ export function archivePlan(planId: string, version: number, reason?: string): P
   return http.post(`/plans/${planId}/archive`, { version, reason })
 }
 
+/** 删除草稿或已归档计划（逻辑删除，敏感操作需 version 和 reason） */
+export function deletePlan(planId: string, version: number, reason: string): Promise<null> {
+  return http.delete(`/plans/${planId}`, { data: { version, reason } })
+}
+
 export function savePlanAsTemplate(
   planId: string,
   data: SaveAsTemplateRequest,

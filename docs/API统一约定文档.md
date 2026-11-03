@@ -776,6 +776,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | PATCH | `/plans/{planId}` | 修改计划属性 | `plan:manage` |
 | POST | `/plans/{planId}/activate` | 启动执行 | `plan:manage` |
 | POST | `/plans/{planId}/archive` | 归档 | `plan:manage` |
+| DELETE | `/plans/{planId}` | 删除草稿或已归档计划（逻辑删除）；请求体 `{ version, reason }`，执行中计划须先归档 | `plan:manage` |
 | POST | `/plans/{planId}/save-as-template` | 另存为模板 | `plan:manage` |
 | GET | `/templates` | 模板列表 | `plan:manage` |
 | GET / PATCH | `/templates/{templateId}` | 模板详情 / 修改 | `plan:manage` |

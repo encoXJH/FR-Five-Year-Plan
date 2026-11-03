@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { listPlans } from '../plan'
+import { deletePlan, listPlans } from '../plan'
 import { http } from '@/utils/request'
 
 vi.mock('@/utils/request', () => ({
-  http: { get: vi.fn() },
+  http: { get: vi.fn(), delete: vi.fn() },
 }))
 
 const getMock = http.get as unknown as ReturnType<typeof vi.fn>
+const deleteMock = http.delete as unknown as ReturnType<typeof vi.fn>
 
 const responseItem = {
   id: '1',
@@ -64,5 +65,17 @@ describe('计划列表卡片映射', () => {
     const [plan] = await listPlans()
 
     expect(plan.overallCompletionRate).toBeNull()
+  })
+})
+
+describe('删除计划', () => {
+  it('携带乐观锁版本和删除原因', async () => {
+    deleteMock.mockResolvedValue(null)
+
+    await deletePlan('1', 2, '清理测试计划')
+
+    expect(deleteMock).toHaveBeenCalledWith('/plans/1', {
+      data: { version: 2, reason: '清理测试计划' },
+    })
   })
 })

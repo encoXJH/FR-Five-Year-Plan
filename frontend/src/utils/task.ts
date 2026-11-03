@@ -35,6 +35,18 @@ export function formatDeadline(input: string | number | Date | null | undefined,
   return { text: base, urgent: false, overdue: false }
 }
 
+/** 年度完成率简单平均：未产生完成值的任务按 0 计入分母。 */
+export function averageTaskYearCompletion(
+  tasks: Pick<TaskListItem, 'completionRate'>[],
+): number | null {
+  if (tasks.length === 0) return null
+  const total = tasks.reduce((sum, task) => {
+    const rate = task.completionRate
+    return sum + (typeof rate === 'number' && Number.isFinite(rate) ? rate : 0)
+  }, 0)
+  return total / tasks.length
+}
+
 /** 完成率（小数）→ 进度条百分比（0–100，超 100 填满） */
 export function progressPercentage(rate: number | null | undefined): number {
   if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0) return 0

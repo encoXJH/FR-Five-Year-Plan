@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canWriteTask, formatDeadline, primaryTaskIndicator, progressPercentage } from '../task'
+import { averageTaskYearCompletion, canWriteTask, formatDeadline, primaryTaskIndicator, progressPercentage } from '../task'
 
 const NOW = new Date('2026-10-22T12:00:00+08:00')
 
@@ -62,5 +62,22 @@ describe('progressPercentage', () => {
     expect(progressPercentage(null)).toBe(0)
     expect(progressPercentage(undefined)).toBe(0)
     expect(progressPercentage(-0.2)).toBe(0)
+  })
+})
+
+describe('averageTaskYearCompletion', () => {
+  it('未产生完成值的任务按 0 计入平均分母', () => {
+    const tasks = [
+      ...Array.from({ length: 13 }, () => ({ completionRate: null })),
+      { completionRate: 1 },
+      { completionRate: 1 },
+      { completionRate: 1 },
+    ]
+
+    expect(averageTaskYearCompletion(tasks)).toBe(3 / 16)
+  })
+
+  it('没有任务时返回 null', () => {
+    expect(averageTaskYearCompletion([])).toBeNull()
   })
 })

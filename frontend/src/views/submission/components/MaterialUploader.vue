@@ -15,6 +15,7 @@ import {
 import FilePreviewDrawer from '@/components/FilePreviewDrawer.vue'
 import { ApiError } from '@/utils/request'
 import { sha256File } from '@/utils/sha256'
+import { createUuid } from '@/utils/uuid'
 import {
   DIRECT_UPLOAD_MAX_SIZE,
   FILE_CATEGORY_COLORS,
@@ -113,7 +114,7 @@ function syncModel(): void {
 
 function pushErrorItem(fileName: string, size: number, message: string): void {
   items.value.push({
-    key: crypto.randomUUID(),
+    key: createUuid(),
     fileName,
     size,
     category: 'ARCHIVE',
@@ -142,7 +143,7 @@ function addFiles(files: File[]): void {
       continue
     }
     const item: UploadItem = {
-      key: crypto.randomUUID(),
+      key: createUuid(),
       fileName: file.name,
       size: file.size,
       category,

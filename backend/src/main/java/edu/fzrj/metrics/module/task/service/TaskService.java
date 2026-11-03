@@ -118,6 +118,14 @@ public class TaskService {
         }
 
         LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<Task>().eq(Task::getDeleted, 0L);
+        List<Long> existingPlanIds = planMapper.selectList(new LambdaQueryWrapper<Plan>()
+                        .eq(Plan::getDeleted, 0L)
+                        .select(Plan::getId))
+                .stream().map(Plan::getId).toList();
+        if (existingPlanIds.isEmpty()) {
+            return new PageResult<>(List.of(), 0L, query.getPage(), query.getPageSize());
+        }
+        wrapper.in(Task::getPlanId, existingPlanIds);
         Long unitId = isUnit ? user.getUnitId() : null;
         List<Long> ownedIndicatorIds = isOwner ? ownedIndicatorIds(user.getUserId()) : List.of();
         if (!isAll) {

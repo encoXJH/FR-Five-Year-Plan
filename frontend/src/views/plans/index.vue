@@ -6,7 +6,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { MoreFilled, Plus } from '@element-plus/icons-vue'
 import ReasonDialog from '@/components/ReasonDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { archivePlan, createPlan, getPlan, listPlans, savePlanAsTemplate } from '@/api/plan'
+import { archivePlan, createPlan, deletePlan, getPlan, listPlans, savePlanAsTemplate } from '@/api/plan'
 import { listTemplates } from '@/api/template'
 import { getTodos, listNotifications, markNotificationRead } from '@/api/todo'
 import { useUserStore } from '@/stores/user'
@@ -158,12 +158,43 @@ async function submitArchive(reason: string): Promise<void> {
   }
 }
 
+const deleteDialogVisible = ref(false)
+const deleteTarget = ref<PlanCard | null>(null)
+const deleting = ref(false)
+
+function openDeleteDialog(plan: PlanCard): void {
+  deleteTarget.value = plan
+  deleteDialogVisible.value = true
+}
+
+async function submitDelete(reason: string): Promise<void> {
+  if (!deleteTarget.value) return
+  const target = deleteTarget.value
+  deleting.value = true
+  try {
+    const detail = await getPlan(target.id)
+    await deletePlan(target.id, detail.version, reason)
+    ElMessage.success(`「${target.name}」已删除`)
+    deleteDialogVisible.value = false
+    if (currentPlanId.value === target.id) {
+      clearCurrentPlan()
+      currentPlanId.value = ''
+    }
+    await loadPlans()
+  } catch {
+    // 拦截器已提示
+  } finally {
+    deleting.value = false
+  }
+}
+
 function handleCardCommand(plan: PlanCard, command: string): void {
   if (command === 'enter') goPlan(plan)
   else if (command === 'current') setAsCurrent(plan)
   else if (command === 'copy') void handleCopy(plan)
   else if (command === 'template') openSaveAsTemplate(plan)
   else if (command === 'archive') openArchiveDialog(plan)
+  else if (command === 'delete') openDeleteDialog(plan)
 }
 
 // ---------- 新建计划 ----------
@@ -374,8 +405,15 @@ useAutoRefresh(() => Promise.all([loadPlans(true), loadTodos(), loadNotification
                 </el-dropdown-item>
                 <el-dropdown-item v-if="canManage" command="copy">复制</el-dropdown-item>
                 <el-dropdown-item v-if="canManage" command="template">另存为模板</el-dropdown-item>
-                <el-dropdown-item v-if="canManage" command="archive" divided>
+                <el-dropdown-item v-if="canManage && plan.status !== 'ARCHIVED'" command="archive" divided>
                   <span class="text-danger">归档</span>
+                </el-dropdown-item>
+                <el-dropdown-item
+                  v-if="canManage && (plan.status === 'DRAFT' || plan.status === 'ARCHIVED')"
+                  command="delete"
+                  divided
+                >
+                  <span class="text-danger">删除</span>
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -543,6 +581,15 @@ useAutoRefresh(() => Promise.all([loadPlans(true), loadTodos(), loadNotification
     confirm-text="确认归档"
     :loading="archiving"
     @confirm="submitArchive"
+  />
+
+  <ReasonDialog
+    v-model="deleteDialogVisible"
+    title="删除计划"
+    :target="deleteTarget ? `${deleteTarget.name}（${deleteTarget.startYear}–${deleteTarget.endYear}） · 删除后不再显示，审计历史保留` : ''"
+    confirm-text="确认删除"
+    :loading="deleting"
+    @confirm="submitDelete"
   />
 </template>
 
