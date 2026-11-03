@@ -118,15 +118,30 @@ onMounted(async () => {
 })
 
 async function handleSubmit(): Promise<void> {
+  // #region debug-point H3:submit-entry
+  fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'login-still-failing', runId: 'pre-fix', hypothesisId: 'H3', location: 'login/index.vue:handleSubmit', msg: '[DEBUG] submit entry', data: { hasForm: !!formRef.value, usernameLength: form.username.length, passwordLength: form.password.length } }) }).catch(() => undefined)
+  // #endregion
   const formEl = formRef.value
   if (!formEl) return
   const valid = await formEl.validate().catch(() => false)
+  // #region debug-point H3:validation-result
+  fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'login-still-failing', runId: 'pre-fix', hypothesisId: 'H3', location: 'login/index.vue:validate', msg: '[DEBUG] validation result', data: { valid } }) }).catch(() => undefined)
+  // #endregion
   if (!valid) return
   loading.value = true
+  // #region debug-point H3:login-call
+  fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'login-still-failing', runId: 'pre-fix', hypothesisId: 'H3', location: 'login/index.vue:login', msg: '[DEBUG] login call', data: {} }) }).catch(() => undefined)
+  // #endregion
   try {
     await userStore.login(form)
+    // #region debug-point H3:login-result
+    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'login-still-failing', runId: 'pre-fix', hypothesisId: 'H3', location: 'login/index.vue:login', msg: '[DEBUG] login success', data: {} }) }).catch(() => undefined)
+    // #endregion
     router.push(redirectTarget())
   } catch {
+    // #region debug-point H3:login-result
+    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'login-still-failing', runId: 'pre-fix', hypothesisId: 'H3', location: 'login/index.vue:login', msg: '[DEBUG] login failed', data: {} }) }).catch(() => undefined)
+    // #endregion
     // 错误提示已由请求拦截器统一展示
   } finally {
     loading.value = false
