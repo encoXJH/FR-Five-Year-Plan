@@ -232,7 +232,7 @@ B 的层级枚举、DTO 字段和统计叶节点只使用上述命名，不提�
 | 场景 | 方式 | 接口 |
 | --- | --- | --- |
 | 飞书内打开（PC / 移动端） | 飞书 H5 免登：前端通过飞书 JSAPI 取得临时授权码 `code`，交给后端换取平台 Token | `POST /auth/feishu/login` |
-| 普通浏览器 | 跳转到飞书 OAuth 授权页，授权后回调平台，再用 `code` 换取 Token | `GET /auth/feishu/authorize-url` → `POST /auth/feishu/login` |
+| 普通浏览器 | 跳转到飞书 OAuth 授权页，授权后由后端完整路径 `/api/callback` 接收并跳转免登页，再用 `code` 换取 Token | `GET /auth/feishu/authorize-url` → `GET /api/callback` → `POST /auth/feishu/login` |
 | 备用 | 账号密码 + 图形验证码 | `POST /auth/login` |
 
 ```mermaid
@@ -759,6 +759,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
+| GET | `/api/callback`（完整路径，不加 `/api/v1`） | 飞书 OAuth 授权结果回调；接收 `code`、`state`、`error`、`error_description`，302 跳转 `/login/feishu-callback`，不直接返回 Token | 公开 |
 | POST | `/auth/feishu/login` | 飞书免登，用 `code` 换取 Token；未配置飞书或身份核验失败 20006，账号停用 / 已绑他人 20006/20007 | 公开 |
 | GET | `/auth/feishu/authorize-url` | 获取浏览器的飞书授权跳转地址（可选 `state` 查询参数）；未配置飞书 20006 | 公开 |
 | GET | `/auth/feishu/config` | 飞书集成可用性 `{ enabled }`；`false` 时前端自动隐藏飞书入口（登录前可查） | 公开 |

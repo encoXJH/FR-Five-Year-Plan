@@ -22,6 +22,7 @@ import {
 import { EMPTY_DISPLAY, formatCount, formatNumber, formatPercent } from '@/utils/format'
 import { formatTargetValue, isPercentCaliber } from '@/utils/indicator'
 import { progressPercentage } from '@/utils/task'
+import { sortUnitStatsByYear, unitStatRate } from '@/utils/stats'
 import { getCurrentPlan, setCurrentPlan } from '@/utils/currentPlan'
 import { useAutoRefresh } from '@/utils/autoRefresh'
 import { useUserStore } from '@/stores/user'
@@ -162,16 +163,22 @@ async function loadPlanContext(): Promise<void> {
 
 let chartFrame: number | null = null
 
+let statsRequestSequence = 0
+
 async function loadStats(silent = false): Promise<void> {
   if (!planId.value) return
+  const requestedPlanId = planId.value
+  const requestedYear = year.value
+  const sequence = ++statsRequestSequence
   if (!silent) loading.value = true
   try {
-    const y = year.value ?? undefined
+    const y = requestedYear ?? undefined
     const [o, u, t] = await Promise.all([
-      getStatsOverview(planId.value, y),
-      getStatsByUnit(planId.value, y),
-      getStatsTree(planId.value, y),
+      getStatsOverview(requestedPlanId, y),
+      getStatsByUnit(requestedPlanId, y),
+      getStatsTree(requestedPlanId, y),
     ])
+    if (sequence !== statsRequestSequence) return
     overview.value = o
     byUnit.value = u
     tree.value = t
@@ -183,7 +190,7 @@ async function loadStats(silent = false): Promise<void> {
       renderComboChart()
     })
   } finally {
-    if (!silent) loading.value = false
+    if (sequence === statsRequestSequence && !silent) loading.value = false
   }
 }
 
@@ -214,7 +221,8 @@ function handleYearChange(): void {
 const unitChart = useEChart()
 
 function renderUnitChart(): void {
-  const sorted = [...byUnit.value].sort((a, b) => (b.cumulativeRate ?? -1) - (a.cumulativeRate ?? -1))
+  const selectedYear = year.value
+  const sorted = sortUnitStatsByYear(byUnit.value, selectedYear)
   unitChart.setOption({
     animation: false,
     grid: { left: 8, right: 48, top: 8, bottom: 8, containLabel: true },
@@ -229,17 +237,21 @@ function renderUnitChart(): void {
       {
         type: 'bar',
         barWidth: 14,
-        data: sorted.map((item) => ({
-          value: item.cumulativeRate == null ? 0 : Number((item.cumulativeRate * 100).toFixed(1)),
-          itemStyle: { color: '#2B5BC0', borderRadius: [0, 3, 3, 0] },
-        })),
+        data: sorted.map((item) => {
+          const rate = unitStatRate(item, selectedYear)
+          return {
+            value: rate == null ? 0 : Number((rate * 100).toFixed(1)),
+            itemStyle: { color: '#2B5BC0', borderRadius: [0, 3, 3, 0] },
+          }
+        }),
         label: {
           show: true,
           position: 'right',
-          formatter: (p: { dataIndex: number }) =>
-            sorted[p.dataIndex]?.cumulativeRate == null
-              ? EMPTY_DISPLAY
-              : `${(sorted[p.dataIndex].cumulativeRate! * 100).toFixed(1)}%`,
+          formatter: (p: { dataIndex: number }) => {
+            const item = sorted[p.dataIndex]
+            const rate = item ? unitStatRate(item, selectedYear) : null
+            return rate == null ? EMPTY_DISPLAY : `${(rate * 100).toFixed(1)}%`
+          },
         },
       },
     ],
@@ -392,10 +404,22 @@ onBeforeUnmount(() => {
 })
 
 // ---------- 初始化 ----------
+let plansRequestSequence = 0
+
+async function loadPlanOptions(): Promise<void> {
+  const sequence = ++plansRequestSequence
+  const result = await listPlans()
+  if (sequence === plansRequestSequence) plans.value = result
+}
+
+function handlePlanDropdownChange(visible: boolean): void {
+  if (visible) void loadPlanOptions().catch(() => undefined)
+}
+
 onMounted(async () => {
   loading.value = true
   try {
-    plans.value = await listPlans()
+    await loadPlanOptions()
     if (!planId.value && plans.value.length > 0) {
       const current = getCurrentPlan()
       const fallback = plans.value.find((p) => p.id === current?.id)
@@ -455,7 +479,12 @@ useAutoRefresh(async () => {
     <el-card shadow="never" class="filter-card">
       <el-form inline class="stats-filter" @submit.prevent>
         <el-form-item label="计划">
-          <el-select v-model="planId" class="plan-select" @change="handlePlanChange">
+          <el-select
+            v-model="planId"
+            class="plan-select"
+            @change="handlePlanChange"
+            @visible-change="handlePlanDropdownChange"
+          >
             <el-option v-for="p in plans" :key="p.id" :label="p.name" :value="p.id" />
           </el-select>
         </el-form-item>
@@ -516,7 +545,11 @@ useAutoRefresh(async () => {
 
       <div class="chart-row">
         <el-card shadow="never" class="chart-card">
-          <template #header><span class="card-title">执行单元五年累计完成率排名</span></template>
+          <template #header>
+            <span class="card-title">
+              {{ year === null ? '执行单元五年累计完成率排名' : `执行单元${year}年完成率排名` }}
+            </span>
+          </template>
           <div v-if="byUnit.length === 0" class="chart-empty">暂无数据</div>
           <div v-show="byUnit.length > 0" :ref="unitChart.container" class="chart-box" />
         </el-card>

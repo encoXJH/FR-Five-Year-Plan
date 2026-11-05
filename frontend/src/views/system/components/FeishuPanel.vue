@@ -24,9 +24,9 @@ const eventCallbackUrl = computed(
 const cardActionCallbackUrl = computed(
   () => `${window.location.origin}/api/v1/integrations/feishu/card-actions`,
 )
-/** 免登 / OAuth 回调地址（前端路由，供配置到飞书后台「重定向 URL」） */
+/** 免登 / OAuth 回调地址（后端接收后转发现行免登页，供配置到飞书后台「重定向 URL」） */
 const authorizeCallbackUrl = computed(
-  () => status.value?.authorizeCallbackUrl ?? `${window.location.origin}/login/feishu-callback`,
+  () => status.value?.authorizeCallbackUrl ?? `${window.location.origin}/api/callback`,
 )
 
 const lastSyncText = computed(() => {

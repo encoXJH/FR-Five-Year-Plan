@@ -50,6 +50,18 @@ describe('计划列表卡片映射', () => {
     await expect(listPlans()).resolves.toHaveLength(1)
   })
 
+  it('完整保留后端返回的多张计划', async () => {
+    getMock.mockResolvedValue([
+      responseItem,
+      { ...responseItem, id: '2', name: '专业群建设计划' },
+    ])
+
+    const plans = await listPlans()
+
+    expect(plans.map((plan) => plan.id)).toEqual(['1', '2'])
+    expect(plans.map((plan) => plan.name)).toEqual(['学院关联计划', '专业群建设计划'])
+  })
+
   it('有学院任务但完成率为空时按 0% 展示', async () => {
     getMock.mockResolvedValue([{ ...responseItem, completionRate: null, taskCountB: 2 }])
 
