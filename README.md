@@ -15,7 +15,7 @@
 # 1. 配置环境变量
 cp .env.example .env   # 按需修改数据库密码、JWT 密钥等
 
-# 2. 后端（首次启动 Flyway 自动建表 + 写入种子数据）
+# 2. 后端（首次启动 Flyway 自动建表 + 写入种子数据，含两张正式计划及指标/任务业务数据）
 cd backend
 ./mvnw spring-boot:run
 # Swagger UI: http://localhost:8081/swagger-ui.html（生产环境自动关闭）
