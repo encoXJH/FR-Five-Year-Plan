@@ -22,7 +22,7 @@ public class OrgUnit {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
-    /** 单元编码，如 C01，用于 B 任务编号 */
+    /** 单元数字编码，如 01、02，用于新 B 任务编号 */
     private String code;
 
     /** 单元名称 */

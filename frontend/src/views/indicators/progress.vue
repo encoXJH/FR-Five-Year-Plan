@@ -141,7 +141,9 @@ async function load(silent = false): Promise<void> {
     let nextOrder = 0
     for (const node of indicatorTree) {
       if (node.level !== 'A') continue
-      const name = node.directionName?.trim() || '未归入建设方向'
+      const name = node.directionName?.trim()
+        ? node.directionName
+        : '未归入建设方向'
       directionNameById.set(node.id, name)
       if (orders[name] === undefined) orders[name] = nextOrder++
     }

@@ -38,7 +38,7 @@ public final class StatsDtos {
             Integer year,
             BigDecimal timeProgress,
             BigDecimal overallCompletionRate,
-            /** 五年累计完成率：各 A 指标累计完成率（累计完成 ÷ 五年总量目标）的算术平均；无数据为 null */
+            /** 五年累计完成率：有效 A 指标累计完成率的算术平均；未产生完成值按 0 计入，无可统计指标为 null */
             BigDecimal cumulativeCompletionRate,
             long constraintTotal,
             long constraintAchieved,
@@ -60,7 +60,7 @@ public final class StatsDtos {
             long taskCount,
             long achievedCount,
             BigDecimal completionRate,
-            /** 五年累计完成率：该单元可见 B 任务累计完成率的算术平均；无数据为 null */
+            /** 五年累计完成率：该单元有效 B 任务累计完成率的算术平均；未产生完成值按 0 计入 */
             BigDecimal cumulativeRate,
             int rank) {
     }
@@ -74,7 +74,7 @@ public final class StatsDtos {
             long taskCount,
             long achievedCount,
             BigDecimal completionRate,
-            /** 五年累计完成率：该 A 下可见 B 任务累计完成率的算术平均，保留历史任务；无数据为 null */
+            /** 五年累计完成率：按 A 汇总完成值后除以五年目标，保留历史任务；未产生完成值按 0 计入 */
             BigDecimal cumulativeRate) {
     }
 

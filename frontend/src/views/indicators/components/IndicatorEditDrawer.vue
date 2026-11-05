@@ -28,7 +28,7 @@ export interface IndicatorDirectionOption {
   id: string
   name?: string
   label?: string
-  code?: string
+  code?: string | null
 }
 
 const props = withDefaults(defineProps<{
@@ -131,7 +131,9 @@ const showUnit = computed(() => form.statCaliber !== 'BOOLEAN')
 const directionSelectOptions = computed(() => {
   const options = props.directionOptions.map((option) => ({
     ...option,
-    text: option.name ?? option.label ?? option.code ?? option.id,
+    text: option.name || option.label
+      ? option.name ?? option.label
+      : option.code ?? option.id,
   }))
   if (form.directionId && !options.some((option) => option.id === form.directionId)) {
     options.unshift({ id: form.directionId, text: '当前建设方向' })

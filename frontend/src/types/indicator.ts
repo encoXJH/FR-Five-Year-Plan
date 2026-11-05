@@ -29,6 +29,7 @@ export interface Indicator {
   subjectType: SubjectType
   /** 仅 ADMIN 的 S 归属管理使用，普通业务页面不得展示 */
   directionId?: string | null
+  directionCode?: string | null
   directionName?: string | null
   sort?: number | null
   measureType: MeasureType | null

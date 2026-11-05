@@ -10,7 +10,9 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 汇总一致性纯逻辑验证（大屏数字与统计接口一致）：
@@ -93,6 +95,17 @@ class StatsConsistencyTest {
         // 88/150 ≈ 0.586667；错误平均 (0.6+0.56)/2 = 0.58
         assertEquals(0, bd("0.586667").compareTo(rollup.actualValue()));
         assertNotEquals(0, bd("0.58").compareTo(rollup.actualValue()));
+    }
+
+    @Test
+    void 越小越好年度与五年判定方向一致() {
+        YearResult withinTarget = new YearResult(bd("8"), null, null, bd("8"), null, null);
+        YearResult aboveTarget = new YearResult(bd("12"), null, null, bd("12"), null, null);
+
+        assertTrue(MetricCalculator.achieved("LOWER_BETTER", "STOCK", withinTarget, bd("10")));
+        assertFalse(MetricCalculator.achieved("LOWER_BETTER", "STOCK", aboveTarget, bd("10")));
+        assertTrue(SettlementRules.fiveYearAchieved("LOWER_BETTER", "STOCK", bd("8"), bd("10")));
+        assertFalse(SettlementRules.fiveYearAchieved("LOWER_BETTER", "STOCK", bd("12"), bd("10")));
     }
 
     @Test

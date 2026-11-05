@@ -39,13 +39,17 @@ public class OrgUnitAdminService {
 
     @Transactional
     public SystemDtos.OrgUnitView create(SystemDtos.OrgUnitCreateRequest request) {
-        String code = request.getCode().trim().toUpperCase();
-        if (!code.matches("[A-Z0-9]{1,16}")) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "单元编码只允许大写字母与数字");
-        }
         if (!TYPES.contains(request.getType())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "单元类型取值不合法：" + request.getType());
         }
+        int maxSequence = orgUnitMapper.selectList(new LambdaQueryWrapper<OrgUnit>()
+                        .select(OrgUnit::getCode))
+                .stream()
+                .map(OrgUnit::getCode)
+                .filter(code -> code != null && code.matches("\\d+"))
+                .mapToInt(Integer::parseInt)
+                .max().orElse(0);
+        String code = String.format("%02d", maxSequence + 1);
         Long duplicate = orgUnitMapper.selectCount(new LambdaQueryWrapper<OrgUnit>()
                 .eq(OrgUnit::getCode, code)
                 .eq(OrgUnit::getDeleted, 0L));

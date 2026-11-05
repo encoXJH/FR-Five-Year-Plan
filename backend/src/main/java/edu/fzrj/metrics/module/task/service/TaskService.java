@@ -6,6 +6,8 @@ import edu.fzrj.metrics.common.api.PageResult;
 import edu.fzrj.metrics.common.datascope.DataScopeService;
 import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
+import edu.fzrj.metrics.module.file.entity.FileRef;
+import edu.fzrj.metrics.module.file.mapper.FileRefMapper;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
 import edu.fzrj.metrics.module.plan.entity.Plan;
@@ -19,6 +21,8 @@ import edu.fzrj.metrics.module.system.service.OrgUnitAdminService;
 import edu.fzrj.metrics.module.system.service.SettingService;
 import edu.fzrj.metrics.module.system.service.UserRefResolver;
 import edu.fzrj.metrics.module.stats.service.support.CumulativeCalculator;
+import edu.fzrj.metrics.module.submission.entity.Submission;
+import edu.fzrj.metrics.module.submission.mapper.SubmissionMapper;
 import edu.fzrj.metrics.module.task.dto.TaskDtos;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
@@ -35,6 +39,7 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -64,12 +69,15 @@ public class TaskService {
     private final UserRefResolver userRefResolver;
     private final DataScopeService dataScopeService;
     private final SettingService settingService;
+    private final SubmissionMapper submissionMapper;
+    private final FileRefMapper fileRefMapper;
 
     public TaskService(TaskMapper taskMapper, TaskYearMapper taskYearMapper,
                        IndicatorMapper indicatorMapper, OrgUnitMapper orgUnitMapper,
                        PlanMapper planMapper, PlanYearMapper planYearMapper,
                        UserRefResolver userRefResolver, DataScopeService dataScopeService,
-                       SettingService settingService) {
+                       SettingService settingService, SubmissionMapper submissionMapper,
+                       FileRefMapper fileRefMapper) {
         this.taskMapper = taskMapper;
         this.taskYearMapper = taskYearMapper;
         this.indicatorMapper = indicatorMapper;
@@ -79,6 +87,8 @@ public class TaskService {
         this.userRefResolver = userRefResolver;
         this.dataScopeService = dataScopeService;
         this.settingService = settingService;
+        this.submissionMapper = submissionMapper;
+        this.fileRefMapper = fileRefMapper;
     }
 
     /** 填报截止日（YYYY-MM-DD）：年度 + 系统参数 plan.fillDeadline（默认 12-31，界面设计规范 A8） */
@@ -101,7 +111,7 @@ public class TaskService {
 
     // ---------------- 查询 ----------------
 
-    /** 分页列表：过滤 unitId / indicatorId / year / status / yearStatus / isHistorical；按数据范围（单元 ∪ 负责人）过滤 */
+    /** 分页列表：过滤 planId / unitId / indicatorId / year / status / yearStatus / isHistorical；按数据范围（单元 ∪ 负责人）过滤 */
     public PageResult<TaskDtos.TaskListItem> page(TaskDtos.TaskQuery query) {
         LoginUser user = SecurityUtils.getLoginUser();
         boolean isAll = dataScopeService.isAllData(user);
@@ -148,6 +158,7 @@ public class TaskService {
             });
         }
         // 学院端可见本单元全部任务；未下发任务只读，填报入口由任务状态与年度状态共同限制
+        wrapper.eq(query.getPlanId() != null, Task::getPlanId, query.getPlanId());
         wrapper.eq(query.getUnitId() != null, Task::getUnitId, query.getUnitId());
         if (query.getIndicatorId() != null) {
             wrapper.and(w -> w.eq(Task::getIndicatorId, query.getIndicatorId())
@@ -308,14 +319,36 @@ public class TaskService {
                 .stream().collect(Collectors.toMap(PlanYear::getPlanId, PlanYear::getYear, Math::max));
         String fillDeadline = tasks.stream().anyMatch(t -> queryYear != null || activeYearByPlan.containsKey(t.getPlanId()))
                 ? settingService.getValue("plan.fillDeadline", "12-31") : null;
+        Map<Long, Integer> displayYearByTask = tasks.stream().collect(HashMap::new,
+                (map, t) -> map.put(t.getId(), queryYear != null ? queryYear : activeYearByPlan.get(t.getPlanId())),
+                HashMap::putAll);
+        List<Integer> displayYears = displayYearByTask.values().stream().filter(Objects::nonNull).distinct().toList();
+        List<Submission> submissions = displayYears.isEmpty() ? List.of()
+                : submissionMapper.selectList(new LambdaQueryWrapper<Submission>()
+                        .in(Submission::getTaskId, taskIds)
+                        .in(Submission::getYear, displayYears)
+                        .eq(Submission::getDeleted, 0L));
+        Map<String, Submission> submissionByTaskYear = submissions.stream().collect(Collectors.toMap(
+                s -> s.getTaskId() + ":" + s.getYear(), Function.identity(), (first, ignored) -> first));
+        List<Long> submissionIds = submissions.stream().map(Submission::getId).toList();
+        Map<Long, Long> fileCounts = submissionIds.isEmpty() ? Map.of()
+                : fileRefMapper.selectList(new LambdaQueryWrapper<FileRef>()
+                        .eq(FileRef::getBizType, "SUBMISSION")
+                        .in(FileRef::getBizId, submissionIds)
+                        .select(FileRef::getBizId))
+                .stream().collect(Collectors.groupingBy(FileRef::getBizId, Collectors.counting()));
         return tasks.stream()
                 .map(t -> {
                     Indicator indicator = refs.indicators().get(t.getIndicatorId());
                     String caliber = indicator == null ? null : indicator.getStatCaliber();
                     List<TaskYear> years = yearsByTask.getOrDefault(t.getId(), List.of());
-                    Integer displayYear = queryYear != null ? queryYear : activeYearByPlan.get(t.getPlanId());
+                    Integer displayYear = displayYearByTask.get(t.getId());
                     TaskYear current = displayYear == null ? null : years.stream()
                             .filter(y -> displayYear.equals(y.getYear())).findFirst().orElse(null);
+                    Submission submission = displayYear == null ? null
+                            : submissionByTaskYear.get(t.getId() + ":" + displayYear);
+                    long fileCount = submission == null ? 0L : fileCounts.getOrDefault(submission.getId(), 0L);
+                    int requiredFileCount = requiredFileCount(indicator);
                     CumulativeCalculator.Cumulative cumulative = CumulativeCalculator.ofTask(caliber, years);
                     return new TaskDtos.TaskListItem(t.getId(), t.getPlanId(), t.getCode(),
                             indicatorRef(indicator),
@@ -330,13 +363,35 @@ public class TaskService {
                                             AllocationService.toTargetView(caliber, y.getTarget())))
                                     .toList(),
                             current == null ? null : current.getActualValue(),
+                            adjustableAmountOf(caliber, current),
                             current == null ? null : current.getCompletionRate(),
                             cumulative.actual(), cumulative.rate(),
                             current == null ? null : current.getYearStatus(),
                             t.getDistributedAt(), t.getAcceptedAt(),
-                            fillDeadlineOfYear(displayYear, fillDeadline), t.getVersion());
+                            fillDeadlineOfYear(displayYear, fillDeadline), displayYear,
+                            submission == null ? null : submission.getId(),
+                            submission == null ? null : submission.getStatus(), fileCount, requiredFileCount,
+                            t.getVersion());
                 })
                 .toList();
+    }
+
+    private BigDecimal adjustableAmountOf(String caliber, TaskYear current) {
+        if (current == null || !"INCREMENT".equals(caliber)) {
+            return null;
+        }
+        BigDecimal target = current.getTarget() == null ? BigDecimal.ZERO : current.getTarget();
+        BigDecimal actual = current.getActualValue() == null ? BigDecimal.ZERO : current.getActualValue();
+        BigDecimal frozen = current.getFrozenAmount() == null ? BigDecimal.ZERO : current.getFrozenAmount();
+        return target.subtract(actual).subtract(frozen);
+    }
+
+    private int requiredFileCount(Indicator indicator) {
+        if (indicator == null) {
+            return 0;
+        }
+        int configured = indicator.getMinFileCount() == null ? 0 : Math.max(0, indicator.getMinFileCount());
+        return "DIRECT_PERCENT".equals(indicator.getStatCaliber()) ? Math.max(1, configured) : configured;
     }
 
     /** B 五年目标：INCREMENT 各年之和；BOOLEAN 规划期内有计划完成年即 true；其余口径取末年目标 */

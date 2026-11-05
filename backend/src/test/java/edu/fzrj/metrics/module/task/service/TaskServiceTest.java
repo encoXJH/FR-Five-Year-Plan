@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import edu.fzrj.metrics.common.api.PageResult;
 import edu.fzrj.metrics.common.datascope.DataScopeService;
 import edu.fzrj.metrics.common.exception.BizException;
+import edu.fzrj.metrics.module.file.entity.FileRef;
+import edu.fzrj.metrics.module.file.mapper.FileRefMapper;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
 import edu.fzrj.metrics.module.plan.entity.Plan;
@@ -16,6 +18,8 @@ import edu.fzrj.metrics.module.system.entity.OrgUnit;
 import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.service.SettingService;
 import edu.fzrj.metrics.module.system.service.UserRefResolver;
+import edu.fzrj.metrics.module.submission.entity.Submission;
+import edu.fzrj.metrics.module.submission.mapper.SubmissionMapper;
 import edu.fzrj.metrics.module.task.dto.TaskDtos;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
@@ -67,6 +71,10 @@ class TaskServiceTest {
     private DataScopeService dataScopeService;
     @Mock
     private SettingService settingService;
+    @Mock
+    private SubmissionMapper submissionMapper;
+    @Mock
+    private FileRefMapper fileRefMapper;
 
     @InjectMocks
     private TaskService taskService;
@@ -80,6 +88,8 @@ class TaskServiceTest {
         TableInfoHelper.initTableInfo(assistant, OrgUnit.class);
         TableInfoHelper.initTableInfo(assistant, Plan.class);
         TableInfoHelper.initTableInfo(assistant, PlanYear.class);
+        TableInfoHelper.initTableInfo(assistant, Submission.class);
+        TableInfoHelper.initTableInfo(assistant, FileRef.class);
     }
 
     @Test
@@ -112,7 +122,7 @@ class TaskServiceTest {
     }
 
     @Test
-    void 多行任务列表只读取一次填报截止参数() {
+    void 多行任务列表批量装载截止参数与材料摘要() {
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
                 new LoginUser(201L, "admin", "管理员", null, List.of("ADMIN"), List.of()), null, List.of()));
         when(dataScopeService.isAllData(any())).thenReturn(true);
@@ -121,17 +131,22 @@ class TaskServiceTest {
         when(planMapper.selectList(any())).thenReturn(List.of(plan));
 
         Task first = task(1L, "A01-1-C01");
-        Task second = task(2L, "A01-1-C02");
+        Task second = task(2L, "A02-01");
+        second.setIndicatorId(101L);
+        second.setTopIndicatorId(101L);
         Page<Task> taskPage = new Page<>();
         taskPage.setRecords(List.of(first, second));
         taskPage.setTotal(2);
         when(taskMapper.selectPage(any(), any())).thenReturn(taskPage);
 
         TaskYear firstYear = taskYear(11L, 1L);
+        firstYear.setActualValue(new BigDecimal("0.25"));
+        firstYear.setFrozenAmount(new BigDecimal("0.15"));
         TaskYear firstNextYear = taskYear(13L, 1L);
         firstNextYear.setYear(2027);
         firstNextYear.setTarget(BigDecimal.valueOf(2));
         TaskYear secondYear = taskYear(12L, 2L);
+        secondYear.setIndicatorId(101L);
         when(taskYearMapper.selectList(any())).thenReturn(List.of(firstNextYear, firstYear, secondYear));
 
         Indicator indicator = new Indicator();
@@ -139,7 +154,14 @@ class TaskServiceTest {
         indicator.setCode("A01-1");
         indicator.setName("测试指标");
         indicator.setStatCaliber("INCREMENT");
-        when(indicatorMapper.selectList(any())).thenReturn(List.of(indicator));
+        indicator.setMinFileCount(2);
+        Indicator directPercent = new Indicator();
+        directPercent.setId(101L);
+        directPercent.setCode("A02");
+        directPercent.setName("直填百分比指标");
+        directPercent.setStatCaliber("DIRECT_PERCENT");
+        directPercent.setMinFileCount(0);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(indicator, directPercent));
         when(orgUnitMapper.selectList(any())).thenReturn(List.of(new OrgUnit()));
         when(userRefResolver.mapOf(any())).thenReturn(Map.of());
 
@@ -149,6 +171,12 @@ class TaskServiceTest {
         active.setStatus("ACTIVE");
         when(planYearMapper.selectList(any())).thenReturn(List.of(active));
         when(settingService.getValue("plan.fillDeadline", "12-31")).thenReturn("12-31");
+
+        Submission firstSubmission = submission(1001L, 1L, "PENDING_REVIEW");
+        Submission secondSubmission = submission(1002L, 2L, "REJECTED");
+        when(submissionMapper.selectList(any())).thenReturn(List.of(firstSubmission, secondSubmission));
+        when(fileRefMapper.selectList(any())).thenReturn(List.of(
+                fileRef(1001L), fileRef(1001L), fileRef(1002L)));
 
         TaskDtos.TaskQuery query = new TaskDtos.TaskQuery();
         query.setYear(2026);
@@ -160,7 +188,22 @@ class TaskServiceTest {
         assertEquals(List.of(2026, 2027), result.getItems().get(0).yearTargets().stream()
                 .map(TaskDtos.YearTargetView::year).toList());
         assertEquals(BigDecimal.valueOf(2), result.getItems().get(0).yearTargets().get(1).target());
+        TaskDtos.TaskListItem firstItem = result.getItems().get(0);
+        TaskDtos.TaskListItem secondItem = result.getItems().get(1);
+        assertEquals(2026, firstItem.displayYear());
+        assertEquals(new BigDecimal("0.60"), firstItem.adjustableAmount());
+        assertEquals(null, secondItem.adjustableAmount());
+        assertEquals(1001L, firstItem.latestSubmissionId());
+        assertEquals("PENDING_REVIEW", firstItem.latestSubmissionStatus());
+        assertEquals(2, firstItem.fileCount());
+        assertEquals(2, firstItem.requiredFileCount());
+        assertEquals(1002L, secondItem.latestSubmissionId());
+        assertEquals("REJECTED", secondItem.latestSubmissionStatus());
+        assertEquals(1, secondItem.fileCount());
+        assertEquals(1, secondItem.requiredFileCount());
         verify(settingService, times(1)).getValue("plan.fillDeadline", "12-31");
+        verify(submissionMapper, times(1)).selectList(any());
+        verify(fileRefMapper, times(1)).selectList(any());
     }
 
     @Test
@@ -175,6 +218,22 @@ class TaskServiceTest {
         assertEquals(0, result.getTotal());
         assertEquals(0, result.getItems().size());
         verify(taskMapper, never()).selectPage(any(), any());
+    }
+
+    private Submission submission(Long id, Long taskId, String status) {
+        Submission submission = new Submission();
+        submission.setId(id);
+        submission.setTaskId(taskId);
+        submission.setYear(2026);
+        submission.setStatus(status);
+        return submission;
+    }
+
+    private FileRef fileRef(Long submissionId) {
+        FileRef fileRef = new FileRef();
+        fileRef.setBizType("SUBMISSION");
+        fileRef.setBizId(submissionId);
+        return fileRef;
     }
 
     private Task task(Long id, String code) {

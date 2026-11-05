@@ -47,6 +47,43 @@ export function averageTaskYearCompletion(
   return total / tasks.length
 }
 
+export type TaskMaterialStatus = 'NOT_UPLOADED' | 'NOT_SUBMITTED' | 'PENDING_REVIEW' | 'APPROVED'
+
+export interface TaskMaterialState {
+  status: TaskMaterialStatus
+  label: '未上传' | '未提交' | '审核中' | '已通过'
+  tagType: 'info' | 'warning' | 'success'
+  fileCount: number
+  requiredFileCount: number
+  /** 审核中与已通过不提示缺材料，其余状态为仍需补充的份数 */
+  missingCount: number
+}
+
+/** 工作台材料状态：只依据展示年度最新提交及其附件数，不影响填报权限判断。 */
+export function taskMaterialState(
+  task: Pick<TaskListItem, 'latestSubmissionStatus' | 'fileCount' | 'requiredFileCount'>,
+): TaskMaterialState {
+  const fileCount = Math.max(0, task.fileCount ?? 0)
+  const requiredFileCount = Math.max(0, task.requiredFileCount ?? 0)
+  const submissionStatus = task.latestSubmissionStatus
+  let status: TaskMaterialStatus = 'NOT_UPLOADED'
+  if (submissionStatus === 'PENDING_REVIEW' || submissionStatus === 'APPROVED') {
+    status = submissionStatus
+  } else if (submissionStatus && fileCount > 0) {
+    status = 'NOT_SUBMITTED'
+  }
+  const display = {
+    NOT_UPLOADED: { label: '未上传', tagType: 'info' },
+    NOT_SUBMITTED: { label: '未提交', tagType: 'warning' },
+    PENDING_REVIEW: { label: '审核中', tagType: 'warning' },
+    APPROVED: { label: '已通过', tagType: 'success' },
+  } as const
+  const missingCount = status === 'PENDING_REVIEW' || status === 'APPROVED'
+    ? 0
+    : Math.max(0, requiredFileCount - fileCount)
+  return { status, ...display[status], fileCount, requiredFileCount, missingCount }
+}
+
 /** 完成率（小数）→ 进度条百分比（0–100，超 100 填满） */
 export function progressPercentage(rate: number | null | undefined): number {
   if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0) return 0

@@ -194,6 +194,44 @@ class IndicatorRulesTest {
     }
 
     @Test
+    void 编号生成_不同建设方向独立取号() {
+        Set<String> existing = Set.of("A09", "B01", "B03", "B01-2");
+        assertEquals("A10", IndicatorRules.nextACode("A", existing));
+        assertEquals("B04", IndicatorRules.nextACode("B", existing));
+        assertEquals("AA01", IndicatorRules.nextACode("AA", existing));
+        assertEquals("AA100", IndicatorRules.nextACode("AA", Set.of("AA99")));
+    }
+
+    @Test
+    void 编号生成_校验指标属于指定建设方向() {
+        assertTrue(IndicatorRules.isACodeForDirection("B01", "B"));
+        assertTrue(IndicatorRules.isACodeForDirection("AA01", "AA"));
+        assertFalse(IndicatorRules.isACodeForDirection("A01", "B"));
+        assertDoesNotThrow(() -> IndicatorRules.requireCodeFormat("A", "B01"));
+        assertDoesNotThrow(() -> IndicatorRules.requireCodeFormat("A", "AA01"));
+        assertThrows(IllegalArgumentException.class, () -> IndicatorRules.nextACode("b", Set.of()));
+    }
+
+    @Test
+    void 建设方向编号超出Z后按整轮重复字母() {
+        assertEquals("A", IndicatorRules.directionCode(1));
+        assertEquals("Z", IndicatorRules.directionCode(26));
+        assertEquals("AA", IndicatorRules.directionCode(27));
+        assertEquals("BB", IndicatorRules.directionCode(28));
+        assertEquals("ZZ", IndicatorRules.directionCode(52));
+        assertEquals("AAA", IndicatorRules.directionCode(53));
+        assertThrows(IllegalArgumentException.class, () -> IndicatorRules.directionCode(0));
+    }
+
+    @Test
+    void 建设方向编号取历史最大序号且不因删除复用() {
+        assertEquals("A", IndicatorRules.nextDirectionCode(List.of()));
+        assertEquals("AA", IndicatorRules.nextDirectionCode(List.of("A", "B", "Z")));
+        assertEquals("CC", IndicatorRules.nextDirectionCode(List.of("A", "Z", "AA", "BB")));
+        assertEquals("AAA", IndicatorRules.nextDirectionCode(List.of("A", "ZZ", "INVALID", "AB")));
+    }
+
+    @Test
     void 编号生成_A加取父编号下最大加一() {
         assertEquals("A01-1", IndicatorRules.nextAPlusCode("A01", Set.of()));
         assertEquals("A01-3", IndicatorRules.nextAPlusCode("A01", Set.of("A01-1", "A01-2", "A02-9")));

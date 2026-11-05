@@ -210,13 +210,13 @@ export function rowsMissingOwner(rows: MatrixRow[]): MatrixRow[] {
   return rows.filter((row) => !row.isHistorical && rowHasTarget(row.targets) && !row.ownerId)
 }
 
-/** 百分比输入框显示值（存储小数 ×100，1 位小数） */
+/** 百分比输入框显示值（存储小数 ×100，最多 4 位小数） */
 export function percentToDisplay(value: number | null | undefined): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
-  return Math.round(value * 1000) / 10
+  return Math.round(value * 1000000) / 10000
 }
 
-/** 百分比输入框回存（÷100，最多 4 位小数） */
+/** 百分比输入框回存（÷100，最多 6 位小数） */
 export function percentToStore(value: number | null | undefined): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
   return Math.round(value * 10000) / 1000000

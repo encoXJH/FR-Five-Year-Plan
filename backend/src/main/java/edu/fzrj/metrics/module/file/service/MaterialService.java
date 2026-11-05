@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /** 材料库：跨学院检索、指标关联绑定与数据范围控制。 */
@@ -62,17 +63,21 @@ public class MaterialService {
                 .eq(Indicator::getDeleted, 0L)
                 .eq(planId != null, Indicator::getPlanId, planId)
                 .orderByAsc(Indicator::getCode));
-        Map<Long, String> directionNames = directionMapper.selectList(new LambdaQueryWrapper<Direction>()
+        Map<Long, Direction> directions = directionMapper.selectList(new LambdaQueryWrapper<Direction>()
                         .eq(planId != null, Direction::getPlanId, planId)
                         .eq(Direction::getDeleted, 0L)
                         .orderByAsc(Direction::getSort))
                 .stream()
-                .collect(Collectors.toMap(Direction::getId, Direction::getName, (left, right) -> left));
+                .collect(Collectors.toMap(Direction::getId, Function.identity(), (left, right) -> left));
         Set<Long> visibleIds = visibleIndicatorIds(user, planId);
         return indicators.stream()
                 .filter(item -> visibleIds.contains(item.getId()))
-                .map(item -> new MaterialDtos.IndicatorOption(item.getId(), item.getCode(), item.getName(),
-                        directionNames.get(item.getDirectionId())))
+                .map(item -> {
+                    Direction direction = directions.get(item.getDirectionId());
+                    return new MaterialDtos.IndicatorOption(item.getId(), item.getCode(), item.getName(),
+                            direction == null ? null : direction.getCode(),
+                            direction == null ? null : direction.getName());
+                })
                 .toList();
     }
 
@@ -90,7 +95,7 @@ public class MaterialService {
         String normalizedKeyword = StringUtils.hasText(keyword) ? keyword.trim().toLowerCase() : null;
         MaterialQuery query = new MaterialQuery(
                 planId, indicatorId, unitId, taskId, year, category, normalizedKeyword, scope[0], scope[1],
-                safePageSize, (long) (safePage - 1) * safePageSize);
+                null, safePageSize, (long) (safePage - 1) * safePageSize);
         long total = materialQueryMapper.countMaterials(query);
         List<MaterialDtos.MaterialItem> items = total == 0 ? List.of() : materialQueryMapper.selectMaterials(query)
                 .stream().map(this::toItem).toList();
@@ -104,7 +109,39 @@ public class MaterialService {
             return List.of();
         }
         return materialQueryMapper.countByIndicator(
-                new MaterialQuery(planId, null, null, null, null, null, null, scope[0], scope[1], 0, 0));
+                new MaterialQuery(planId, null, null, null, null, null, null, scope[0], scope[1], null, 0, 0));
+    }
+
+    /** ZIP 创建前在登录上下文逐文件校验材料库可见性，异步线程只接收已授权的文件 ID。 */
+    public void requireExportable(List<Long> fileIds) {
+        LoginUser user = SecurityUtils.getLoginUser();
+        if (!user.getPermissions().contains("material:view")) {
+            throw new BizException(ErrorCode.FORBIDDEN, "没有材料导出权限");
+        }
+        if (fileIds == null || fileIds.isEmpty()) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "请至少选择一份材料");
+        }
+        Long[] scope = resolveScope(user);
+        if (scope == null) {
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
+        }
+        for (Long fileId : fileIds) {
+            FileInfo file = fileInfoMapper.selectOne(new LambdaQueryWrapper<FileInfo>()
+                    .eq(FileInfo::getId, fileId)
+                    .eq(FileInfo::getDeleted, 0L));
+            if (file == null) {
+                throw new BizException(ErrorCode.FILE_NOT_FOUND, "材料文件不存在或已删除：" + fileId);
+            }
+        }
+        List<MaterialRow> rows = materialQueryMapper.selectMaterials(new MaterialQuery(
+                null, null, null, null, null, null, null, scope[0], scope[1], fileIds, 0, 0));
+        Set<Long> visibleIds = rows.stream().map(MaterialRow::getFileId).collect(Collectors.toSet());
+        for (Long fileId : fileIds) {
+            if (!visibleIds.contains(fileId)) {
+                throw new BizException(ErrorCode.DATA_SCOPE_DENIED,
+                        "仅可导出数据范围内审核通过的材料：" + fileId);
+            }
+        }
     }
 
     /** 返回 [负责人范围, 单元范围]；无任何可见范围时返回 null */

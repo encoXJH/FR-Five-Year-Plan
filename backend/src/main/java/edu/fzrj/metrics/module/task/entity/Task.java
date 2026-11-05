@@ -38,7 +38,7 @@ public class Task {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long unitId;
 
-    /** 任务编号，同一计划内唯一，格式 {指标编号}-{单元编码}，如 A01-2-C03 */
+    /** 任务编号，同一计划内唯一；新任务格式 {指标编号}-{数字单元编码}，如 B01-03 */
     private String code;
 
     /** 学院项目负责人，引用 sys_user.id（下发前必填，50002） */

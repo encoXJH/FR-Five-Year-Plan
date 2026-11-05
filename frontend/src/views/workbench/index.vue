@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Expand, Fold } from '@element-plus/icons-vue'
 import StatusTag from '@/components/StatusTag.vue'
 import ProgressWithTimeLine from '@/components/ProgressWithTimeLine.vue'
 import TaskDetailDrawer from './components/TaskDetailDrawer.vue'
@@ -10,10 +11,10 @@ import { getStatsOverview } from '@/api/stats'
 import { listOrgUnits } from '@/api/orgUnit'
 import type { OrgUnit } from '@/api/orgUnit'
 import { useUserStore } from '@/stores/user'
-import { formatPercent } from '@/utils/format'
+import { formatCount, formatPercent } from '@/utils/format'
 import { formatTargetValue } from '@/utils/indicator'
 import { useAutoRefresh } from '@/utils/autoRefresh'
-import { averageTaskYearCompletion, canWriteTask, formatDeadline, primaryTaskIndicator } from '@/utils/task'
+import { averageTaskYearCompletion, canWriteTask, formatDeadline, primaryTaskIndicator, taskMaterialState } from '@/utils/task'
 import { canApplyForTask } from '@/utils/adjustment'
 import type { PageResult } from '@/types/api'
 import type { TaskListItem, TaskQuery } from '@/types/task'
@@ -62,11 +63,22 @@ const loading = ref(false)
 const page = ref<PageResult<TaskListItem>>({ items: [], total: 0, page: 1, pageSize: 20 })
 
 const kpi = reactive({
+  /** 当前可见任务总数（状态侧栏计数） */
+  all: 0,
   /** 本年完成率：当前可见任务完成率的简单平均 */
   yearRate: null as number | null,
   todo: 0,
   review: 0,
 })
+
+/** 状态侧栏收起状态 */
+const statusSidebarCollapsed = ref(false)
+
+function statusCount(key: string): number {
+  if (key === 'todo') return kpi.todo
+  if (key === 'review') return kpi.review
+  return kpi.all
+}
 
 /** 滞后预警任务 id 集合（overview.warnings） */
 const warningTaskIds = ref<ReadonlySet<string>>(new Set())
@@ -126,6 +138,7 @@ async function loadKpi(): Promise<void> {
     ])
     kpi.todo = todo.total
     kpi.review = review.total
+    kpi.all = batch.length
     kpi.yearRate = averageTaskYearCompletion(batch)
     await loadWarnings(batch)
   } catch {
@@ -144,6 +157,12 @@ function switchTab(): void {
   loadTasks()
 }
 
+function selectStatusTab(key: string): void {
+  if (filters.tab === key) return
+  filters.tab = key
+  switchTab()
+}
+
 function changePage(next: number): void {
   page.value.page = next
   loadTasks()
@@ -158,9 +177,23 @@ function changePageSize(next: number): void {
 // ---------- 行操作 ----------
 const drawerVisible = ref(false)
 const activeTaskId = ref<string | null>(null)
+const drawerInitialYear = ref<number | null>(null)
+const drawerInitialSubmissionId = ref<string | null>(null)
+const drawerInitialTab = ref<'info' | 'submissions' | 'adjustments'>('info')
 
 function openDetail(row: TaskListItem): void {
   activeTaskId.value = row.id
+  drawerInitialYear.value = null
+  drawerInitialSubmissionId.value = null
+  drawerInitialTab.value = 'info'
+  drawerVisible.value = true
+}
+
+function openMaterials(row: TaskListItem): void {
+  activeTaskId.value = row.id
+  drawerInitialYear.value = row.displayYear ?? null
+  drawerInitialSubmissionId.value = row.latestSubmissionId ?? null
+  drawerInitialTab.value = 'submissions'
   drawerVisible.value = true
 }
 
@@ -245,39 +278,14 @@ useAutoRefresh(
 <template>
   <div class="workbench-page">
     <div class="page-header">
-      <h1 class="page-title">{{ isAdminView ? '任务代填' : `${unitName} · 学院工作台` }}</h1>
+      <div class="page-heading-copy">
+        <span class="page-eyebrow">五年规划 · 任务执行</span>
+        <h1 class="page-title">{{ isAdminView ? '任务代填' : `${unitName} · 学院工作台` }}</h1>
+        <p class="page-subtitle">
+          {{ filters.year ? `${filters.year} 年` : '全部年度' }}<span aria-hidden="true">/</span>任务填报、佐证材料与完成进度统一处理
+        </p>
+      </div>
     </div>
-
-    <el-form inline class="workbench-filter" @submit.prevent>
-      <el-form-item v-if="isAdminView" label="执行单元">
-        <el-select
-          v-model="filters.unitId"
-          clearable
-          filterable
-          placeholder="全部单元"
-          class="unit-select"
-          @change="applyFilters"
-        >
-          <el-option
-            v-for="unit in unitOptions"
-            :key="unit.id"
-            :label="`${unit.code} ${unit.name}`"
-            :value="unit.id"
-          />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="年度">
-        <el-select
-          v-model="filters.year"
-          clearable
-          placeholder="全部年份"
-          class="year-select"
-          @change="applyFilters"
-        >
-          <el-option v-for="year in yearOptions" :key="year" :label="`${year} 年`" :value="year" />
-        </el-select>
-      </el-form-item>
-    </el-form>
 
     <el-alert
       v-if="isAdminView && !filters.unitId"
@@ -287,28 +295,83 @@ useAutoRefresh(
       title="任务代填模式：请先选择执行单元"
     />
 
-    <div class="kpi-row">
-      <el-card shadow="never" class="kpi-card">
-        <div class="kpi-value">{{ kpi.todo }}</div>
-        <div class="kpi-label">待填报</div>
-      </el-card>
-      <el-card shadow="never" class="kpi-card">
-        <div class="kpi-value">{{ kpi.review }}</div>
-        <div class="kpi-label">待审核</div>
-      </el-card>
-      <el-card shadow="never" class="kpi-card">
-        <div class="kpi-value">{{ formatPercent(kpi.yearRate) }}</div>
-        <div class="kpi-label">本年完成率</div>
-      </el-card>
-    </div>
+    <section class="workbench-workspace" :class="{ 'is-status-collapsed': statusSidebarCollapsed }">
+      <aside class="status-sidebar" :class="{ 'is-collapsed': statusSidebarCollapsed }">
+        <div class="status-sidebar__header">
+          <strong v-if="!statusSidebarCollapsed">任务状态</strong>
+          <div class="status-sidebar__header-actions">
+            <el-button
+              class="status-sidebar__toggle"
+              link
+              type="primary"
+              :aria-label="statusSidebarCollapsed ? '展开任务状态' : '收起任务状态'"
+              :aria-expanded="!statusSidebarCollapsed"
+              aria-controls="status-sidebar-content"
+              :title="statusSidebarCollapsed ? '展开任务状态' : '收起任务状态'"
+              @click="statusSidebarCollapsed = !statusSidebarCollapsed"
+            >
+              <el-icon><Expand v-if="statusSidebarCollapsed" /><Fold v-else /></el-icon>
+            </el-button>
+          </div>
+        </div>
+        <Transition name="status-sidebar-content">
+          <div v-if="!statusSidebarCollapsed" id="status-sidebar-content" class="status-sidebar__body">
+            <button
+              v-for="tab in STATUS_TABS"
+              :key="tab.key"
+              type="button"
+              class="status-nav-item"
+              :class="{ 'is-active': filters.tab === tab.key }"
+              :aria-pressed="filters.tab === tab.key"
+              :data-status-key="tab.key"
+              @click="selectStatusTab(tab.key)"
+            >
+              <span>{{ tab.label }}</span><span>{{ statusCount(tab.key) }}</span>
+            </button>
+          </div>
+        </Transition>
+      </aside>
 
-    <el-card shadow="never">
-      <el-tabs v-model="filters.tab" @tab-change="switchTab">
-        <el-tab-pane v-for="tab in STATUS_TABS" :key="tab.key" :label="tab.label" :name="tab.key" />
-      </el-tabs>
+      <div class="workbench-main">
+        <div class="simple-filter">
+          <el-select
+            v-if="isAdminView"
+            v-model="filters.unitId"
+            clearable
+            filterable
+            placeholder="全部单元"
+            class="simple-filter__unit"
+            aria-label="按执行单元筛选"
+            @change="applyFilters"
+          >
+            <el-option
+              v-for="unit in unitOptions"
+              :key="unit.id"
+              :label="`${unit.code} ${unit.name}`"
+              :value="unit.id"
+            />
+          </el-select>
+          <el-select
+            v-model="filters.year"
+            clearable
+            placeholder="全部年份"
+            class="simple-filter__year"
+            aria-label="按年度筛选"
+            @change="applyFilters"
+          >
+            <el-option v-for="year in yearOptions" :key="year" :label="`${year} 年`" :value="year" />
+          </el-select>
+          <el-button type="primary" class="simple-filter__query" @click="applyFilters">查询</el-button>
+        </div>
 
-      <!-- 移动端（≤768px）：任务卡片单列堆叠（UI 规范 5.2），桌面端隐藏 -->
-      <div v-loading="loading" class="task-cards">
+        <div class="workbench-summary">
+          <div><span>待填报</span><strong>{{ kpi.todo }}</strong></div>
+          <div><span>待审核</span><strong>{{ kpi.review }}</strong></div>
+          <div><span>本年完成率</span><strong>{{ formatPercent(kpi.yearRate) }}</strong></div>
+        </div>
+
+        <!-- 移动端（≤768px）：任务卡片单列堆叠（UI 规范 5.2），桌面端隐藏 -->
+        <div v-loading="loading" class="task-cards">
         <el-empty
           v-if="!loading && page.items.length === 0"
           :image-size="80"
@@ -337,6 +400,38 @@ useAutoRefresh(
             :rate="row.cumulativeRate ?? null"
             :lagging="warningTaskIds.has(row.id)"
           />
+          <div
+            class="task-card-materials"
+            :class="{ 'is-missing': taskMaterialState(row).missingCount > 0 }"
+          >
+            <div class="task-card-material-heading">
+              <span>佐证材料</span>
+              <el-tag :type="taskMaterialState(row).tagType" size="small" effect="light">
+                {{ taskMaterialState(row).label }}
+              </el-tag>
+              <span v-if="taskMaterialState(row).missingCount > 0" class="material-missing">
+                缺 {{ taskMaterialState(row).missingCount }} 份
+              </span>
+            </div>
+            <div class="task-card-material-actions">
+              <el-button
+                class="material-preview-button"
+                plain
+                :aria-label="`预览 ${taskName(row)} 的佐证材料，共 ${taskMaterialState(row).fileCount} 份`"
+                @click="openMaterials(row)"
+              >
+                材料预览 · 共 {{ formatCount(taskMaterialState(row).fileCount) }} 份
+              </el-button>
+              <el-button
+                v-if="taskMaterialState(row).missingCount > 0 && canSubmitRow(row)"
+                type="danger"
+                plain
+                @click="goSubmit(row)"
+              >
+                去补材料
+              </el-button>
+            </div>
+          </div>
           <div class="app-action-row task-card-actions">
             <el-button v-if="canSubmitRow(row)" type="primary" size="small" @click="goSubmit(row)">填报</el-button>
             <el-button size="small" @click="openDetail(row)">详情</el-button>
@@ -346,7 +441,7 @@ useAutoRefresh(
       </div>
 
       <div class="task-table">
-        <el-table v-loading="loading" :data="page.items" border size="small">
+        <el-table v-loading="loading" :data="page.items" class="workbench-table">
         <el-table-column label="任务" min-width="260" fixed="left">
           <template #default="{ row }">
             <div class="task-name" :title="taskName(row)">{{ taskName(row) }}</div>
@@ -378,6 +473,38 @@ useAutoRefresh(
               :rate="row.cumulativeRate ?? null"
               :lagging="warningTaskIds.has(row.id)"
             />
+          </template>
+        </el-table-column>
+        <el-table-column label="材料" width="148" align="center" header-align="center">
+          <template #default="{ row }">
+            <div class="material-cell" :class="{ 'is-missing': taskMaterialState(row).missingCount > 0 }">
+              <el-button
+                link
+                type="primary"
+                class="material-count"
+                :title="`查看 ${row.displayYear ?? '当前'} 年度提交记录与佐证材料`"
+                @click="openMaterials(row)"
+              >
+                共 {{ formatCount(taskMaterialState(row).fileCount) }} 份
+              </el-button>
+              <div class="material-status-line">
+                <el-tag :type="taskMaterialState(row).tagType" size="small" effect="light">
+                  {{ taskMaterialState(row).label }}
+                </el-tag>
+                <span v-if="taskMaterialState(row).missingCount > 0" class="material-missing">
+                  缺 {{ taskMaterialState(row).missingCount }} 份
+                </span>
+              </div>
+              <el-button
+                v-if="taskMaterialState(row).missingCount > 0 && canSubmitRow(row)"
+                link
+                type="danger"
+                class="material-fill"
+                @click="goSubmit(row)"
+              >
+                去补材料
+              </el-button>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="96" align="center">
@@ -416,6 +543,10 @@ useAutoRefresh(
       </el-table>
       </div>
 
+      <div class="table-footer">
+        共 {{ page.total }} 条任务；当前显示 {{ page.items.length }} 条；待填报 {{ kpi.todo }} / 待审核 {{ kpi.review }}
+      </div>
+
       <div class="pager">
         <el-pagination
           :current-page="page.page"
@@ -427,19 +558,34 @@ useAutoRefresh(
           @size-change="changePageSize"
         />
       </div>
-    </el-card>
+      </div>
+    </section>
 
     <TaskDetailDrawer
       v-model="drawerVisible"
       :task-id="activeTaskId"
+      :initial-year="drawerInitialYear"
+      :initial-submission-id="drawerInitialSubmissionId"
+      :initial-tab="drawerInitialTab"
     />
   </div>
 </template>
 
 <style scoped>
 .workbench-page {
+  --workbench-ink: #17233c;
+  --workbench-muted: #6c7687;
+  --workbench-line: #e4e9f0;
+  --workbench-soft: #f8fafc;
+  --workbench-paper: #ffffff;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
   max-width: 100%;
+  box-sizing: border-box;
+  color: var(--workbench-ink);
 }
 
 .page-alert {
@@ -447,63 +593,317 @@ useAutoRefresh(
 }
 
 .page-header {
-  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: 18px;
+  padding: 2px 0 18px;
+  border-bottom: 1px solid var(--workbench-line);
+}
+
+.page-heading-copy {
+  min-width: 0;
+}
+
+.page-eyebrow {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--el-color-primary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  line-height: 16px;
 }
 
 .page-title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 28px;
+  font-size: 25px;
+  font-weight: 650;
+  line-height: 34px;
+  letter-spacing: -0.4px;
   overflow-wrap: anywhere;
 }
 
-.kpi-row {
+.page-subtitle {
+  margin: 4px 0 0;
+  color: var(--workbench-muted);
+  font-size: 12px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.page-subtitle > span {
+  padding: 0 7px;
+  color: var(--el-border-color);
+}
+
+.workbench-workspace {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-4);
-  margin-bottom: var(--space-4);
-}
-
-.kpi-card {
+  grid-template-columns: 200px minmax(0, 1fr);
+  flex: 1;
+  gap: 22px;
+  transition: grid-template-columns 0.2s ease;
+  min-height: 0;
   min-width: 0;
-  border-radius: var(--radius-card);
-  text-align: center;
+  overflow: hidden;
 }
 
-.kpi-value {
-  font-size: 24px;
+.workbench-workspace.is-status-collapsed {
+  grid-template-columns: 44px minmax(0, 1fr);
+}
+
+.status-sidebar {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 10px;
+  border: 1px solid var(--workbench-line);
+  border-top: 3px solid var(--el-color-primary);
+  border-radius: 8px;
+  background: var(--workbench-paper);
+}
+
+.status-sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding: 0 10px 14px;
+  border-bottom: 1px solid var(--workbench-line);
+  font-size: 14px;
+}
+
+.status-sidebar__header strong {
   font-weight: 600;
-  line-height: 32px;
+  letter-spacing: 0.3px;
+}
+
+.status-sidebar__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.status-sidebar__header-actions :deep(.el-button) {
+  margin-left: 0;
+}
+
+.status-sidebar__toggle {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
+
+.status-sidebar.is-collapsed {
+  overflow: hidden;
+  padding: 8px 4px;
+}
+
+.status-sidebar.is-collapsed .status-sidebar__header {
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border-bottom: 0;
+}
+
+.status-sidebar__body {
+  transform-origin: left top;
+}
+
+.status-sidebar-content-enter-active,
+.status-sidebar-content-leave-active {
+  transition: opacity 0.16s ease, transform 0.18s ease;
+}
+
+.status-sidebar-content-enter-from,
+.status-sidebar-content-leave-to {
+  opacity: 0;
+  transform: translateX(-8px);
+}
+
+.status-nav-item {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--el-text-color-regular);
+  font: inherit;
+  font-size: 13px;
+  line-height: 21px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+.status-nav-item > span:first-child {
+  min-width: 0;
+}
+
+.status-nav-item > span:last-child {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--workbench-soft);
+  color: var(--workbench-muted);
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
-.kpi-label {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin-top: var(--space-1);
+.status-nav-item:hover {
+  background: var(--workbench-soft);
+  color: var(--el-color-primary);
 }
 
-.workbench-filter {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 var(--space-3);
-  margin-bottom: var(--space-4);
+.status-nav-item.is-active {
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-weight: 600;
 }
 
-.workbench-filter :deep(.el-form-item) {
+.status-nav-item.is-active::before {
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 0;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--el-color-primary);
+  content: '';
+}
+
+.status-nav-item.is-active > span:last-child {
+  background: var(--el-color-primary);
+  color: #fff;
+}
+
+.status-nav-item:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: -2px;
+}
+
+.workbench-main {
   min-width: 0;
-  margin: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 2px 12px 0;
 }
 
-.unit-select {
+.simple-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--workbench-line);
+  border-radius: 7px;
+  background: var(--workbench-soft);
+}
+
+.simple-filter__unit {
   width: 220px;
+  flex: 0 0 auto;
+}
+
+.simple-filter__year {
+  width: 130px;
+  flex: 0 0 auto;
+}
+
+.simple-filter__query {
+  min-width: 66px;
+}
+
+.workbench-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  margin-bottom: 14px;
+  border: 1px solid var(--workbench-line);
+  border-radius: 7px;
+  background: var(--workbench-paper);
+}
+
+.workbench-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-right: 1px solid var(--workbench-line);
+}
+
+.workbench-summary > div:last-child {
+  border-right: 0;
+}
+
+.workbench-summary span {
+  color: var(--workbench-muted);
+  font-size: 11px;
+}
+
+.workbench-summary strong {
+  color: var(--workbench-ink);
+  font-size: 16px;
+  line-height: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.task-table {
+  min-width: 0;
   max-width: 100%;
 }
 
-.year-select {
-  width: 120px;
-  max-width: 100%;
+.workbench-table {
+  width: 100%;
+  color: var(--workbench-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.workbench-table :deep(.el-table__inner-wrapper::before),
+.workbench-table :deep(.el-table__border-left-patch) {
+  display: none;
+}
+
+.workbench-table :deep(.el-table__header th) {
+  height: 40px;
+  padding: 0;
+  border-bottom: 1px solid #cfd7e3;
+  background: transparent;
+  color: var(--workbench-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+
+.workbench-table :deep(.el-table__body td) {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--workbench-line);
+  background: transparent;
+}
+
+.workbench-table :deep(.el-table__body tr:hover > td) {
+  background: #fafbfc;
+}
+
+.table-footer {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--workbench-line);
+  color: var(--workbench-muted);
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .mono {
@@ -525,6 +925,44 @@ useAutoRefresh(
   gap: var(--space-1) var(--space-2);
   margin-top: var(--space-1);
   color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.material-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.material-count {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.material-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 3px 6px;
+}
+
+.material-missing {
+  color: var(--el-color-danger);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.material-fill {
+  min-height: 22px;
+  margin: 0;
+  padding: 0;
   font-size: 12px;
 }
 
@@ -565,17 +1003,93 @@ useAutoRefresh(
 
 /* 移动端（≤768px，UI 规范 5.2）：表格改卡片单列堆叠 */
 @media (max-width: 768px) {
-  .kpi-row {
-    gap: var(--space-2);
+  .workbench-page {
+    display: block;
+    height: auto;
   }
 
-  .kpi-value {
-    font-size: 18px;
-    line-height: 26px;
+  .page-header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
-  .workbench-filter {
+  .page-title {
+    font-size: 23px;
+  }
+
+  .workbench-workspace {
+    display: block;
+    overflow: visible;
+  }
+
+  .status-sidebar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+    padding: 10px;
+    overflow-x: auto;
+    border: 1px solid var(--workbench-line);
+    border-top: 3px solid var(--el-color-primary);
+    border-radius: 7px;
+  }
+
+  .status-sidebar__header {
+    flex: 0 0 auto;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 4px 8px;
+    border-bottom: 0;
+  }
+
+  .status-sidebar__body {
+    display: flex;
+    flex: 1 0 auto;
+    align-items: center;
+    gap: 8px;
+    min-width: max-content;
+  }
+
+  .status-sidebar.is-collapsed {
     width: 100%;
+    padding: 6px 10px;
+  }
+
+  .status-sidebar.is-collapsed .status-sidebar__header {
+    align-items: center;
+    width: 100%;
+    padding: 0;
+  }
+
+  .status-nav-item {
+    flex: 0 0 auto;
+    width: auto;
+    min-height: 40px;
+    white-space: nowrap;
+  }
+
+  .workbench-main {
+    overflow: visible;
+    padding: 0;
+  }
+
+  .simple-filter {
+    flex-wrap: wrap;
+  }
+
+  .simple-filter__unit {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .simple-filter__year {
+    flex: 1 1 130px;
+    width: auto;
+  }
+
+  .workbench-summary strong {
+    font-size: 15px;
   }
 
   .task-table {
@@ -587,18 +1101,24 @@ useAutoRefresh(
   }
 
   .task-card {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
     padding: 14px;
     margin-bottom: var(--space-3);
-    border: 1px solid var(--el-border-color-light);
+    border: 1px solid var(--workbench-line);
     border-radius: 8px;
     background-color: var(--el-bg-color);
   }
 
   .task-card-header {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
+    min-width: 0;
   }
 
   .task-card-code {
@@ -607,10 +1127,12 @@ useAutoRefresh(
   }
 
   .task-card-name {
+    min-width: 0;
     margin-top: var(--space-1);
     font-size: 15px;
     font-weight: 600;
     line-height: 22px;
+    overflow-wrap: anywhere;
   }
 
   .task-card-kv {
@@ -623,8 +1145,49 @@ useAutoRefresh(
     font-variant-numeric: tabular-nums;
   }
 
+  .task-card-materials {
+    min-width: 0;
+    margin-top: var(--space-3);
+    padding: 10px;
+    border: 1px solid var(--workbench-line);
+    border-radius: 6px;
+    background: var(--workbench-soft);
+  }
+
+  .task-card-materials.is-missing {
+    border-color: var(--el-color-danger-light-7);
+    background: var(--el-color-danger-light-9);
+  }
+
+  .task-card-material-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    color: var(--workbench-muted);
+    font-size: 13px;
+  }
+
+  .task-card-material-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    min-width: 0;
+    margin-top: var(--space-2);
+  }
+
+  .task-card-material-actions .el-button {
+    flex: 1 1 130px;
+    min-width: 0;
+    min-height: 44px;
+    margin: 0;
+    white-space: normal;
+  }
+
   .task-card-actions {
     display: flex;
+    flex-wrap: wrap;
     width: 100%;
     gap: var(--space-2);
     margin: var(--space-2) 0 0;
@@ -636,6 +1199,10 @@ useAutoRefresh(
     min-width: 0;
     min-height: 44px;
     margin: 0;
+  }
+
+  .table-footer {
+    display: none;
   }
 
   .pager {
@@ -659,31 +1226,18 @@ useAutoRefresh(
   }
 }
 
-@media (max-width: 600px) {
-  .workbench-filter :deep(.el-form-item) {
-    display: block;
-    flex: 1 1 180px;
+@media (max-width: 420px) {
+  .simple-filter {
+    gap: 8px;
+    padding: 10px;
   }
 
-  .workbench-filter :deep(.el-form-item__label) {
-    height: auto;
-    margin-bottom: var(--space-1);
-    line-height: 20px;
+  .status-sidebar {
+    padding: 8px;
   }
 
-  .workbench-filter :deep(.el-form-item__content),
-  .unit-select,
-  .year-select {
-    width: 100%;
-    margin-left: 0 !important;
-  }
-
-  .kpi-card :deep(.el-card__body) {
-    padding: var(--space-3) var(--space-2);
-  }
-
-  .kpi-label {
-    overflow-wrap: anywhere;
+  .workbench-summary > div {
+    padding: 10px;
   }
 }
 </style>

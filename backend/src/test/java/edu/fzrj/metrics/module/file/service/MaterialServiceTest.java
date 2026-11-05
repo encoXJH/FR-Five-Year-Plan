@@ -197,6 +197,36 @@ class MaterialServiceTest {
         assertEquals(List.of(10L, 11L), result.stream().map(MaterialDtos.IndicatorOption::id).toList());
     }
 
+    @Test
+    void 学院导出ZIP时逐文件保留本单元范围() {
+        login(new LoginUser(2L, "c01", "学院负责人", 100L, List.of("UNIT_OWNER"), List.of("material:view")));
+        FileInfo file = new FileInfo();
+        file.setId(20L);
+        file.setDeleted(0L);
+        when(fileInfoMapper.selectOne(any())).thenReturn(file);
+        when(materialQueryMapper.selectMaterials(any())).thenReturn(List.of());
+
+        BizException error = assertThrows(BizException.class,
+                () -> materialService.requireExportable(List.of(20L)));
+
+        assertEquals(20005, error.getErrorCode().getCode());
+        ArgumentCaptor<MaterialQuery> captor = ArgumentCaptor.forClass(MaterialQuery.class);
+        verify(materialQueryMapper).selectMaterials(captor.capture());
+        assertEquals(100L, captor.getValue().unitScope());
+        assertEquals(List.of(20L), captor.getValue().fileIds());
+    }
+
+    @Test
+    void 没有材料查看权限时不能创建ZIP导出() {
+        login(new LoginUser(2L, "c01", "学院负责人", 100L, List.of("UNIT_OWNER"), List.of()));
+
+        BizException error = assertThrows(BizException.class,
+                () -> materialService.requireExportable(List.of(20L)));
+
+        assertEquals(20004, error.getErrorCode().getCode());
+        verify(fileInfoMapper, never()).selectOne(any());
+    }
+
     private Indicator indicator(Long id, String code) {
         Indicator indicator = new Indicator();
         indicator.setId(id);

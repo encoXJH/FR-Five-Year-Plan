@@ -20,6 +20,9 @@ import type { StatCaliber } from '@/types/enums'
 const props = defineProps<{
   modelValue: boolean
   taskId: string | null
+  initialYear?: number | null
+  initialSubmissionId?: string | null
+  initialTab?: 'info' | 'submissions' | 'adjustments'
 }>()
 
 const emit = defineEmits<{
@@ -57,16 +60,36 @@ function transferLine(item: AdjustmentListItem): string {
 // ---------- 提交记录与佐证材料 ----------
 const submissions = ref<SubmissionListItem[]>([])
 const submissionDetail = ref<SubmissionDetail | null>(null)
+const selectedSubmissionId = ref<string | null>(null)
 const submissionLoading = ref(false)
+const submissionLoadFailed = ref(false)
 const previewVisible = ref(false)
 const previewFile = ref<FileInfo | null>(null)
+let submissionRequestSequence = 0
+
+const visibleSubmissions = computed(() => {
+  if (props.initialYear == null) return submissions.value
+  return submissions.value.filter((item) => item.year === props.initialYear)
+})
+
+const submissionEmptyDescription = computed(() => props.initialYear == null
+  ? '该任务暂无提交记录，可在工作台填报后查看材料'
+  : `${props.initialYear} 年暂无提交记录，请返回工作台点击“填报”上传材料`)
 
 async function openSubmission(item: SubmissionListItem): Promise<void> {
+  const sequence = ++submissionRequestSequence
+  selectedSubmissionId.value = item.id
+  submissionDetail.value = null
+  submissionLoadFailed.value = false
   submissionLoading.value = true
   try {
-    submissionDetail.value = await getSubmission(item.id)
+    const detail = await getSubmission(item.id)
+    if (sequence !== submissionRequestSequence || !visible.value) return
+    submissionDetail.value = detail
+  } catch {
+    if (sequence === submissionRequestSequence && visible.value) submissionLoadFailed.value = true
   } finally {
-    submissionLoading.value = false
+    if (sequence === submissionRequestSequence) submissionLoading.value = false
   }
 }
 
@@ -80,35 +103,52 @@ function openMaterial(file: FileInfo): void {
   previewVisible.value = true
 }
 
-async function load(): Promise<void> {
-  if (!props.taskId) return
+let loadSequence = 0
+
+async function load(sequence: number): Promise<void> {
+  const taskId = props.taskId
+  if (!taskId) return
   loading.value = true
   try {
     const [detail, history, submissionItems] = await Promise.all([
-      getTask(props.taskId),
-      listTaskAdjustments(props.taskId).catch(() => [] as AdjustmentListItem[]),
-      listSubmissions(props.taskId).catch(() => [] as SubmissionListItem[]),
+      getTask(taskId),
+      listTaskAdjustments(taskId).catch(() => [] as AdjustmentListItem[]),
+      listSubmissions(taskId).catch(() => [] as SubmissionListItem[]),
     ])
+    if (sequence !== loadSequence || !visible.value || props.taskId !== taskId) return
     task.value = detail
     adjustments.value = history
     submissions.value = submissionItems
     adjustmentsLoaded.value = true
+    if (activeTab.value === 'submissions') {
+      const latest = visibleSubmissions.value.find((item) => item.id === props.initialSubmissionId)
+        ?? visibleSubmissions.value[0]
+      if (latest) void openSubmission(latest)
+    }
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
 watch(visible, (value) => {
+  loadSequence += 1
+  submissionRequestSequence += 1
   if (value) {
     task.value = null
     adjustments.value = []
     submissions.value = []
     submissionDetail.value = null
+    selectedSubmissionId.value = null
+    submissionLoading.value = false
+    submissionLoadFailed.value = false
     previewFile.value = null
     previewVisible.value = false
     adjustmentsLoaded.value = false
-    activeTab.value = 'info'
-    load()
+    activeTab.value = props.initialTab ?? 'info'
+    void load(loadSequence)
+  } else {
+    loading.value = false
+    submissionLoading.value = false
   }
 })
 </script>
@@ -185,13 +225,13 @@ watch(visible, (value) => {
           </el-tab-pane>
 
           <el-tab-pane label="提交记录" name="submissions">
-            <div v-if="submissions.length > 0" class="submission-list">
+            <div v-if="visibleSubmissions.length > 0" class="submission-list">
               <button
-                v-for="item in submissions"
+                v-for="item in visibleSubmissions"
                 :key="item.id"
                 type="button"
                 class="submission-record"
-                :class="{ 'is-active': submissionDetail?.id === item.id }"
+                :class="{ 'is-active': selectedSubmissionId === item.id }"
                 @click="openSubmission(item)"
               >
                 <span>{{ item.year }} 年 · {{ submissionRoundLabel(item.revisionNo) }}</span>
@@ -199,22 +239,34 @@ watch(visible, (value) => {
                 <small>{{ formatDateTime(item.submittedAt ?? item.createdAt) }} · 材料 {{ item.fileCount ?? 0 }} 份</small>
               </button>
             </div>
-            <el-empty v-else :image-size="80" description="该任务暂无提交记录" />
+            <el-empty v-else :image-size="80" :description="submissionEmptyDescription" />
 
-            <div v-if="submissionDetail" v-loading="submissionLoading" class="submission-materials">
-              <h3 class="section-title">提交材料（{{ submissionDetail.files.length }} 份）</h3>
-              <div v-if="submissionDetail.files.length > 0" class="material-list">
-                <el-button
-                  v-for="file in submissionDetail.files"
-                  :key="file.id"
-                  text
-                  type="primary"
-                  @click="openMaterial(file)"
-                >
-                  {{ file.fileName }}
-                </el-button>
-              </div>
-              <el-empty v-else :image-size="60" description="本次提交未上传材料" />
+            <div
+              v-if="selectedSubmissionId"
+              v-loading="submissionLoading"
+              class="submission-materials"
+              :class="{ 'is-loading': submissionLoading }"
+            >
+              <template v-if="submissionDetail">
+                <h3 class="section-title">提交材料（{{ submissionDetail.files.length }} 份）</h3>
+                <div v-if="submissionDetail.files.length > 0" class="material-list">
+                  <el-button
+                    v-for="file in submissionDetail.files"
+                    :key="file.id"
+                    text
+                    type="primary"
+                    @click="openMaterial(file)"
+                  >
+                    {{ file.fileName }}
+                  </el-button>
+                </div>
+                <el-empty v-else :image-size="60" description="本次提交未上传材料" />
+              </template>
+              <el-empty
+                v-else-if="submissionLoadFailed && !submissionLoading"
+                :image-size="60"
+                description="提交详情加载失败，请点击上方记录重试"
+              />
             </div>
           </el-tab-pane>
 
@@ -265,6 +317,7 @@ watch(visible, (value) => {
 }
 
 :global(.task-detail-dialog .el-dialog__body) {
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
 }
@@ -272,6 +325,16 @@ watch(visible, (value) => {
 @media (max-width: 768px) {
   :global(.task-detail-dialog) {
     max-height: calc(100dvh - 32px);
+  }
+
+  .submission-record {
+    min-height: 44px;
+  }
+
+  .material-list .el-button {
+    width: 100%;
+    min-height: 44px;
+    justify-content: flex-start;
   }
 }
 
@@ -329,7 +392,12 @@ watch(visible, (value) => {
 }
 
 .submission-materials {
+  min-width: 0;
   margin-top: var(--space-4);
+}
+
+.submission-materials.is-loading {
+  min-height: 96px;
 }
 
 .material-list {
@@ -345,6 +413,7 @@ watch(visible, (value) => {
   min-height: 32px;
   margin: 0;
   white-space: normal;
+  overflow-wrap: anywhere;
   text-align: left;
 }
 

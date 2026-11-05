@@ -54,16 +54,28 @@ public class TaskYear {
     /** 调整审批中冻结的额度（防止同一额度重复申请） */
     private BigDecimal frozenAmount;
 
-    /** 缓存：年度完成值（审核通过口径） */
+    /** 本任务自身审核通过填报计算的年度完成值 */
+    private BigDecimal ownActualValue;
+
+    /** 本任务自身 RATIO 口径分子 */
+    private BigDecimal ownActualNumerator;
+
+    /** 本任务自身 RATIO 口径分母 */
+    private BigDecimal ownActualDenominator;
+
+    /** 本任务自身 STOCK / GROWTH 口径最新审核通过总量 */
+    private BigDecimal ownActualTotal;
+
+    /** 有效缓存：自身与直接关联候选选择后的年度完成值 */
     private BigDecimal actualValue;
 
-    /** 缓存：RATIO 口径分子 */
+    /** 有效缓存：RATIO 口径分子 */
     private BigDecimal actualNumerator;
 
-    /** 缓存：RATIO 口径分母 */
+    /** 有效缓存：RATIO 口径分母 */
     private BigDecimal actualDenominator;
 
-    /** 缓存：STOCK / GROWTH 口径最新审核通过总量 */
+    /** 有效缓存：STOCK / GROWTH 口径最新完成总量 */
     private BigDecimal actualTotal;
 
     /** 缓存：是否达标 */
@@ -71,6 +83,13 @@ public class TaskYear {
 
     /** 缓存：完成率（小数） */
     private BigDecimal completionRate;
+
+    /** 是否由直接关联任务同步达标 */
+    private Boolean linkedAchieved;
+
+    /** 当前有效完成值的直接关联来源任务年度；自身值时为空 */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long linkedSourceTaskYearId;
 
     /** 年度状态：NOT_ACTIVATED 未激活 / IN_PROGRESS 进行中 / PENDING_REVIEW 待审核 / ADJUSTING 调整审批中 / ACHIEVED 已达标 / NOT_ACHIEVED 未达标 / MAKEUP_PENDING 待补做 / MADE_UP 已补做 */
     private String yearStatus;

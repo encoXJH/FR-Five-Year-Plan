@@ -9,6 +9,7 @@ export interface MaterialIndicator {
 }
 
 export interface MaterialIndicatorOption extends MaterialIndicator {
+  directionCode: string | null
   directionName: string | null
 }
 

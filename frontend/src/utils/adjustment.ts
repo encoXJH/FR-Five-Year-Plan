@@ -41,6 +41,18 @@ export function adjustmentTypeOptions(
   })
 }
 
+/** 勾选任务后即时展示可调整类型，服务端仍按 70006 复核。 */
+export function adjustmentTypeHint(caliber: StatCaliber | null, isAdmin: boolean): string {
+  if (caliber === null) return '请先勾选学院任务，系统将根据统计口径提示可调整类型'
+  if (caliber === 'INCREMENT') {
+    return `可发起：延期、转移、延期 + 转移${isAdmin ? '、目标调整' : ''}`
+  }
+  if (caliber === 'BOOLEAN') {
+    return `仅可延期（修改计划完成年份）${isAdmin ? '；管理员也可发起目标调整' : ''}`
+  }
+  return `不支持延期或转移；${isAdmin ? '可发起目标调整' : '如需变更请联系管理员发起目标调整'}（70006）`
+}
+
 /** 是否涉及接收单元（转移类） */
 export function isTransferType(type: AdjustmentType): boolean {
   return type === 'TRANSFER' || type === 'POSTPONE_TRANSFER'

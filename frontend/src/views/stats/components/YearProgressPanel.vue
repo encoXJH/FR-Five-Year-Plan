@@ -10,14 +10,16 @@ import { useAutoRefresh } from '@/utils/autoRefresh'
 
 const props = withDefaults(defineProps<{
   planId: string
-  /** 页面年度筛选；为 null（五年累计）时模块回退到当前自然年 */
+  /** 页面年度筛选；为 null（五年累计）时由后端按计划起止年份解析展示年度 */
   year: number | null
   showUploads?: boolean
 }>(), {
   showUploads: true,
 })
 
-const progressYear = computed(() => props.year ?? new Date().getFullYear())
+const progressYear = computed(() => props.year ?? overview.value?.year ?? new Date().getFullYear())
+/** 页面选择“五年累计”时展示累计进度，不再套用后端解析出的展示年度 */
+const cumulative = computed(() => props.year === null)
 const loading = ref(false)
 const overview = ref<StatsOverview | null>(null)
 const uploads = ref<YearUploadItem[]>([])
@@ -30,7 +32,9 @@ const hasMoreUploads = computed(() => uploads.value.length > UPLOAD_PREVIEW_SIZE
 const achievedCount = computed(() => overview.value?.achievedCount ?? 0)
 const totalCount = computed(() => overview.value?.taskCount ?? 0)
 const unfinishedCount = computed(() => Math.max(0, totalCount.value - achievedCount.value))
-const completionRate = computed(() => totalCount.value > 0 ? achievedCount.value / totalCount.value : null)
+const annualCompletionRate = computed(() => totalCount.value > 0 ? achievedCount.value / totalCount.value : null)
+const cumulativeCompletionRate = computed(() => overview.value?.cumulativeCompletionRate ?? null)
+const completionRate = computed(() => cumulative.value ? cumulativeCompletionRate.value : annualCompletionRate.value)
 const progressPercentage = computed(() => completionRate.value === null
   ? 0
   : Math.min(100, Number((completionRate.value * 100).toFixed(1))))
@@ -43,10 +47,11 @@ async function load(silent = false): Promise<void> {
   }
   if (!silent) loading.value = true
   try {
-    const [stats, items] = await Promise.all([
-      getStatsOverview(props.planId, progressYear.value),
-      props.showUploads ? listYearUploads(props.planId, progressYear.value) : Promise.resolve([]),
-    ])
+    const stats = await getStatsOverview(props.planId, props.year ?? undefined)
+    const resolvedYear = stats.year ?? progressYear.value
+    const items = props.showUploads && !cumulative.value
+      ? await listYearUploads(props.planId, resolvedYear)
+      : []
     overview.value = stats
     uploads.value = items
   } finally {
@@ -54,7 +59,7 @@ async function load(silent = false): Promise<void> {
   }
 }
 
-watch(() => [props.planId, progressYear.value, props.showUploads], () => {
+watch(() => [props.planId, props.year, props.showUploads], () => {
   uploadExpanded.value = false
   void load()
 }, { immediate: true })
@@ -66,12 +71,13 @@ useAutoRefresh(() => load(true), { intervalMs: 60_000 })
   <el-card v-loading="loading" shadow="never" class="year-progress-panel">
     <template #header>
       <div class="panel-header">
-        <span class="card-title">{{ progressYear }} 年总进度</span>
-        <span class="card-tip">已完成 {{ formatCount(achievedCount) }} / 共 {{ formatCount(totalCount) }} 项任务</span>
+        <span class="card-title">{{ cumulative ? '五年累计总进度' : `${progressYear} 年总进度` }}</span>
+        <span v-if="cumulative" class="card-tip">五年累计完成率 {{ formatPercent(cumulativeCompletionRate) }}</span>
+        <span v-else class="card-tip">已完成 {{ formatCount(achievedCount) }} / 共 {{ formatCount(totalCount) }} 项任务</span>
       </div>
     </template>
 
-    <div class="progress-summary">
+    <div class="progress-summary" :class="{ 'is-cumulative': cumulative }">
       <div class="progress-main">
         <el-progress
           :percentage="progressPercentage"
@@ -79,9 +85,11 @@ useAutoRefresh(() => load(true), { intervalMs: 60_000 })
           :text-inside="false"
           :format="() => formatPercent(completionRate)"
         />
-        <div class="progress-caption">当年整体任务完成进度</div>
+        <div class="progress-caption">
+          {{ cumulative ? '五年累计指标完成进度（按指标累计完成率平均）' : '当年整体任务完成进度' }}
+        </div>
       </div>
-      <div class="progress-numbers">
+      <div v-if="!cumulative" class="progress-numbers">
         <div class="number-item">
           <div class="number-value is-good">{{ formatCount(achievedCount) }}</div>
           <div class="number-label">已完成任务</div>
@@ -93,7 +101,7 @@ useAutoRefresh(() => load(true), { intervalMs: 60_000 })
       </div>
     </div>
 
-    <div v-if="showUploads" class="upload-section">
+    <div v-if="showUploads && !cumulative" class="upload-section">
       <div class="upload-title">当年已上传指标清单（{{ formatCount(uploads.length) }}）</div>
       <el-table v-if="uploads.length > 0" :data="visibleUploads" border size="small" max-height="360">
         <el-table-column label="指标名称" min-width="240">
@@ -132,6 +140,7 @@ useAutoRefresh(() => load(true), { intervalMs: 60_000 })
 .card-title { font-weight: 600; }
 .card-tip { color: var(--el-text-color-secondary); font-size: 12px; }
 .progress-summary { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: center; }
+.progress-summary.is-cumulative { grid-template-columns: minmax(0, 1fr); }
 .progress-main :deep(.el-progress__text) { min-width: 56px; font-size: 15px; font-weight: 600; color: var(--el-color-primary); }
 .progress-caption { margin-top: 6px; color: var(--el-text-color-secondary); font-size: 12px; }
 .progress-numbers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }

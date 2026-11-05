@@ -158,7 +158,8 @@ async function remove(row: Direction): Promise<void> {
 }
 
 function directionName(id: string | null | undefined): string {
-  return directions.value.find((item) => item.id === id)?.name ?? EMPTY_DISPLAY
+  const direction = directions.value.find((item) => item.id === id)
+  return direction ? direction.name : EMPTY_DISPLAY
 }
 
 function assignmentDirty(row: IndicatorTreeNode): boolean {
@@ -202,7 +203,9 @@ useAutoRefresh(() => loadAll(true), {
       <el-card shadow="never" class="section-card">
         <template #header><span class="card-title">主要建设方向与总负责人</span></template>
         <el-table :data="directions" border>
-          <el-table-column prop="name" label="主要建设方向" min-width="220" />
+          <el-table-column label="主要建设方向" min-width="220">
+            <template #default="{ row }">{{ row.name }}</template>
+          </el-table-column>
           <el-table-column prop="sort" label="排序" width="90" align="right">
             <template #default="{ row }">{{ row.sort ?? EMPTY_DISPLAY }}</template>
           </el-table-column>
@@ -244,7 +247,12 @@ useAutoRefresh(() => loadAll(true), {
                 :disabled="assignmentRowReadonly(row)"
                 style="width: 100%"
               >
-                <el-option v-for="item in directions" :key="item.id" :label="item.name" :value="item.id" />
+                <el-option
+                  v-for="item in directions"
+                  :key="item.id"
+                  :label="item.name"
+                  :value="item.id"
+                />
               </el-select>
             </template>
           </el-table-column>

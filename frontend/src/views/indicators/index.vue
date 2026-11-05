@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { ArrowDown, Delete } from '@element-plus/icons-vue'
+import { ArrowDown, Delete, Expand, Fold } from '@element-plus/icons-vue'
 import StatusTag from '@/components/StatusTag.vue'
 import ResponsiveRecordView from '@/components/ResponsiveRecordView.vue'
 import FilePreviewDrawer from '@/components/FilePreviewDrawer.vue'
@@ -36,6 +36,7 @@ import {
   hasQuantitativeFields,
   indexStatsTree,
   isPercentCaliber,
+  parseDirectionIdQuery,
   parseExpandedIndicatorIds,
   serializeExpandedIndicatorIds,
   yearTargetMap,
@@ -66,6 +67,23 @@ const yearStatsIndexes = ref<Map<number, StatsTreeIndex>>(new Map())
 const directionList = ref<Direction[]>([])
 const userOptions = ref<UserOption[]>([])
 const selectedDirectionId = ref('')
+const DIRECTION_SIDEBAR_COLLAPSED_KEY = 'fzsu.indicatorDirectionSidebarCollapsed'
+function readDirectionSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(DIRECTION_SIDEBAR_COLLAPSED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+const directionSidebarCollapsed = ref(readDirectionSidebarCollapsed())
+function toggleDirectionSidebar(): void {
+  directionSidebarCollapsed.value = !directionSidebarCollapsed.value
+  try {
+    localStorage.setItem(DIRECTION_SIDEBAR_COLLAPSED_KEY, directionSidebarCollapsed.value ? '1' : '0')
+  } catch {
+    // 存储不可用时退化为当前会话内记忆。
+  }
+}
 let planRequestId = 0
 let treeRequestId = 0
 let statsRequestId = 0
@@ -205,7 +223,7 @@ function resetFilters(): void {
   filters.completionStatus = ''
   filters.onlyMine = defaultOnlyMine()
   filters.keyword = ''
-  selectedDirectionId.value = ''
+  selectDirection('')
   applyFilters()
 }
 
@@ -239,12 +257,15 @@ const visibleTree = computed<IndicatorTreeNode[]>(() => {
 })
 
 const directionOptions = computed(() => {
-  const options = new Map<string, { id: string; name: string }>()
-  for (const direction of directionList.value) options.set(direction.id, { id: direction.id, name: direction.name })
+  const options = new Map<string, { id: string; code: string | null; name: string }>()
+  for (const direction of directionList.value) {
+    options.set(direction.id, { id: direction.id, code: direction.code, name: direction.name })
+  }
   for (const indicator of tree.value) {
     if (indicator.directionId && !options.has(indicator.directionId)) {
       options.set(indicator.directionId, {
         id: indicator.directionId,
+        code: indicator.directionCode ?? null,
         name: indicator.directionName ?? '未命名建设方向',
       })
     }
@@ -259,13 +280,23 @@ const directionNavItems = computed(() => {
   }))
   const unassignedCount = tree.value.filter((indicator) => !indicator.directionId).length
   if (unassignedCount > 0) {
-    items.push({ id: '__UNASSIGNED__', name: '未分配建设方向', count: unassignedCount })
+    items.push({ id: '__UNASSIGNED__', code: null, name: '未分配建设方向', count: unassignedCount })
   }
   return items
 })
 
+function syncDirectionQuery(id: string): void {
+  if (parseDirectionIdQuery(route.query.directionId) === id && (id || route.query.directionId === undefined)) return
+  const query = { ...route.query }
+  if (id) query.directionId = id
+  else delete query.directionId
+  void router.replace({ query })
+}
+
 function selectDirection(id: string): void {
-  selectedDirectionId.value = id
+  const directionId = parseDirectionIdQuery(id)
+  selectedDirectionId.value = directionId
+  syncDirectionQuery(directionId)
 }
 
 async function addDirection(): Promise<void> {
@@ -825,7 +856,7 @@ async function handleDeleteDirection(direction: { id: string; name: string }): P
   try {
     await deleteDirection(direction.id)
     ElMessage.success('主要建设方向已删除')
-    if (selectedDirectionId.value === direction.id) selectedDirectionId.value = ''
+    if (selectedDirectionId.value === direction.id) selectDirection('')
     await Promise.all([loadDirections(), loadTree()])
   } catch {
     // 拦截器已提示。
@@ -896,7 +927,7 @@ async function redirectToActivePlan(): Promise<void> {
   }
 }
 
-watch(planId, (id) => {
+watch(planId, (id, previousId) => {
   planRequestId += 1
   treeRequestId += 1
   statsRequestId += 1
@@ -910,7 +941,9 @@ watch(planId, (id) => {
   yearStatsIndexes.value = new Map()
   directionList.value = []
   materialCounts.value = {}
-  selectedDirectionId.value = ''
+  const switchingPlan = Boolean(previousId && previousId !== id)
+  selectedDirectionId.value = switchingPlan ? '' : parseDirectionIdQuery(route.query.directionId)
+  if (switchingPlan) syncDirectionQuery('')
   editMode.value = false
   for (const key of Object.keys(tasksByIndicator)) delete tasksByIndicator[key]
   taskRequests.clear()
@@ -923,6 +956,11 @@ watch(planId, (id) => {
   if (id) void loadAll()
   else loading.value = false
 }, { immediate: true })
+
+watch(() => route.query.directionId, (value) => {
+  const directionId = parseDirectionIdQuery(value)
+  if (selectedDirectionId.value !== directionId) selectedDirectionId.value = directionId
+})
 
 watch(visibleTree, () => updateExpandAllState())
 
@@ -982,48 +1020,77 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
       class="page-alert"
     />
 
-    <section class="indicator-workspace">
-      <aside class="direction-sidebar">
+    <section class="indicator-workspace" :class="{ 'is-direction-collapsed': directionSidebarCollapsed }">
+      <aside class="direction-sidebar" :class="{ 'is-collapsed': directionSidebarCollapsed }">
         <div class="direction-sidebar__header">
-          <strong>主要建设方向</strong>
-          <el-button v-if="isAdmin && !readOnly" link type="primary" @click="addDirection">添加</el-button>
+          <strong v-if="!directionSidebarCollapsed">主要建设方向</strong>
+          <div class="direction-sidebar__header-actions">
+            <el-button v-if="!directionSidebarCollapsed && isAdmin && !readOnly" link type="primary" @click="addDirection">添加</el-button>
+            <el-button
+              class="direction-sidebar__toggle"
+              link
+              type="primary"
+              :aria-label="directionSidebarCollapsed ? '展开主要建设方向' : '收起主要建设方向'"
+              :aria-expanded="!directionSidebarCollapsed"
+              aria-controls="direction-sidebar-content"
+              :title="directionSidebarCollapsed ? '展开主要建设方向' : '收起主要建设方向'"
+              @click="toggleDirectionSidebar"
+            >
+              <el-icon><Expand v-if="directionSidebarCollapsed" /><Fold v-else /></el-icon>
+            </el-button>
+          </div>
         </div>
-        <button
-          type="button"
-          class="direction-nav-item direction-nav-all"
-          :class="{ 'is-active': selectedDirectionId === '' }"
-          :aria-pressed="selectedDirectionId === ''"
-          data-direction-id=""
-          @click="selectDirection('')"
-        >
-          <span>全部方向</span><span>{{ aRows.length }}</span>
-        </button>
-        <div v-for="direction in directionNavItems" :key="direction.id" class="direction-nav-row">
-          <button
-            type="button"
-            class="direction-nav-item"
-            :class="{ 'is-active': selectedDirectionId === direction.id }"
-            :aria-pressed="selectedDirectionId === direction.id"
-            :data-direction-id="direction.id"
-            @click="selectDirection(direction.id)"
-          >
-            <span>{{ direction.name }}</span><span>{{ direction.count }}</span>
-          </button>
-          <el-button
-            v-if="editMode && canDeleteDirection && direction.id !== '__UNASSIGNED__'"
-            class="direction-nav-delete"
-            link
-            type="danger"
-            :icon="Delete"
-            :aria-label="`删除主要建设方向 ${direction.name}`"
-            title="删除主要建设方向"
-            @click.stop="handleDeleteDirection(direction)"
-          />
-        </div>
+        <Transition name="direction-sidebar-content">
+          <div v-if="!directionSidebarCollapsed" id="direction-sidebar-content" class="direction-sidebar__body">
+            <button
+              type="button"
+              class="direction-nav-item direction-nav-all"
+              :class="{ 'is-active': selectedDirectionId === '' }"
+              :aria-pressed="selectedDirectionId === ''"
+              data-direction-id=""
+              @click="selectDirection('')"
+            >
+              <span>全部方向</span><span>{{ aRows.length }}</span>
+            </button>
+            <div v-for="direction in directionNavItems" :key="direction.id" class="direction-nav-row">
+              <button
+                type="button"
+                class="direction-nav-item"
+                :class="{ 'is-active': selectedDirectionId === direction.id }"
+                :aria-pressed="selectedDirectionId === direction.id"
+                :data-direction-id="direction.id"
+                @click="selectDirection(direction.id)"
+              >
+                <span>{{ direction.name }}</span><span>{{ direction.count }}</span>
+              </button>
+              <el-button
+                v-if="editMode && canDeleteDirection && direction.id !== '__UNASSIGNED__'"
+                class="direction-nav-delete"
+                link
+                type="danger"
+                :icon="Delete"
+                :aria-label="`删除主要建设方向 ${direction.name}`"
+                title="删除主要建设方向"
+                @click.stop="handleDeleteDirection(direction)"
+              />
+            </div>
+          </div>
+        </Transition>
       </aside>
 
       <div ref="indicatorMainRef" class="indicator-main">
         <div class="simple-filter">
+          <el-select
+            v-model="selectedDirectionId"
+            class="simple-filter__direction"
+            placeholder="全部方向"
+            filterable
+            aria-label="按主要建设方向筛选"
+            @change="selectDirection"
+          >
+            <el-option label="全部方向" value="" />
+            <el-option v-for="direction in directionNavItems" :key="direction.id" :label="direction.name" :value="direction.id" />
+          </el-select>
           <el-input
             v-model="filters.keyword"
             clearable
@@ -1560,11 +1627,13 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
   grid-template-columns: 232px minmax(0, 1fr);
   flex: 1;
   gap: 22px;
+  transition: grid-template-columns 0.2s ease;
   min-height: 0;
   overflow: hidden;
   min-width: 0;
   background: transparent;
 }
+.indicator-workspace.is-direction-collapsed { grid-template-columns: 44px minmax(0, 1fr); }
 .direction-sidebar {
   min-width: 0;
   min-height: 0;
@@ -1585,6 +1654,14 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
   font-size: 14px;
 }
 .direction-sidebar__header strong { font-weight: 600; letter-spacing: 0.3px; }
+.direction-sidebar__header-actions { display: flex; align-items: center; gap: 2px; }
+.direction-sidebar__header-actions :deep(.el-button) { margin-left: 0; }
+.direction-sidebar__toggle { width: 30px; height: 30px; padding: 0; }
+.direction-sidebar.is-collapsed { overflow: hidden; padding: 8px 4px; }
+.direction-sidebar.is-collapsed .direction-sidebar__header { justify-content: center; margin: 0; padding: 0; border-bottom: 0; }
+.direction-sidebar__body { transform-origin: left top; }
+.direction-sidebar-content-enter-active, .direction-sidebar-content-leave-active { transition: opacity 0.16s ease, transform 0.18s ease; }
+.direction-sidebar-content-enter-from, .direction-sidebar-content-leave-to { opacity: 0; transform: translateX(-8px); }
 .direction-nav-item {
   position: relative;
   display: flex;
@@ -1640,6 +1717,7 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
   border-radius: 7px;
   background: var(--indicator-soft);
 }
+.simple-filter__direction { width: 210px; flex: 0 0 auto; }
 .simple-filter__keyword { width: 250px; }
 .simple-filter__status { width: 168px; }
 .simple-filter__query { min-width: 66px; }
@@ -1829,11 +1907,15 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
   .indicator-workspace { display: block; overflow: visible; background: transparent; }
   .direction-sidebar { display: flex; gap: 8px; margin-bottom: 14px; padding: 10px; overflow-x: auto; border: 1px solid var(--indicator-line); border-top: 3px solid var(--el-color-primary); border-radius: 7px; }
   .direction-sidebar__header { flex: 0 0 auto; align-items: flex-start; flex-direction: column; gap: 2px; margin: 0; padding: 4px 8px; border-bottom: 0; }
+  .direction-sidebar__body { display: flex; flex: 1 0 auto; align-items: center; gap: 8px; min-width: max-content; }
+  .direction-sidebar.is-collapsed { width: 100%; padding: 6px 10px; }
+  .direction-sidebar.is-collapsed .direction-sidebar__header { align-items: center; width: 100%; padding: 0; }
   .direction-nav-item { flex: 0 0 auto; width: auto; min-height: 40px; white-space: nowrap; }
   .direction-nav-row { flex: 0 0 auto; }
   .direction-nav-row .direction-nav-item { width: auto; }
   .direction-nav-all { margin-bottom: 0; }
   .indicator-main { overflow: visible; padding: 0; background: var(--indicator-paper); }
+  .simple-filter__direction { flex: 1 1 100%; width: 100%; }
   .simple-filter__keyword { flex: 1 1 100%; }
   .simple-filter__status { flex: 1 1 130px; }
   .simple-filter__query { flex: 0 0 auto; }

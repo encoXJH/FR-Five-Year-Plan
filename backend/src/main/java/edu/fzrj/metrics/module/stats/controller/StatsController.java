@@ -4,6 +4,7 @@ import edu.fzrj.metrics.module.stats.dto.StatsDtos;
 import edu.fzrj.metrics.module.stats.service.StatsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,6 +19,7 @@ import java.util.List;
 @Tag(name = "统计")
 @RestController
 @RequestMapping("/api/v1")
+@PreAuthorize("hasAuthority('stats:view')")
 public class StatsController {
 
     private final StatsService statsService;
@@ -35,14 +37,14 @@ public class StatsController {
     }
 
     @Operation(summary = "按执行单元统计（完成率排名）",
-            description = "已登录；全校聚合视图（PRD Q12：学院可见全校概览与排名，不见明细）")
+            description = "stats:view；全校角色看全校，纯学院角色须已获报表下发且仅返回本单元")
     @GetMapping("/plans/{planId}/stats/by-unit")
     public List<StatsDtos.UnitStat> byUnit(@PathVariable Long planId,
                                            @RequestParam(required = false) Integer year) {
         return statsService.byUnit(planId, year);
     }
 
-    @Operation(summary = "按 A 级指标统计", description = "已登录；全校聚合视图；非量化 A 不参与统计")
+    @Operation(summary = "按 A 级指标统计", description = "stats:view；纯学院角色仅按本单元任务归集；非量化 A 不参与统计")
     @GetMapping("/plans/{planId}/stats/by-indicator")
     public List<StatsDtos.IndicatorStat> byIndicator(@PathVariable Long planId,
                                                      @RequestParam(required = false) Integer year) {
@@ -58,7 +60,7 @@ public class StatsController {
     }
 
     @Operation(summary = "指标各年度目标与实际趋势",
-            description = "已登录；全校角色与指标有效负责人可看，其余 20005")
+            description = "stats:view；全校角色与指标有效负责人按原范围查看，已下发学院按本单元重新归集，其余 20005")
     @GetMapping("/indicators/{indicatorId}/trend")
     public StatsDtos.TrendView trend(@PathVariable Long indicatorId) {
         return statsService.trend(indicatorId);

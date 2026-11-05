@@ -55,7 +55,7 @@ public class IndicatorController {
     }
 
     @Operation(summary = "新增 A 或 A+（A+ 必须带 parentId 且父 A 可量化，否则 40006）",
-            description = "权限：indicator:edit；code 为空时系统生成（A01 / A01-1）；草稿 A 的 S 归属可暂空，仅 ADMIN 可在创建时指定")
+            description = "权限：indicator:edit；A 的 code 为空时按所属方向生成 A01、B01…，未分配方向暂用 A 系列；草稿 A 的 S 归属可暂空，仅 ADMIN 可在创建时指定")
     @PostMapping("/api/v1/plans/{planId}/indicators")
     @PreAuthorize("hasAuthority('indicator:edit')")
     @AuditLog(action = "CREATE", resourceType = "indicator", resourceId = "#result.id", after = "#result")

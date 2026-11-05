@@ -1,6 +1,6 @@
 import type { JobStatus } from './enums'
 
-export type ExportType = 'INDICATORS' | 'TASKS' | 'STATS_REPORT' | 'SETTLEMENT' | 'AUDIT_LOGS'
+export type ExportType = 'INDICATORS' | 'TASKS' | 'STATS_REPORT' | 'SETTLEMENT' | 'AUDIT_LOGS' | 'MATERIAL_ZIP'
 
 /** POST /exports 请求体 */
 export interface CreateExportRequest {

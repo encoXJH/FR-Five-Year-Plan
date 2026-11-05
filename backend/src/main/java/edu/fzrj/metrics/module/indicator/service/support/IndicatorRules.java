@@ -22,8 +22,8 @@ public final class IndicatorRules {
     public static final String LEVEL_A = "A";
     public static final String LEVEL_A_PLUS = "A_PLUS";
 
-    private static final Pattern A_CODE = Pattern.compile("A\\d{2}");
-    private static final Pattern A_PLUS_CODE = Pattern.compile("A\\d{2}-\\d+");
+    private static final Pattern A_CODE = Pattern.compile("([A-Z]+)(\\d{2,})");
+    private static final Pattern A_PLUS_CODE = Pattern.compile("[A-Z]+\\d{2,}-\\d+");
 
     /** 计量类型 → 允许的统计口径（不符合返回 40007） */
     private static final Map<String, List<String>> MEASURE_CALIBERS = Map.of(
@@ -63,24 +63,76 @@ public final class IndicatorRules {
         return code != null && A_PLUS_CODE.matcher(code).matches();
     }
 
+    /** 校验编号是否使用指定建设方向的字母前缀。 */
+    public static boolean isACodeForDirection(String code, String directionCode) {
+        if (code == null || directionCode == null) {
+            return false;
+        }
+        var matcher = A_CODE.matcher(code);
+        return matcher.matches() && matcher.group(1).equals(directionCode);
+    }
+
     /** 校验编号格式与层级匹配，不合法抛 10001 */
     public static void requireCodeFormat(String level, String code) {
         boolean ok = LEVEL_A.equals(level) ? isACode(code) : isAPlusCode(code);
         if (!ok) {
             throw new BizException(ErrorCode.PARAM_INVALID,
-                    LEVEL_A.equals(level) ? "指标编号格式应为 A01 形式" : "历史量化记录编号格式应为 A01-1 形式");
+                    LEVEL_A.equals(level) ? "指标编号格式应为 A01、B01、AA01 形式"
+                            : "历史量化记录编号格式应为 A01-1 形式");
         }
     }
 
-    /** 生成下一个 A 编号：A01、A02 …（在既有编号集合上取最大 +1） */
+    /** 未分配方向的指标沿用计划内 A 系列取号。 */
     public static String nextACode(Collection<String> existingCodes) {
+        return nextACode("A", existingCodes);
+    }
+
+    /** 生成指定方向内下一个指标编号，同时避开同计划其他记录占用的完整编码。 */
+    public static String nextACode(String directionCode, Collection<String> existingCodes) {
+        if (directionCode == null || !directionCode.matches("[A-Z]+")) {
+            throw new IllegalArgumentException("建设方向编码必须为字母");
+        }
         int max = 0;
         for (String code : existingCodes) {
-            if (isACode(code)) {
-                max = Math.max(max, Integer.parseInt(code.substring(1)));
+            if (code == null) {
+                continue;
+            }
+            var matcher = A_CODE.matcher(code);
+            if (matcher.matches() && matcher.group(1).equals(directionCode)) {
+                max = Math.max(max, Integer.parseInt(matcher.group(2)));
             }
         }
-        return String.format("A%02d", max + 1);
+        return String.format("%s%02d", directionCode, max + 1);
+    }
+
+    /** 建设方向字母编号：1–26 为 A–Z，27–52 为 AA–ZZ，之后每轮重复次数加一。 */
+    public static String directionCode(int sequence) {
+        if (sequence < 1) {
+            throw new IllegalArgumentException("建设方向编号序号必须大于 0");
+        }
+        int letterIndex = (sequence - 1) % 26;
+        int repeat = (sequence - 1) / 26 + 1;
+        return String.valueOf((char) ('A' + letterIndex)).repeat(repeat);
+    }
+
+    /** 取历史最大方向序号 +1；软删除记录也应传入，确保编号永不复用。 */
+    public static String nextDirectionCode(Collection<String> existingCodes) {
+        int max = 0;
+        for (String code : existingCodes) {
+            if (code == null || code.isEmpty()) {
+                continue;
+            }
+            char letter = code.charAt(0);
+            if (letter < 'A' || letter > 'Z') {
+                continue;
+            }
+            boolean sameLetter = code.chars().allMatch(ch -> ch == letter);
+            if (sameLetter) {
+                int sequence = (code.length() - 1) * 26 + letter - 'A' + 1;
+                max = Math.max(max, sequence);
+            }
+        }
+        return directionCode(max + 1);
     }
 
     /** 生成下一个 A+ 编号：{父编号}-1、-2 … */

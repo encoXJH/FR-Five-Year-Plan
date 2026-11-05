@@ -3,6 +3,7 @@ package edu.fzrj.metrics.module.stats.service;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import edu.fzrj.metrics.common.datascope.DataScopeService;
+import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.indicator.entity.Direction;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.entity.IndicatorYearTarget;
@@ -196,6 +197,221 @@ class StatsServiceTest {
         assertEquals(0, new BigDecimal("8").compareTo(a.actualTotal()));
         assertEquals(0, new BigDecimal("3").compareTo(a.children().get(0).actualTotal()));
         assertEquals(0, new BigDecimal("5").compareTo(a.children().get(1).actualTotal()));
+    }
+
+    @Test
+    void 五年累计不受所选年度零目标影响() {
+        Plan plan = new Plan();
+        plan.setId(11L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2030);
+        Indicator a = indicator(1L, null, "A01", "INCREMENT");
+        a.setRollupMode("AUTO_SUM");
+        a.setTotalTarget(BigDecimal.TEN);
+        Task task = task(101L, 1L, 31L, "A01-C01");
+        TaskYear y2026 = taskYear(1001L, 101L, 1L, 31L, "INCREMENT", "4", "0", "1");
+        TaskYear y2027 = taskYear(1002L, 101L, 1L, 31L, "INCREMENT", "0", "0", "1");
+        y2027.setYear(2027);
+        y2027.setTarget(BigDecimal.ZERO);
+        y2027.setActualValue(null);
+        List<TaskYear> allYears = List.of(y2026, y2027);
+
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(a));
+        when(directionMapper.selectList(any())).thenReturn(List.of());
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit(31L, "C01")));
+        when(taskMapper.selectList(any())).thenReturn(List.of(task));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(y2027), allYears);
+
+        List<StatsDtos.UnitStat> result = statsService.byUnit(11L, 2027, StatsService.ScopeFilter.allData());
+
+        assertEquals(1, result.size());
+        assertEquals(0, result.get(0).taskCount());
+        assertEquals(0, new BigDecimal("0.4").compareTo(result.get(0).cumulativeRate()));
+    }
+
+    @Test
+    void 概览与指标统计将无完成值按零计入且结果一致() {
+        Plan plan = new Plan();
+        plan.setId(11L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2026);
+        Indicator first = indicator(1L, null, "A01", "INCREMENT");
+        first.setRollupMode("AUTO_SUM");
+        first.setTotalTarget(BigDecimal.TEN);
+        Indicator second = indicator(2L, null, "A02", "INCREMENT");
+        second.setRollupMode("AUTO_SUM");
+        second.setTotalTarget(BigDecimal.TEN);
+        Task firstTask = task(101L, 1L, 31L, "A01-C01");
+        Task secondTask = task(102L, 2L, 32L, "A02-C02");
+        TaskYear completed = taskYear(1001L, 101L, 1L, 31L, "INCREMENT", "4", "0", "1");
+        completed.setYearStatus("IN_PROGRESS");
+        TaskYear noData = taskYear(1002L, 102L, 2L, 32L, "INCREMENT", "0", "0", "1");
+        noData.setActualValue(null);
+        noData.setYearStatus("IN_PROGRESS");
+        List<TaskYear> rows = List.of(completed, noData);
+
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(first, second));
+        when(directionMapper.selectList(any())).thenReturn(List.of());
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit(31L, "C01"), unit(32L, "C02")));
+        when(taskMapper.selectList(any())).thenReturn(List.of(firstTask, secondTask));
+        when(taskYearMapper.selectList(any())).thenReturn(rows);
+        when(yearTargetMapper.selectList(any())).thenReturn(List.of());
+        when(planYearMapper.selectList(any())).thenReturn(List.of());
+
+        StatsDtos.Overview overview = statsService.overview(11L, 2026, StatsService.ScopeFilter.allData());
+        List<StatsDtos.IndicatorStat> indicators = statsService.byIndicator(
+                11L, 2026, StatsService.ScopeFilter.allData());
+
+        assertEquals(0, new BigDecimal("0.2").compareTo(overview.cumulativeCompletionRate()));
+        assertEquals(0, new BigDecimal("0.4").compareTo(indicators.get(0).cumulativeRate()));
+        assertEquals(0, BigDecimal.ZERO.compareTo(indicators.get(1).cumulativeRate()));
+    }
+
+    @Test
+    void 指标五年累计占比按分子分母汇总而非任务完成率平均() {
+        Plan plan = new Plan();
+        plan.setId(11L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2026);
+        Indicator a = indicator(1L, null, "A01", "RATIO");
+        a.setRollupMode("AUTO_SUM");
+        a.setTotalTarget(new BigDecimal("0.8"));
+        Task firstTask = task(101L, 1L, 31L, "A01-C01");
+        Task secondTask = task(102L, 1L, 32L, "A01-C02");
+        TaskYear firstYear = taskYear(1001L, 101L, 1L, 31L, "RATIO", "0", "90", "100");
+        firstYear.setTarget(new BigDecimal("0.8"));
+        TaskYear secondYear = taskYear(1002L, 102L, 1L, 32L, "RATIO", "0", "30", "50");
+        secondYear.setTarget(new BigDecimal("0.8"));
+        List<TaskYear> rows = List.of(firstYear, secondYear);
+
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(a));
+        when(directionMapper.selectList(any())).thenReturn(List.of());
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit(31L, "C01"), unit(32L, "C02")));
+        when(taskMapper.selectList(any())).thenReturn(List.of(firstTask, secondTask));
+        when(taskYearMapper.selectList(any())).thenReturn(rows);
+
+        StatsDtos.IndicatorStat result = statsService.byIndicator(
+                11L, 2026, StatsService.ScopeFilter.allData()).get(0);
+
+        assertEquals(0, BigDecimal.ONE.compareTo(result.cumulativeRate()));
+    }
+
+    @Test
+    void 纯学院未下发也能访问统计报表() {
+        login(new LoginUser(201L, "unit", "学院负责人", 31L, List.of("UNIT_OWNER"), List.of()));
+        when(dataScopeService.isUnitScope(any())).thenReturn(true);
+        Plan plan = new Plan();
+        plan.setId(11L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2026);
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of());
+        when(directionMapper.selectList(any())).thenReturn(List.of());
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of());
+        when(taskMapper.selectList(any())).thenReturn(List.of());
+        when(planYearMapper.selectList(any())).thenReturn(List.of());
+
+        assertEquals(0, statsService.overview(11L, 2026).taskCount());
+        assertTrue(statsService.tree(11L, 2026).isEmpty());
+        assertTrue(statsService.byUnit(11L, 2026).isEmpty());
+        assertTrue(statsService.byIndicator(11L, 2026).isEmpty());
+    }
+
+    @Test
+    void 学院统计只归集本单元任务() {
+        login(new LoginUser(201L, "unit", "学院负责人", 31L, List.of("UNIT_OWNER"), List.of()));
+        when(dataScopeService.isUnitScope(any())).thenReturn(true);
+        Plan plan = new Plan();
+        plan.setId(11L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2026);
+        Indicator a = indicator(1L, null, "A01", "INCREMENT");
+        a.setRollupMode("AUTO_SUM");
+        a.setTotalTarget(BigDecimal.TEN);
+        Task own = task(101L, 1L, 31L, "A01-01");
+        Task other = task(102L, 1L, 32L, "A01-02");
+        TaskYear ownYear = taskYear(1001L, 101L, 1L, 31L, "INCREMENT", "4", "0", "1");
+        TaskYear otherYear = taskYear(1002L, 102L, 1L, 32L, "INCREMENT", "10", "0", "1");
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(a));
+        when(directionMapper.selectList(any())).thenReturn(List.of());
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit(31L, "01"), unit(32L, "02")));
+        when(taskMapper.selectList(any())).thenReturn(List.of(own, other));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(ownYear), List.of(ownYear));
+        when(yearTargetMapper.selectList(any())).thenReturn(List.of());
+        when(planYearMapper.selectList(any())).thenReturn(List.of());
+
+        List<StatsDtos.UnitStat> units = statsService.byUnit(11L, 2026);
+        List<StatsDtos.IndicatorStat> indicators = statsService.byIndicator(11L, 2026);
+
+        assertEquals(1, units.size());
+        assertEquals(31L, units.get(0).unit().id());
+        assertEquals(1, units.get(0).taskCount());
+        assertEquals(0, new BigDecimal("0.4").compareTo(units.get(0).cumulativeRate()));
+        assertEquals(1, indicators.size());
+        assertEquals(1, indicators.get(0).taskCount());
+        assertEquals(0, new BigDecimal("0.4").compareTo(indicators.get(0).cumulativeRate()));
+    }
+
+    @Test
+    void 多角色用户按数据范围并集访问统计() {
+        login(new LoginUser(201L, "owner", "负责人", 31L,
+                List.of("UNIT_OWNER", "SCHOOL_OWNER"), List.of()));
+        when(dataScopeService.isUnitScope(any())).thenReturn(true);
+        when(dataScopeService.isOwnerScope(any())).thenReturn(true);
+        Plan plan = new Plan();
+        plan.setId(11L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2026);
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of());
+
+        StatsDtos.Overview result = statsService.overview(11L, 2026);
+
+        assertEquals(0, result.taskCount());
+    }
+
+    @Test
+    void 学院占比趋势按本单元分子分母归集且不采用全校缓存() {
+        login(new LoginUser(201L, "unit", "学院负责人", 31L, List.of("UNIT_OWNER"), List.of()));
+        when(dataScopeService.isUnitScope(any())).thenReturn(true);
+        Indicator indicator = indicator(1L, null, "A01", "RATIO");
+        indicator.setRollupMode("AUTO_SUM");
+        indicator.setTotalTarget(new BigDecimal("0.8"));
+        Plan plan = new Plan();
+        plan.setId(11L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2026);
+        Task own = task(101L, 1L, 31L, "A01-01");
+        Task other = task(102L, 1L, 32L, "A01-02");
+        TaskYear ownYear = taskYear(1001L, 101L, 1L, 31L, "RATIO", "0", "90", "100");
+        IndicatorYearTarget allSchoolCache = target(501L, 1L, "RATIO", "0.99", "99", "100");
+        allSchoolCache.setTarget(new BigDecimal("0.8"));
+        when(indicatorMapper.selectOne(any())).thenReturn(indicator);
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(indicator));
+        when(directionMapper.selectList(any())).thenReturn(List.of());
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit(31L, "01"), unit(32L, "02")));
+        when(taskMapper.selectList(any())).thenReturn(List.of(own, other));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(ownYear), List.of(ownYear));
+        when(yearTargetMapper.selectList(any())).thenReturn(List.of(allSchoolCache));
+        when(planYearMapper.selectList(any())).thenReturn(List.of());
+
+        StatsDtos.TrendView result = statsService.trend(1L);
+
+        StatsDtos.TrendYear year = result.years().get(0);
+        assertEquals(0, new BigDecimal("90").compareTo(year.actualNumerator()));
+        assertEquals(0, new BigDecimal("100").compareTo(year.actualDenominator()));
+        assertEquals(0, new BigDecimal("0.9").compareTo(year.actualValue()));
+        assertEquals(0, new BigDecimal("0.9").compareTo(result.cumulativeActual()));
+    }
+
+    private void login(LoginUser user) {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(user, null, List.of()));
     }
 
     private StatsDtos.TreeNode mixedTree(String caliber) {

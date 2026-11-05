@@ -135,7 +135,7 @@
 | 类型 | JSON 类型 | 规则 | 示例 |
 | --- | --- | --- | --- |
 | ID | string | 64 位雪花 ID **必须用字符串传输**，避免 JS 丢失精度 | `"1849000000000000101"` |
-| 业务编号 | string | A：`A01`；A+：`A01-1`；B：`A01-1-{单元编码}` | `"A01-2-C03"` |
+| 业务编号 | string | 新 A：`{方向编码}{两位序号}`，如 `A01`、`B01`；新 B：`{A编号}-{数字单元编码}`；V21 将存量新 A→B 任务按当前指标与单元编码统一重编，历史 A+ 下的旧 B 编号原样保留 | `"B01-03"` |
 | 年度 | integer | 自然年（需求文档 Q8） | `2026` |
 | 日期 | string | `YYYY-MM-DD` | `"2026-12-31"` |
 | 日期时间 | string | ISO 8601，带时区。服务端统一返回 `+08:00`，接收任意时区 | `"2026-10-22T16:08:43+08:00"` |
@@ -211,6 +211,7 @@
 
 | 资源 / DTO | 字段 | 类型 | 契约规则 |
 | --- | --- | --- | --- |
+| `DirectionDtos` | `code` | string | 建设方向计划内字母编号，只读；按计划内 `sort` 顺序自动生成，1–26 为 `A`–`Z`、27–52 为 `AA`–`ZZ`，之后每轮重复次数加一。创建后不复用、不随删除或排序重排；展示统一为 `编号 · 名称` |
 | `DirectionDtos` | `leaderId` | string / null | S 总负责人 ID；新增、修改时传该字段，配置对象必须是启用且具有 `LEADER` 角色的用户。仅建立责任关联，不新增角色、数据范围或审批节点 |
 | `DirectionDtos` | `leader` | UserRef / null | S 列表和详情返回的总负责人精简引用，只读；未配置时为 `null`，与 `leaderId` 同时返回 |
 | `Indicator` | `isQuantifiable` | boolean | 仅 A 使用；`false` 时只保留 S 归属、名称、性质、说明和负责人，量化字段均为 `null`，不生成 A+ / B，不进入填报、审核、核算和完成率统计 |
@@ -636,7 +637,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | `FileBizType` 文件用途 | `SUBMISSION_ATTACHMENT` / `ADJUSTMENT_ATTACHMENT` / `MILESTONE_ATTACHMENT` / `IMPORT_FILE` | 填报材料 / 调整附件 / 里程碑附件 / 导入文件 |
 | `FileCategory` 文件分类 | `DOCUMENT` / `PDF` / `IMAGE` / `VIDEO` / `ARCHIVE` | 文档 / PDF / 图片 / 视频 / 压缩包 |
 | `PreviewType` 预览方式 | `IMAGE` / `PDF` / `OFFICE` / `VIDEO` / `UNSUPPORTED` | — |
-| `ExportType` 导出类型 | `INDICATORS` / `TASKS` / `STATS_REPORT` / `SETTLEMENT` / `AUDIT_LOGS` | 指标体系 / B 任务 / 统计报表 / 核算结果 / 操作日志 |
+| `ExportType` 导出类型 | `INDICATORS` / `TASKS` / `STATS_REPORT` / `SETTLEMENT` / `AUDIT_LOGS` / `MATERIAL_ZIP` | 指标体系 / B 任务 / 统计报表 / 核算结果 / 操作日志 / 材料 ZIP |
 | `JobStatus` 异步任务状态 | `PENDING` / `RUNNING` / `SUCCEEDED` / `FAILED` | 排队中 / 执行中 / 成功 / 失败 |
 | `NotificationType` 通知类型 | `TASK_DISTRIBUTED` / `DEADLINE_REMINDER` / `REVIEW_RESULT` / `ADJUSTMENT_TODO` / `ADJUSTMENT_RESULT` / `WARNING` | 任务下发 / 截止提醒 / 审核结果 / 调整待办 / 调整结果 / 预警 |
 | `AuditAction` 日志动作 | `LOGIN` / `CREATE` / `UPDATE` / `DELETE` / `IMPORT` / `EXPORT` / `FINALIZE` / `DISTRIBUTE` / `ACCEPT` / `SUBMIT` / `WITHDRAW` / `REVIEW` / `ADJUST_APPLY` / `ADJUST_DECIDE` / `SETTLE` / `UNLOCK` / `PERMISSION_CHANGE` / `FILE_DOWNLOAD` / `FILE_PREVIEW` / `SYNC_ORG` | — |
@@ -669,21 +670,21 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | `TRANSFER` / `POSTPONE_TRANSFER` | `INCREMENT` |
 | `TARGET_CHANGE` | 全部口径（仅限管理员发起） |
 
-**执行单元初始化数据**（来自需求文档 2.1；`code` 用于 B 任务编号，上线后不能修改）：初始 `isEnabled` 均为 `true`，但只有同时满足 `isEnabled=true`、`isBAssignable=true` 的单元才能承接新 B。后续资格由系统管理配置，不得写死编码。
+**执行单元初始化数据**（名称与资格来自需求文档 2.1；V17 后 `code` 统一为数字并用于新 B 任务编号，上线后不能修改）：初始 `isEnabled` 均为 `true`，但只有同时满足 `isEnabled=true`、`isBAssignable=true` 的单元才能承接新 B。后续资格由系统管理配置，不得写死编码。
 
 | code | name | type | isBAssignable |
 | --- | --- | --- | :-: |
-| `C01` | 智能产业学院 | `COLLEGE` | true |
-| `C02` | 数字金融产业学院 | `COLLEGE` | true |
-| `C03` | 数字影视传媒产业学院 | `COLLEGE` | true |
-| `C04` | 数据产业学院 | `COLLEGE` | true |
-| `C05` | 游戏产业学院 | `COLLEGE` | true |
-| `C06` | 智能建造产业学院 | `COLLEGE` | true |
-| `C07` | 现代通信产业学院 | `COLLEGE` | true |
-| `C08` | 未来技术产业学院 | `COLLEGE` | true |
-| `C09` | 国际学院 | `INTERNATIONAL_COLLEGE` | false |
-| `C10` | 马克思主义学院 | `MARXISM_COLLEGE` | false |
-| `S01` | 校办公室 | `SCHOOL_OFFICE` | false |
+| `01` | 智能产业学院 | `COLLEGE` | true |
+| `02` | 数字金融产业学院 | `COLLEGE` | true |
+| `03` | 数字影视传媒产业学院 | `COLLEGE` | true |
+| `04` | 数据产业学院 | `COLLEGE` | true |
+| `05` | 游戏产业学院 | `COLLEGE` | true |
+| `06` | 智能建造产业学院 | `COLLEGE` | true |
+| `07` | 现代通信产业学院 | `COLLEGE` | true |
+| `08` | 未来技术产业学院 | `COLLEGE` | true |
+| `09` | 国际学院 | `INTERNATIONAL_COLLEGE` | false |
+| `10` | 马克思主义学院 | `MARXISM_COLLEGE` | false |
+| `11` | 校办公室 | `SCHOOL_OFFICE` | false |
 
 ---
 
@@ -792,7 +793,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
 | GET | `/plans/{planId}/indicators` | 指标列表；`view=tree` 返回 A → A+ 树；可按 `level`、`isQuantifiable`、`ownerId`、`keyword` 过滤，不支持 S/方向过滤；节点携带 `directionId`、`directionName` 仅供指标总表按主要建设方向分组展示，不用于方向统计 | 已登录（按数据范围） |
-| POST | `/plans/{planId}/indicators` | 新增 A（带 `isQuantifiable`），或在可量化 A 下新增 A+（必须带 `parentId`）；不可量化 A 只校验基础字段 | `indicator:edit` |
+| POST | `/plans/{planId}/indicators` | 新增 A（带 `isQuantifiable`），或在可量化 A 下新增 A+（必须带 `parentId`）；不可量化 A 只校验基础字段；A 的 `code` 为空时按所属方向生成 A01、B01…，未分配方向暂用 A 系列 | `indicator:edit` |
 | POST ⚡ | `/plans/{planId}/indicators/{parentId}/decomposition` | 一页式分解：请求 `{ indicator, rows }`，在一个事务中新建 A+、保存年度目标和 B 草稿，响应 `{ aPlus, allocation }`；任一步失败整体回滚，不下发、不通知学院 | `indicator:edit` + `allocation:edit` + 负责人数据范围 |
 | GET | `/indicators/{indicatorId}` | 指标详情（含量化指标的年度目标、下属 A+，以及 `bSummaries`）；不返回 S 信息 | 按数据范围 |
 | PATCH | `/indicators/{indicatorId}` | 修改指标（带 `version`）；不可量化 A 仅可修改名称、性质、说明、负责人，S 归属须走系统管理接口 | `indicator:edit` |
@@ -813,13 +814,17 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | PUT | `/indicators/{indicatorId}/allocation` | 保存非历史 B 草稿，允许合计不足或超额；已下发指标可追加合格学院，新增行须启用且 `isBAssignable=true`；历史及已生效任务必须原样保留，不得改负责人、改目标或删除 | `allocation:edit` |
 | POST ⚡ | `/plans/{planId}/distribute` | DRAFT 与历史 FINALIZED 均可直接下发；`indicatorIds` 为空时处理全部可下发 A+。下发前依次复核完整性（10001）、年度目标五年守恒（40002）、A/A+ 拆分守恒（40003）、B 分解平衡（50001）及学院负责人（50002），并再次校验单元资格；已下发指标存在追加的待下发 B 时仅处理新任务，无待办对象幂等跳过。下发成功后，计划年度已激活的年份其 `task_year.year_status` 同步置为 `IN_PROGRESS`，学院可直接填报 | `task:distribute` |
 | POST ⚡ | `/plans/{planId}/years/{year}/activate` | 管理员手动激活年度；计划启动后各年度默认未激活，激活后该年已下发任务的年度状态转为进行中，重复激活幂等。填报仅允许当前自然年份且年度未锁定；历史任务跳过且不生成待办或提醒 | `settlement:manage` |
-| GET | `/tasks` | B 任务列表（可按 `unitId`、`indicatorId`、`year`、`status`、`yearStatus`、`isHistorical` 过滤），每项返回 `isHistorical`；学院端可见本单元全部任务，`PENDING_DISTRIBUTION` 任务仅只读展示，不能填报 | 按数据范围 |
+| GET | `/tasks` | B 任务列表（可按 `planId`、`unitId`、`indicatorId`、`year`、`status`、`yearStatus`、`isHistorical` 过滤），每项返回 `isHistorical`；同时返回 `displayYear/latestSubmissionId/latestSubmissionStatus/fileCount/requiredFileCount` 材料摘要，供工作台定位展示年度最新填报及材料缺口；`adjustableAmount` 为 INCREMENT 展示年度剩余可调整量（目标 − 已认定 − 已冻结），其他口径为 null；学院端可见本单元全部任务，`PENDING_DISTRIBUTION` 任务仅只读展示，不能填报 | 按数据范围 |
 | GET | `/tasks/{taskId}` | B 任务详情（各年度目标、完成值、状态、`isHistorical`）；历史任务及既有记录只读可见；待下发任务可查看但不可填报 | 按数据范围 |
 | POST ⚡ | `/tasks/{taskId}/accept` | 历史兼容接口；现行学院角色不再分配此权限，下发后无需接收即可按年度状态填报 | `task:accept` |
+| POST ⚡ | `/task-completion-links` | 创建任务完成进度直接关联，请求 `{ taskAId, taskBId, sourceNote? }`；ID 按字符串传输，来源说明不超过 500 字；允许跨计划，双方须为非历史任务且统计口径一致，同一任务自关联或重复活跃关联返回 10001；建联后立即双向重算各年度既有审核进度 | `system:manage` |
+| GET | `/task-completion-links` | 关联列表；可选 `taskId` 过滤任一侧包含该任务的直接关联 | `system:manage` |
 
-> 分解预览、草稿保存、下发和转移接收必须共用同一套 `isEnabled && isBAssignable` 校验，初始仅 C01–C08 合格，但接口不得按编码硬编码。历史 B 不出现在可编辑矩阵行中，其目标作为只读冻结基数参与守恒；历史任务详情、目标、已审核完成值、快照和审计不删除、不重编号。
+> 分解预览、草稿保存、下发和转移接收必须共用同一套 `isEnabled && isBAssignable` 校验，初始前 8 个二级学院（现行编码 01–08）合格，但接口不得按编码硬编码。历史 B 不出现在可编辑矩阵行中，其目标作为只读冻结基数参与守恒；历史任务详情、目标、已审核完成值、快照和审计不删除、不重编号。
 >
 > 历史 B 的确认接收、填报写入、提交、撤回、单笔/批量审核、调整发起或处理、补做及年度批处理写入，均由服务端统一返回 `409 + 50006（TASK_HISTORICAL_READ_ONLY）`；批量请求混入历史任务时不得部分写入。历史记录查询不受此限制。
+>
+> 创建完成进度关联时，按年度双侧重算双方既有审核进度；后续任一侧审核通过或驳回后，同时重算自身及直接关联任务的相同年度。候选仅取自身与直接邻居的 `ownActual*`，按统计口径和达成方向选择较优一份而不相加，再按本任务目标计算有效 `actual*`、`completionRate` 和 `isAchieved`，并刷新五年累计及 B→A 汇总。部分进度通过 `linkedSourceTaskYearId` 记录来源，仅关联值使本任务达标时设置 `linkedAchieved=true`；待审核不增加进度，来源下降或失效可回退。关联不生成填报、认定、材料或审核记录，也不读取邻居有效值继续传播。
 
 ### 15.5 填报（M4）与审核（M5）
 
@@ -888,6 +893,10 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | POST ⚡ | `/exports` | 创建异步导出任务：`{ type: ExportType, params }`，返回 `exportId` | 视导出类型而定 |
 | GET | `/exports/{exportId}` | 查询导出任务状态；成功时返回签名下载地址 | 任务创建人 |
 
+材料 ZIP 导出约定（任务 3 补录）：`POST /exports` 使用 `{ type: "MATERIAL_ZIP", params: { fileIds: string[] } }`，必须携带 `Idempotency-Key`，权限为 `material:view` 且逐文件套用材料库数据范围。`fileIds` 至少 1 项，服务端自动去重；仅允许导出材料库可见的审核通过填报材料及有权访问的指标材料，文件不存在返回 80004，越权或材料不符合材料库可见条件返回 20005。任务创建时固定文件 ID，异步生成 ZIP；执行期间文件或物理内容已删除时任务置为 `FAILED`，`errorMessage` 明确指出缺失文件。ZIP 以 `建设方向/指标编号/材料名` 组织文件，同目录重名自动追加稳定序号，并附 `manifest.csv`（材料名、ZIP 路径、指标、任务、学院、审核通过时间）；路径分隔符和非法文件名字符会被清理。创建和下载分别沿用 `EXPORT`、`FILE_DOWNLOAD` 审计，导出任务及签名地址仅创建人可查询。
+
+统计报表查看约定（2026-11-04 调整）：`stats:view` 授予 ADMIN / LEADER / SCHOOL_OWNER / UNIT_OWNER，统计报表对所有拥有 `stats:view` 的角色开放，不设下发步骤，也不存在报表下发配置接口与 `stats:distribute` 权限。纯学院角色（UNIT_OWNER 且没有全校或校级负责人数据范围）直接访问 overview、tree、by-unit、by-indicator、trend，年度、五年累计和趋势只归集本单元 B，趋势不得读取全校完成值缓存；多角色按数据范围并集访问。大屏和异步 Excel 的内部统计行为不受影响。
+
 甘特图 `data` 固定包含 `plan/years/nodes/milestones/dependencies/criticalPath/graph`。节点以 `kind=indicator/task` 和 `parentId` 组成 A→B，`years[]` 包含目标、审核完成值、完成率、状态和版本；里程碑保留真实 `dueDate/relatedYear`。`criticalPath.status` 为 `EMPTY/OK/NO_DEPENDENCIES/UNSCHEDULED/CYCLE_DETECTED/YEAR_CONFLICT`，关键任务和边以字符串 ID 数组返回。依赖请求体为 `{ predecessorTaskId, successorTaskId, type: "FS" }`；创建必须携带 `Idempotency-Key`。依赖只表达计划关系，不自动修改目标或阻塞填报。
 
 `GET /plans/{planId}/stats/by-indicator?year=` 的统一响应 `data` 为 `IndicatorStat[]`，无数据时返回 `[]`。`GET /screens/{planId}?year=` 的 `byIndicator` 使用同一数组项结构，不保留方向维度字段。
@@ -911,12 +920,13 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 > - `GET /tasks` 列表项与 `GET /tasks/{taskId}` 详情新增 `deadline`（YYYY-MM-DD，填报截止日 = 展示年度 + 系统参数 `plan.fillDeadline`，默认 12-31；无展示年度为 null）；`GET /todos` 的 `items[]` 新增 `deadline`（仅 FILL / REVIEW 有值）。新增系统参数 `plan.fillDeadline`（V6 迁移，默认 `12-31`，界面设计规范 A8）。
 >
 > 说明（五年累计进度补录 2026-10-25）：年度目标是过程刻度，五年总量目标才是 100%（如「五年 5 本教材」不必每年 1 本）。运行期新增五年累计口径字段，取值规则与五年核算一致（INCREMENT 各年完成值之和；STOCK/GROWTH 最新有数据年总量；RATIO/DIRECT_PERCENT 最新有数据年比率；BOOLEAN 任一年完成为 1），完成率 = 累计完成 ÷ 五年总量目标：
-> - `GET /plans/{planId}/stats/overview` 新增 `cumulativeCompletionRate`（可见可量化 A 指标累计完成率的算术平均，按数据范围过滤，不可量化 A 不进入分母）；
+> - `GET /plans/{planId}/stats/overview` 新增 `cumulativeCompletionRate`（可见可量化 A 指标累计完成率的算术平均，按数据范围过滤，不可量化 A、无有效五年目标及未下发 AUTO_SUM 指标不进入分母；纳入统计但未产生完成值的指标按 0 计入）；
 > - `GET /plans/{planId}/stats/tree` 节点（A / A+ / B）新增 `cumulativeActual` / `cumulativeRate`；节点同时返回 `actualTotal`（STOCK / GROWTH 年度完成总量，GROWTH 的 `actualValue` 为增长率，展示完成量时使用 `actualTotal`）；
-> - `GET /plans/{planId}/stats/by-unit` 与 `by-indicator` 新增 `cumulativeRate`（范围内可量化 B 任务累计完成率按既定口径汇总）；
+> - `GET /plans/{planId}/stats/by-unit` 与 `by-indicator` 新增 `cumulativeRate`：by-unit 对有效 B 任务累计完成率求平均，未产生完成值按 0 计入；by-indicator 先按 A 归集全部可见 B 的完成值再除以 A 五年目标，RATIO 必须按 Σ分子 ÷ Σ分母归集，禁止平均 B 完成率。五年累计使用全规划期数据，不受所选年度目标是否为 0 影响；
 > - `GET /indicators/{indicatorId}/trend` 新增 `cumulativeActual` / `cumulativeRate`（MANUAL 汇总的 A 优先取人工认定值）；
 > - `GET /tasks` 列表项与 `GET /tasks/{taskId}` 详情新增 `cumulativeActual` / `cumulativeRate`。
 > - `GET /tasks` 列表项新增 `yearTargets`（全规划期年度目标数组），供指标总表展开 B 后直接展示全部年度，避免逐任务查询详情。
+> - 调整申请任务勾选补录（2026-11-04）：`GET /tasks` 新增 `planId` 过滤参数；列表项新增 `adjustableAmount`，INCREMENT 按展示年度的目标 − 已认定 − 已冻结计算，其他口径返回 null，供调整前识别剩余可调整量。
 > - `GET /reviews/pending` 新增 `keyword`、`submittedAtFrom`、`submittedAtTo` 查询参数；关键字匹配任务编号、指标编号或名称，时间采用 ISO 8601。
 > - `POST /plans` 的 COPY 请求使用 `copyAllocations` 选择是否复制 B 分工结构；复制后的任务与年度均为待下发/未激活状态，不复制接收、填报、审核或调整执行数据。
 > 均为新增字段，旧客户端不受影响。
@@ -945,8 +955,8 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | --- | --- | --- | --- |
 | GET / POST | `/plans/{planId}/directions` | 系统管理“S 级任务”面板的 S 列表 / 新增；列表和详情 DTO 同时返回 `leaderId` 与 `leader`（UserRef / null），新增时传 `leaderId` | `system:manage`（仅 ADMIN） |
 | PATCH / DELETE | `/directions/{directionId}` | 修改 S 名称、排序、`leaderId` / 删除 S；负责人须具有 LEADER 角色；关联指标已下发后仅可更换总负责人 | `system:manage`（仅 ADMIN） |
-| PUT | `/indicators/{indicatorId}/direction` | 设置未下发 A 的 S 归属 `{ directionId, version }`；自身或下属已下发后禁止，A+ 沿用所属 A | `system:manage`（仅 ADMIN） |
-| GET / POST | `/org-units` | 执行单元列表 / 新增；资源包含 `isEnabled`、`isBAssignable` | 已登录 / `system:manage` |
+| PUT | `/indicators/{indicatorId}/direction` | 设置未下发 A 的 S 归属 `{ directionId, version }`；归属变化时按新方向自动生成 A01、B01…等编码，未分配方向暂用 A 系列；自身或下属已下发后禁止，历史 A+ 仅同步归属、不改编码 | `system:manage`（仅 ADMIN） |
+| GET / POST | `/org-units` | 执行单元列表 / 新增；资源包含 `isEnabled`、`isBAssignable`。V17 将现有单元统一迁移为 `01`、`02`…；新增无需传编码，服务端按包含软删除记录在内的纯数字编码最大值 +1 生成；V21 将新 A→B 任务编号统一为当前指标编码 + 数字单元编码，历史 A+ 任务编号保持不变 | 已登录 / `system:manage` |
 | PATCH | `/org-units/{unitId}` | 修改、停用或配置“可承接新 B”（`isBAssignable`）；既有历史任务不受影响 | `system:manage` |
 | GET / POST | `/major-groups` | 专业群列表 / 新增 | 已登录 / `system:manage` |
 | PATCH | `/major-groups/{majorGroupId}` | 修改专业群 | `system:manage` |

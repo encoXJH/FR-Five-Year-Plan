@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.fzrj.metrics.common.util.PatchHelper;
 import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
+import edu.fzrj.metrics.module.indicator.entity.Direction;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.entity.IndicatorYearTarget;
 import edu.fzrj.metrics.module.indicator.mapper.DirectionMapper;
@@ -17,7 +18,9 @@ import edu.fzrj.metrics.module.plan.entity.PlanYear;
 import edu.fzrj.metrics.module.plan.mapper.PlanMapper;
 import edu.fzrj.metrics.module.plan.mapper.PlanYearMapper;
 import edu.fzrj.metrics.module.plan.mapper.TemplateMapper;
+import edu.fzrj.metrics.module.system.entity.OrgUnit;
 import edu.fzrj.metrics.module.system.mapper.MajorGroupMapper;
+import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.mapper.UserRoleMapper;
 import edu.fzrj.metrics.module.system.service.UserRefResolver;
 import edu.fzrj.metrics.module.task.entity.Task;
@@ -75,6 +78,8 @@ class PlanServiceTest {
     @Mock
     private MajorGroupMapper majorGroupMapper;
     @Mock
+    private OrgUnitMapper orgUnitMapper;
+    @Mock
     private UserRefResolver userRefResolver;
     @Mock
     private UserRoleMapper userRoleMapper;
@@ -100,6 +105,7 @@ class PlanServiceTest {
         TableInfoHelper.initTableInfo(assistant, IndicatorYearTarget.class);
         TableInfoHelper.initTableInfo(assistant, Task.class);
         TableInfoHelper.initTableInfo(assistant, TaskYear.class);
+        TableInfoHelper.initTableInfo(assistant, OrgUnit.class);
     }
 
     @BeforeEach
@@ -133,6 +139,41 @@ class PlanServiceTest {
         assertEquals("DRAFT", indicators.getValue().getStatus());
         assertEquals("DRAFT", plan.getStatus());
         assertNull(plan.getFinalizedAt());
+        verifyNoInteractions(taskMapper, taskYearMapper);
+    }
+
+    @Test
+    void 模板实例化按sort生成建设方向及对应指标编号() {
+        Plan plan = new Plan();
+        plan.setId(11L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2030);
+        TemplateContent.DirectionNode later = new TemplateContent.DirectionNode();
+        later.setSubjectType("SCHOOL");
+        later.setName("后排序方向");
+        later.setSort(20);
+        later.getIndicators().add(indicatorNode("A", "OLD02"));
+        TemplateContent.DirectionNode first = new TemplateContent.DirectionNode();
+        first.setSubjectType("SCHOOL");
+        first.setName("先排序方向");
+        first.setSort(10);
+        first.getIndicators().add(indicatorNode("A", "OLD01"));
+        TemplateContent content = new TemplateContent();
+        content.getDirections().add(later);
+        content.getDirections().add(first);
+
+        planService.instantiate(plan, content);
+
+        ArgumentCaptor<Direction> directions = ArgumentCaptor.forClass(Direction.class);
+        verify(directionMapper, times(2)).insert(directions.capture());
+        assertEquals("先排序方向", directions.getAllValues().get(0).getName());
+        assertEquals("A", directions.getAllValues().get(0).getCode());
+        assertEquals("后排序方向", directions.getAllValues().get(1).getName());
+        assertEquals("B", directions.getAllValues().get(1).getCode());
+        ArgumentCaptor<Indicator> indicators = ArgumentCaptor.forClass(Indicator.class);
+        verify(indicatorMapper, times(2)).insert(indicators.capture());
+        assertEquals("A01", indicators.getAllValues().get(0).getCode());
+        assertEquals("B01", indicators.getAllValues().get(1).getCode());
         verifyNoInteractions(taskMapper, taskYearMapper);
     }
 
@@ -211,6 +252,46 @@ class PlanServiceTest {
     }
 
     @Test
+    void 计划卡片将无完成值指标按零计入五年累计平均分母() {
+        Plan plan = new Plan();
+        plan.setId(1L);
+        plan.setName("测试计划");
+        plan.setStartYear(2026);
+        plan.setEndYear(2030);
+        plan.setStatus("ACTIVE");
+        plan.setSource("BLANK");
+        plan.setCreatedAt(LocalDateTime.of(2026, 1, 1, 8, 0));
+        Task completedTask = task(101L);
+        completedTask.setIndicatorId(10L);
+        completedTask.setTopIndicatorId(10L);
+        Task emptyTask = task(102L);
+        emptyTask.setIndicatorId(20L);
+        emptyTask.setTopIndicatorId(20L);
+        Indicator completed = indicator(10L, null, "A");
+        completed.setIsQuantifiable(true);
+        completed.setStatCaliber("INCREMENT");
+        completed.setTotalTarget(new BigDecimal("100"));
+        Indicator noData = indicator(20L, null, "A");
+        noData.setIsQuantifiable(true);
+        noData.setStatCaliber("INCREMENT");
+        noData.setTotalTarget(new BigDecimal("100"));
+        TaskYear completedYear = taskYear(101L, 2026, "100");
+        TaskYear emptyYear = taskYear(102L, "IN_PROGRESS");
+        emptyYear.setYear(2026);
+
+        when(planMapper.selectList(any())).thenReturn(List.of(plan));
+        when(planReadScopeService.filterVisiblePlans(any())).thenReturn(List.of(plan));
+        when(planReadScopeService.visibleTasks(1L)).thenReturn(List.of(completedTask, emptyTask));
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(completed, noData));
+        when(planReadScopeService.visibleIndicatorIds(any(), any())).thenReturn(Set.of(10L, 20L));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(completedYear, emptyYear));
+
+        PlanDtos.ListItem item = planService.list(null).get(0);
+
+        assertEquals(0, new BigDecimal("0.5").compareTo(item.completionRate()));
+    }
+
+    @Test
     void 跨学院直接访问计划详情返回数据范围错误() {
         Plan plan = new Plan();
         plan.setId(1L);
@@ -282,6 +363,10 @@ class PlanServiceTest {
         when(indicatorMapper.selectList(any())).thenReturn(List.of(sourceIndicator), List.of(targetIndicator));
         when(taskMapper.selectList(any())).thenReturn(List.of(sourceTask));
         when(taskYearMapper.selectList(any())).thenReturn(List.of(sourceYear));
+        OrgUnit unit = new OrgUnit();
+        unit.setId(300L);
+        unit.setCode("03");
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit));
         doAnswer(invocation -> {
             invocation.getArgument(0, Task.class).setId(200L);
             return 1;
@@ -296,6 +381,7 @@ class PlanServiceTest {
         Task copied = taskCaptor.getValue();
         assertEquals(2L, copied.getPlanId());
         assertEquals(20L, copied.getIndicatorId());
+        assertEquals("A01-03", copied.getCode());
         assertEquals("PENDING_DISTRIBUTION", copied.getStatus());
         assertNull(copied.getAcceptedAt());
         assertNull(copied.getDistributedAt());
@@ -364,6 +450,7 @@ class PlanServiceTest {
         sourceTask.setPlanId(1L);
         sourceTask.setIndicatorId(10L);
         sourceTask.setTopIndicatorId(10L);
+        sourceTask.setUnitId(300L);
         sourceTask.setCode("A01-C01");
         TaskYear firstYear = taskYear(100L, "ACHIEVED");
         firstYear.setYear(2026);
@@ -375,6 +462,10 @@ class PlanServiceTest {
         when(indicatorMapper.selectList(any())).thenReturn(List.of(sourceIndicator), List.of(targetIndicator));
         when(taskMapper.selectList(any())).thenReturn(List.of(sourceTask));
         when(taskYearMapper.selectList(any())).thenReturn(List.of(firstYear, lastYear));
+        OrgUnit unit = new OrgUnit();
+        unit.setId(300L);
+        unit.setCode("03");
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit));
         doAnswer(invocation -> {
             invocation.getArgument(0, Task.class).setId(200L);
             return 1;
@@ -404,12 +495,17 @@ class PlanServiceTest {
         Task sourceTask = task(100L);
         sourceTask.setIndicatorId(10L);
         sourceTask.setTopIndicatorId(10L);
+        sourceTask.setUnitId(300L);
         TaskYear sourceYear = taskYear(100L, "ACHIEVED");
         sourceYear.setYear(2026);
         when(planMapper.selectOne(any())).thenReturn(sourcePlan);
         when(indicatorMapper.selectList(any())).thenReturn(List.of(sourceIndicator), List.of(targetIndicator));
         when(taskMapper.selectList(any())).thenReturn(List.of(sourceTask));
         when(taskYearMapper.selectList(any())).thenReturn(List.of(sourceYear));
+        OrgUnit unit = new OrgUnit();
+        unit.setId(300L);
+        unit.setCode("03");
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit));
 
         BizException error = assertThrows(BizException.class,
                 () -> planService.copyAllocations(1L, targetPlan, 99L));

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import { ArrowLeft, ArrowRight, FolderOpened, Search } from '@element-plus/icons-vue'
 import { bindMaterials, listMaterialIndicators, listMaterials } from '@/api/material'
 import type { MaterialIndicatorOption, MaterialItem } from '@/api/material'
@@ -11,12 +11,14 @@ import type { OrgUnit } from '@/api/orgUnit'
 import { listPlans } from '@/api/plan'
 import { getCurrentPlan, setCurrentPlan } from '@/utils/currentPlan'
 import { downloadFile } from '@/api/file'
+import { createExport, pollExport } from '@/api/export'
+import { newIdempotencyKey } from '@/utils/idempotency'
 import MaterialUploader from '@/views/submission/components/MaterialUploader.vue'
 import FilePreviewDrawer from '@/components/FilePreviewDrawer.vue'
 import { useUserStore } from '@/stores/user'
 import { formatDateTime } from '@/utils/format'
 import { useAutoRefresh } from '@/utils/autoRefresh'
-import { FILE_CATEGORY_COLORS, formatFileSize } from '@/utils/file'
+import { FILE_CATEGORY_COLORS, formatFileSize, triggerFileDownload } from '@/utils/file'
 import type { TaskListItem } from '@/types/task'
 import type { PlanCard } from '@/types/plan'
 
@@ -37,6 +39,9 @@ const indicators = ref<MaterialIndicatorOption[]>([])
 const units = ref<OrgUnit[]>([])
 const rows = ref<MaterialItem[]>([])
 const total = ref(0)
+const materialTable = ref()
+const selectedMaterials = ref<MaterialItem[]>([])
+const exportingZip = ref(false)
 const filters = reactive({ unitId: '', category: '', keyword: '' })
 const page = ref(1)
 const pageSize = ref(10)
@@ -60,6 +65,7 @@ const selectedPlanName = computed(() =>
   plans.value.find((item) => item.id === planId.value)?.name ?? '')
 const canDirectUpload = computed(() =>
   userStore.roles.includes('ADMIN') || userStore.roles.includes('SCHOOL_OWNER'))
+const selectedMaterialIds = computed(() => new Set(selectedMaterials.value.map((item) => item.id)))
 const hasSelection = computed(() => Boolean(selectedIndicatorId.value))
 const selectedIndicator = computed(() =>
   indicators.value.find((item) => item.id === selectedIndicatorId.value))
@@ -86,7 +92,9 @@ const emptyDescription = computed(() =>
 const indicatorGroups = computed(() => {
   const groups = new Map<string, MaterialIndicatorOption[]>()
   for (const item of indicators.value) {
-    const key = item.directionName?.trim() || '未归入建设方向'
+    const key = item.directionName?.trim()
+      ? item.directionName
+      : '未归入建设方向'
     const list = groups.get(key)
     if (list) list.push(item)
     else groups.set(key, [item])
@@ -157,6 +165,8 @@ function resetPlanContext(): void {
   filters.keyword = ''
   navKeyword.value = ''
   rows.value = []
+  selectedMaterials.value = []
+  materialTable.value?.clearSelection()
   total.value = 0
   page.value = 1
   expandedIndicatorIds.value = new Set()
@@ -170,6 +180,36 @@ async function handlePlanChange(): Promise<void> {
   resetPlanContext()
   await router.replace({ path: route.path, query: planId.value ? { planId: planId.value } : {} })
   await loadIndicators()
+}
+
+function handleMaterialSelectionChange(selection: MaterialItem[]): void {
+  const currentPageIds = new Set(rows.value.map((item) => item.id))
+  const merged = new Map(
+    selectedMaterials.value.filter((item) => !currentPageIds.has(item.id)).map((item) => [item.id, item] as const),
+  )
+  selection.forEach((item) => merged.set(item.id, item))
+  selectedMaterials.value = [...merged.values()]
+}
+
+function syncMaterialTableSelection(): void {
+  void nextTick(() => {
+    const selectedIds = new Set(selectedMaterials.value.map((item) => item.id))
+    rows.value.forEach((row) => materialTable.value?.toggleRowSelection(row, selectedIds.has(row.id)))
+  })
+}
+
+function toggleMaterial(row: MaterialItem): void {
+  if (selectedMaterialIds.value.has(row.id)) {
+    selectedMaterials.value = selectedMaterials.value.filter((item) => item.id !== row.id)
+  } else {
+    selectedMaterials.value = [...selectedMaterials.value, row]
+  }
+  syncMaterialTableSelection()
+}
+
+function clearFileSelection(): void {
+  selectedMaterials.value = []
+  materialTable.value?.clearSelection()
 }
 
 async function loadList(silent = false): Promise<void> {
@@ -196,6 +236,7 @@ async function loadList(silent = false): Promise<void> {
     if (sequence !== listRequestSequence) return
     rows.value = result.items
     total.value = result.total
+    syncMaterialTableSelection()
   } finally {
     if (!silent && sequence === listRequestSequence) loading.value = false
   }
@@ -286,6 +327,7 @@ function showAllYears(): void {
 function clearSelection(): void {
   listRequestSequence += 1
   loading.value = false
+  clearFileSelection()
   selectedIndicatorId.value = ''
   selectedTaskId.value = ''
   selectedTaskCode.value = ''
@@ -343,6 +385,43 @@ function openPreview(row: MaterialItem): void {
 
 async function download(row: MaterialItem): Promise<void> {
   await downloadFile(row.id, row.fileName, row.size)
+}
+
+async function exportSelectedZip(): Promise<void> {
+  if (selectedMaterials.value.length === 0) {
+    ElMessage.warning('请先勾选要导出的材料')
+    return
+  }
+  exportingZip.value = true
+  const notification = ElNotification({
+    title: '导出 ZIP',
+    message: `正在打包 ${selectedMaterials.value.length} 份材料，请稍候…`,
+    type: 'info',
+    duration: 0,
+  })
+  try {
+    const { exportId } = await createExport(
+      { type: 'MATERIAL_ZIP', params: { fileIds: selectedMaterials.value.map((item) => item.id) } },
+      newIdempotencyKey(),
+    )
+    const job = await pollExport(exportId, undefined, { timeoutMs: 600000 })
+    notification.close()
+    if (job.status === 'SUCCEEDED' && job.downloadUrl) {
+      triggerFileDownload(job.downloadUrl, '材料库.zip')
+      ElNotification({ title: '导出成功', message: 'ZIP 已生成，已开始下载', type: 'success' })
+    } else {
+      ElNotification({ title: '导出失败', message: job.errorMessage ?? '材料打包失败', type: 'error' })
+    }
+  } catch (error) {
+    notification.close()
+    ElNotification({
+      title: '导出失败',
+      message: error instanceof Error ? error.message : '材料打包失败',
+      type: 'error',
+    })
+  } finally {
+    exportingZip.value = false
+  }
 }
 
 onMounted(async () => {
@@ -529,15 +608,29 @@ useAutoRefresh(async () => {
             </el-form>
           </el-card>
 
+          <div v-if="selectedMaterials.length" class="material-selection-bar">
+            <span>已选 <strong>{{ selectedMaterials.length }}</strong> 份材料<small>支持跨页选择，切换计划后自动清空</small></span>
+            <div class="material-selection-bar__actions">
+              <el-button type="primary" :loading="exportingZip" @click="exportSelectedZip">导出 ZIP（{{ selectedMaterials.length }}）</el-button>
+              <el-button :disabled="exportingZip" @click="clearFileSelection">清空</el-button>
+              <el-button text :disabled="exportingZip" @click="clearFileSelection">取消</el-button>
+            </div>
+          </div>
+
           <el-card shadow="never" class="list-card">
             <div class="material-table-wrap">
               <el-table
+                ref="materialTable"
                 v-loading="loading"
                 :data="rows"
+                row-key="id"
                 border
                 size="small"
-                :style="{ minWidth: selectedTaskId ? '820px' : '1060px' }"
+                :style="{ minWidth: selectedTaskId ? '864px' : '1104px' }"
+                @select="handleMaterialSelectionChange"
+                @select-all="handleMaterialSelectionChange"
               >
+                <el-table-column type="selection" width="44" fixed="left" align="center" />
                 <el-table-column label="材料名称" min-width="200">
                   <template #default="{ row }">
                     <div class="file-name-cell">
@@ -581,6 +674,26 @@ useAutoRefresh(async () => {
                 </el-table-column>
                 <template #empty><el-empty :image-size="80" :description="emptyDescription" /></template>
               </el-table>
+            </div>
+            <div v-loading="loading" class="material-mobile-list">
+              <article v-for="row in rows" :key="row.id" class="material-mobile-card" :class="{ selected: selectedMaterialIds.has(row.id) }">
+                <div class="material-mobile-card__head">
+                  <el-checkbox :model-value="selectedMaterialIds.has(row.id)" @change="toggleMaterial(row)">
+                    <span class="material-mobile-card__name">{{ row.fileName }}</span>
+                  </el-checkbox>
+                </div>
+                <div class="material-mobile-card__meta">
+                  <span>{{ CATEGORY_LABELS[row.category] ?? row.category }} · {{ formatFileSize(row.size) }}</span>
+                  <span v-if="row.taskCode">{{ row.taskCode }}<template v-if="row.year"> · {{ row.year }} 年</template></span>
+                  <span v-if="row.unit">{{ row.unit.name }}</span>
+                  <span>{{ formatDateTime(row.uploadedAt) }}</span>
+                </div>
+                <div class="material-mobile-card__actions">
+                  <el-button link type="primary" @click="openPreview(row)">预览</el-button>
+                  <el-button link type="primary" @click="download(row)">下载</el-button>
+                </div>
+              </article>
+              <el-empty v-if="rows.length === 0" :image-size="80" :description="emptyDescription" />
             </div>
             <el-pagination
               v-model:current-page="page"
@@ -668,6 +781,11 @@ useAutoRefresh(async () => {
 .material-content__actions { display: flex; flex-wrap: wrap; gap: 8px; flex: none; }
 .filter-card { margin-bottom: 16px; }
 .filter-card :deep(.el-card__body) { padding-bottom: 0; }
+.material-selection-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; padding: 10px 12px; color: var(--el-color-primary); background: var(--el-color-primary-light-9); border: 1px solid var(--el-color-primary-light-7); border-radius: 6px; }
+.material-selection-bar > span { font-size: 13px; }
+.material-selection-bar small { margin-left: 10px; color: var(--el-text-color-secondary); }
+.material-selection-bar__actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.material-mobile-list { display: none; }
 :global(.material-indicator-popper) { max-width: 560px; }
 :global(.material-indicator-popper .el-select-dropdown__item) { display: flex; align-items: center; gap: 6px; }
 :global(.material-indicator-popper .opt-code) { flex: none; color: var(--el-color-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -697,6 +815,22 @@ useAutoRefresh(async () => {
   .filter-card :deep(.el-form-item) { display: flex; margin-right: 0; }
   .filter-card :deep(.el-form-item__content) { flex: 1; }
   .filter-card :deep(.el-select), .filter-card :deep(.el-input) { width: 100% !important; }
+  .material-selection-bar { align-items: stretch; flex-direction: column; }
+  .material-selection-bar small { display: block; margin: 4px 0 0; }
+  .material-selection-bar__actions { flex-wrap: wrap; }
+  .material-selection-bar__actions .el-button { min-height: 40px; margin: 0; }
+  .material-selection-bar__actions .el-button:first-child { flex: 1; }
+  .material-table-wrap { display: none; }
+  .material-mobile-list { display: grid; gap: 10px; }
+  .material-mobile-card { padding: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 6px; }
+  .material-mobile-card.selected { background: var(--el-color-primary-light-9); border-color: var(--el-color-primary-light-5); }
+  .material-mobile-card__head :deep(.el-checkbox) { width: 100%; height: auto; align-items: flex-start; white-space: normal; }
+  .material-mobile-card__head :deep(.el-checkbox__input) { margin-top: 3px; }
+  .material-mobile-card__head :deep(.el-checkbox__label) { min-width: 0; line-height: 1.45; overflow-wrap: anywhere; }
+  .material-mobile-card__name { color: var(--el-text-color-primary); font-weight: 600; }
+  .material-mobile-card__meta { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 4px 24px; color: var(--el-text-color-secondary); font-size: 12px; }
+  .material-mobile-card__actions { display: flex; justify-content: flex-end; }
+  .material-mobile-card__actions .el-button { min-height: 40px; }
   .list-pagination { justify-content: center; }
 }
 </style>

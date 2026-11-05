@@ -135,6 +135,7 @@ export interface UpdateTemplateRequest {
 export interface Direction {
   id: string
   planId: string
+  code: string
   name: string
   sort: number | null
   leaderId: string | null

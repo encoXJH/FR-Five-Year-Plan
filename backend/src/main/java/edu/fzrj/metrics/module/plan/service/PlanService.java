@@ -11,6 +11,7 @@ import edu.fzrj.metrics.module.indicator.entity.IndicatorYearTarget;
 import edu.fzrj.metrics.module.indicator.mapper.DirectionMapper;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorYearTargetMapper;
+import edu.fzrj.metrics.module.indicator.service.support.IndicatorRules;
 import edu.fzrj.metrics.module.plan.dto.PlanDtos;
 import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.plan.entity.PlanYear;
@@ -21,9 +22,11 @@ import edu.fzrj.metrics.module.plan.mapper.TemplateMapper;
 import edu.fzrj.metrics.module.stats.service.support.CumulativeCalculator;
 import edu.fzrj.metrics.module.submission.service.support.MetricCalculator;
 import edu.fzrj.metrics.module.system.entity.MajorGroup;
+import edu.fzrj.metrics.module.system.entity.OrgUnit;
 import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.system.entity.UserRole;
 import edu.fzrj.metrics.module.system.mapper.MajorGroupMapper;
+import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.mapper.UserRoleMapper;
 import edu.fzrj.metrics.module.system.service.UserRefResolver;
 import edu.fzrj.metrics.module.task.entity.Task;
@@ -59,6 +62,7 @@ public class PlanService {
     private final IndicatorMapper indicatorMapper;
     private final IndicatorYearTargetMapper yearTargetMapper;
     private final MajorGroupMapper majorGroupMapper;
+    private final OrgUnitMapper orgUnitMapper;
     private final UserRefResolver userRefResolver;
     private final UserRoleMapper userRoleMapper;
     private final TaskMapper taskMapper;
@@ -70,7 +74,7 @@ public class PlanService {
     public PlanService(PlanMapper planMapper, PlanYearMapper planYearMapper, TemplateMapper templateMapper,
                        DirectionMapper directionMapper, IndicatorMapper indicatorMapper,
                        IndicatorYearTargetMapper yearTargetMapper, MajorGroupMapper majorGroupMapper,
-                       UserRefResolver userRefResolver, UserRoleMapper userRoleMapper,
+                       OrgUnitMapper orgUnitMapper, UserRefResolver userRefResolver, UserRoleMapper userRoleMapper,
                        TaskMapper taskMapper, TaskYearMapper taskYearMapper,
                        TaskYearActivationService taskYearActivationService,
                        ObjectMapper objectMapper,
@@ -82,6 +86,7 @@ public class PlanService {
         this.indicatorMapper = indicatorMapper;
         this.yearTargetMapper = yearTargetMapper;
         this.majorGroupMapper = majorGroupMapper;
+        this.orgUnitMapper = orgUnitMapper;
         this.userRefResolver = userRefResolver;
         this.userRoleMapper = userRoleMapper;
         this.taskMapper = taskMapper;
@@ -93,7 +98,7 @@ public class PlanService {
 
     // ---------------- 查询 ----------------
 
-    /** 计划列表（不分页，首页卡片；完成率 = 当前统计年度有正目标的已下发任务达标率，无任务时为 null） */
+    /** 计划列表（不分页，首页卡片；完成率 = 有效 A 指标五年累计完成率平均，无执行任务时为 null） */
     public List<PlanDtos.ListItem> list(String status) {
         LambdaQueryWrapper<Plan> wrapper = new LambdaQueryWrapper<Plan>()
                 .eq(Plan::getDeleted, 0L)
@@ -133,10 +138,10 @@ public class PlanService {
             return null;
         }
 
-        List<Long> taskIds = visibleTasks.stream()
+        List<Task> distributedTasks = visibleTasks.stream()
                 .filter(task -> !"PENDING_DISTRIBUTION".equals(task.getStatus()))
-                .filter(task -> !Boolean.TRUE.equals(task.getIsHistorical()))
-                .map(Task::getId).toList();
+                .toList();
+        List<Long> taskIds = distributedTasks.stream().map(Task::getId).toList();
         Map<Long, List<TaskYear>> taskYearsByTask = taskIds.isEmpty() ? Map.of()
                 : taskYearMapper.selectList(new LambdaQueryWrapper<TaskYear>()
                         .in(TaskYear::getTaskId, taskIds)
@@ -155,8 +160,19 @@ public class PlanService {
 
         List<BigDecimal> rates = new ArrayList<>();
         for (Indicator a : rootAs) {
+            if (a.getTotalTarget() == null || a.getTotalTarget().compareTo(BigDecimal.ZERO) == 0) {
+                continue;
+            }
+            boolean manual = "MANUAL".equals(a.getRollupMode());
+            List<Task> indicatorTasks = distributedTasks.stream()
+                    .filter(task -> a.getId().equals(task.getTopIndicatorId())
+                            || a.getId().equals(task.getIndicatorId()))
+                    .toList();
+            if (!manual && indicatorTasks.isEmpty()) {
+                continue;
+            }
             List<MetricCalculator.YearResult> years = new ArrayList<>();
-            if ("MANUAL".equals(a.getRollupMode())) {
+            if (manual) {
                 Map<Integer, IndicatorYearTarget> byYear = manualByYear.getOrDefault(a.getId(), Map.of());
                 for (int y = plan.getStartYear(); y <= plan.getEndYear(); y++) {
                     IndicatorYearTarget row = byYear.get(y);
@@ -166,9 +182,7 @@ public class PlanService {
                                     row.getActualTotal(), null, null));
                 }
             } else {
-                List<TaskYear> rows = visibleTasks.stream()
-                        .filter(task -> a.getId().equals(task.getTopIndicatorId())
-                                || a.getId().equals(task.getIndicatorId()))
+                List<TaskYear> rows = indicatorTasks.stream()
                         .flatMap(task -> taskYearsByTask.getOrDefault(task.getId(), List.of()).stream())
                         .toList();
                 BigDecimal previousTotal = a.getBaselineValue();
@@ -506,9 +520,15 @@ public class PlanService {
             requireReliableYearMapping(content.getStartYear(), content.getEndYear(), plan);
         }
         Long userId = SecurityUtils.getUserId();
-        for (TemplateContent.DirectionNode directionNode : content.getDirections()) {
+        int directionSequence = 1;
+        java.util.Set<String> instantiatedCodes = new java.util.HashSet<>();
+        List<TemplateContent.DirectionNode> directionNodes = content.getDirections().stream()
+                .sorted(java.util.Comparator.comparing(node -> node.getSort() == null ? 0 : node.getSort()))
+                .toList();
+        for (TemplateContent.DirectionNode directionNode : directionNodes) {
             Direction direction = new Direction();
             direction.setPlanId(plan.getId());
+            direction.setCode(IndicatorRules.directionCode(directionSequence++));
             direction.setSubjectType(directionNode.getSubjectType());
             if ("MAJOR_GROUP".equals(directionNode.getSubjectType())) {
                 MajorGroup group = majorGroupMapper.selectOne(new LambdaQueryWrapper<MajorGroup>()
@@ -539,6 +559,8 @@ public class PlanService {
             directionMapper.insert(direction);
             for (TemplateContent.IndicatorNode aNode : directionNode.getIndicators()) {
                 Indicator a = toIndicator(plan.getId(), direction.getId(), null, aNode, userId);
+                a.setCode(IndicatorRules.nextACode(direction.getCode(), instantiatedCodes));
+                instantiatedCodes.add(a.getCode());
                 indicatorMapper.insert(a);
                 insertYearTargets(a.getId(), aNode.getYearTargets(), plan, content, userId);
                 for (TemplateContent.IndicatorNode apNode : aNode.getChildren()) {
@@ -550,6 +572,8 @@ public class PlanService {
         }
         for (TemplateContent.IndicatorNode aNode : content.getUnassignedIndicators()) {
             Indicator a = toIndicator(plan.getId(), null, null, aNode, userId);
+            a.setCode(IndicatorRules.nextACode(instantiatedCodes));
+            instantiatedCodes.add(a.getCode());
             indicatorMapper.insert(a);
             insertYearTargets(a.getId(), aNode.getYearTargets(), plan, content, userId);
             for (TemplateContent.IndicatorNode apNode : aNode.getChildren()) {
@@ -567,10 +591,13 @@ public class PlanService {
                         .eq(Indicator::getPlanId, sourcePlanId)
                         .eq(Indicator::getDeleted, 0L))
                 .stream().collect(Collectors.toMap(Indicator::getId, Function.identity()));
-        Map<String, Long> targetIndicatorIds = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
-                        .eq(Indicator::getPlanId, targetPlan.getId())
-                        .eq(Indicator::getDeleted, 0L))
-                .stream().collect(Collectors.toMap(Indicator::getCode, Indicator::getId));
+        List<Indicator> targetIndicators = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
+                .eq(Indicator::getPlanId, targetPlan.getId())
+                .eq(Indicator::getDeleted, 0L));
+        Map<String, Long> targetIndicatorIds = targetIndicators.stream()
+                .collect(Collectors.toMap(Indicator::getCode, Indicator::getId));
+        Map<Long, Indicator> targetIndicatorsById = targetIndicators.stream()
+                .collect(Collectors.toMap(Indicator::getId, Function.identity()));
         List<Task> sourceTasks = taskMapper.selectList(new LambdaQueryWrapper<Task>()
                 .eq(Task::getPlanId, sourcePlanId)
                 .eq(Task::getIsHistorical, false)
@@ -578,6 +605,9 @@ public class PlanService {
         if (sourceTasks.isEmpty()) {
             return;
         }
+        Map<Long, String> unitCodes = orgUnitMapper.selectList(new LambdaQueryWrapper<OrgUnit>()
+                        .in(OrgUnit::getId, sourceTasks.stream().map(Task::getUnitId).toList()))
+                .stream().collect(Collectors.toMap(OrgUnit::getId, OrgUnit::getCode));
         Map<Long, List<TaskYear>> yearsByTask = taskYearMapper.selectList(new LambdaQueryWrapper<TaskYear>()
                         .in(TaskYear::getTaskId, sourceTasks.stream().map(Task::getId).toList())
                         .eq(TaskYear::getDeleted, 0L))
@@ -593,7 +623,7 @@ public class PlanService {
             target.setIndicatorId(indicatorId);
             target.setTopIndicatorId(topIndicatorId);
             target.setUnitId(source.getUnitId());
-            target.setCode(source.getCode());
+            target.setCode(targetIndicatorsById.get(indicatorId).getCode() + "-" + unitCodes.get(source.getUnitId()));
             target.setOwnerId(source.getOwnerId());
             target.setStatus("PENDING_DISTRIBUTION");
             target.setIsHistorical(false);

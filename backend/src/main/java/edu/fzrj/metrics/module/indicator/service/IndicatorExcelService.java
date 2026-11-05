@@ -105,7 +105,7 @@ public class IndicatorExcelService {
         notes.add(List.of("统计口径：INCREMENT 增量累计型 / STOCK 存量时点型 / GROWTH 增长率型 / RATIO 占比型 / DIRECT_PERCENT 直填百分比型 / BOOLEAN 是否型"));
         notes.add(List.of("合法组合：数值→增量/存量；是否→是否型；百分比-可量化→增长率/占比；百分比-不可量化→直填百分比"));
         notes.add(List.of("达成方向：HIGHER_BETTER 越大越好 / LOWER_BETTER 越小越好；汇总方式：AUTO_SUM 自动汇总 / MANUAL 手工认定（仅可量化的 A 必填）"));
-        notes.add(List.of("层级仅支持 A；编号可留空由系统生成（A01），学院 B 在分工矩阵中直接分配"));
+        notes.add(List.of("层级仅支持 A；编号可留空由系统生成（未分配方向时使用 A01、A02…），学院 B 在分工矩阵中直接分配"));
         notes.add(List.of("不可量化 A 的计量类型、统计口径、单位、达成方向、汇总方式、基线值、五年目标和年度目标均须留空"));
         notes.add(List.of("导入的 A 均为未归属 S 的草稿，S 归属由 ADMIN 在系统管理中另行配置"));
         notes.add(List.of("增量累计型：各年度目标之和必须等于五年目标；是否型：在计划完成年份的目标列填「是」，其余留空"));

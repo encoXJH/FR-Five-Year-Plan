@@ -52,11 +52,13 @@ const filters = reactive({
 })
 
 const unitOptions = ref<OrgUnit[]>([])
-const indicatorOptions = ref<{ id: string; code: string; name: string; directionName: string | null }[]>([])
+const indicatorOptions = ref<{ id: string; code: string; name: string; directionCode: string | null; directionName: string | null }[]>([])
 const indicatorGroups = computed(() => {
   const groups = new Map<string, typeof indicatorOptions.value>()
   for (const option of indicatorOptions.value) {
-    const name = option.directionName || '未归入建设方向'
+    const name = option.directionName
+      ? option.directionName
+      : '未归入建设方向'
     const list = groups.get(name) ?? []
     list.push(option)
     groups.set(name, list)
@@ -79,6 +81,7 @@ async function loadIndicatorOptions(): Promise<void> {
       id: node.id,
       code: node.code,
       name: node.name,
+      directionCode: node.directionCode ?? null,
       directionName: node.directionName ?? null,
     }))
   } catch {
@@ -758,7 +761,7 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
             <el-form label-width="110px" class="review-form" @submit.prevent>
             <template v-if="caliber === 'INCREMENT'">
               <el-form-item label="认定值">
-                <el-input-number v-model="reviewForm.amount" :min="0" :precision="0" controls-position="right" />
+                <el-input-number v-model="reviewForm.amount" :min="0" :precision="4" controls-position="right" />
                 <span class="field-hint">≤ 填报值 {{ detail.value.amount ?? '—' }}</span>
               </el-form-item>
             </template>
@@ -780,7 +783,7 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
             </template>
             <template v-else-if="caliber === 'DIRECT_PERCENT'">
               <el-form-item label="认定百分比">
-                <el-input-number v-model="reviewForm.percent" :min="0" :max="100" :precision="1" controls-position="right" />
+                <el-input-number v-model="reviewForm.percent" :min="0" :max="100" :precision="4" controls-position="right" />
                 <span class="field-unit">%</span>
                 <span class="field-hint">≤ 填报值 {{ detail.value.percent === null || detail.value.percent === undefined ? '—' : formatPercent(detail.value.percent) }}</span>
               </el-form-item>

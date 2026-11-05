@@ -62,6 +62,32 @@ class SubmissionValueRulesTest {
     }
 
     @Test
+    void 普通数值最多四位小数且忽略末尾零() {
+        assertNull(SubmissionValueRules.caliberError("INCREMENT", bd("1.2345"), null, null, null, null, null));
+        assertNull(SubmissionValueRules.caliberError("STOCK", null, bd("1.0000"), null, null, null, null));
+        assertNull(SubmissionValueRules.caliberError("GROWTH", null, bd("1.00000"), null, null, null, null));
+        assertNull(SubmissionValueRules.caliberError("RATIO", null, null, bd("2.3456"), bd("3.4567"), null, null));
+
+        assertNotNull(SubmissionValueRules.caliberError("INCREMENT", bd("1.23456"), null, null, null, null, null));
+        assertNotNull(SubmissionValueRules.caliberError("STOCK", null, bd("1.23456"), null, null, null, null));
+        assertNotNull(SubmissionValueRules.caliberError("GROWTH", null, bd("1.23456"), null, null, null, null));
+        assertNotNull(SubmissionValueRules.caliberError("RATIO", null, null, bd("1.23456"), bd("2"), null, null));
+        assertNotNull(SubmissionValueRules.caliberError("RATIO", null, null, bd("1"), bd("2.34567"), null, null));
+    }
+
+    @Test
+    void 直填百分比必须在零到一之间且最多六位小数() {
+        assertNull(SubmissionValueRules.caliberError("DIRECT_PERCENT", null, null, null, null, BigDecimal.ZERO, null));
+        assertNull(SubmissionValueRules.caliberError("DIRECT_PERCENT", null, null, null, null, BigDecimal.ONE, null));
+        assertNull(SubmissionValueRules.caliberError("DIRECT_PERCENT", null, null, null, null, bd("0.123456"), null));
+        assertNull(SubmissionValueRules.caliberError("DIRECT_PERCENT", null, null, null, null, bd("1.0000000"), null));
+
+        assertNotNull(SubmissionValueRules.caliberError("DIRECT_PERCENT", null, null, null, null, bd("1.000001"), null));
+        assertNotNull(SubmissionValueRules.caliberError("DIRECT_PERCENT", null, null, null, null, bd("-0.000001"), null));
+        assertNotNull(SubmissionValueRules.caliberError("DIRECT_PERCENT", null, null, null, null, bd("0.1234567"), null));
+    }
+
+    @Test
     void 认定值大于填报值判定() {
         assertTrue(SubmissionValueRules.exceedsSubmitted("INCREMENT",
                 bd("2"), null, null, null, null, null,

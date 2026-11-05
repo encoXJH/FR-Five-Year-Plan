@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.fzrj.metrics.common.datascope.DataScopeService;
 import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
+import edu.fzrj.metrics.module.file.service.MaterialService;
 import edu.fzrj.metrics.module.file.service.SignedUrlService;
 import edu.fzrj.metrics.module.plan.service.PlanService;
 import edu.fzrj.metrics.module.system.dto.ExportDtos;
@@ -13,35 +14,40 @@ import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
 
+import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * 异步导出任务（API 约定 15.8）：创建 → @Async 生成 xlsx 落盘 → 查询状态拿签名地址。
- * 阶段 2 仅支持 INDICATORS 指标体系导出。
+ * 异步导出任务（API 约定 15.8）：创建 → @Async 生成文件落盘 → 查询状态拿签名地址。
  */
 @Service
 public class ExportService {
 
     private static final Set<String> EXPORT_TYPES = Set.of(
-            "INDICATORS", "TASKS", "STATS_REPORT", "SETTLEMENT", "AUDIT_LOGS");
+            "INDICATORS", "TASKS", "STATS_REPORT", "SETTLEMENT", "AUDIT_LOGS", "MATERIAL_ZIP");
 
     private final ExportJobMapper exportJobMapper;
     private final ExportJobExecutor exportJobExecutor;
     private final PlanService planService;
     private final DataScopeService dataScopeService;
     private final SignedUrlService signedUrlService;
+    private final MaterialService materialService;
     private final ObjectMapper objectMapper;
 
     public ExportService(ExportJobMapper exportJobMapper, ExportJobExecutor exportJobExecutor,
                          PlanService planService, DataScopeService dataScopeService,
-                         SignedUrlService signedUrlService, ObjectMapper objectMapper) {
+                         SignedUrlService signedUrlService, MaterialService materialService,
+                         ObjectMapper objectMapper) {
         this.exportJobMapper = exportJobMapper;
         this.exportJobExecutor = exportJobExecutor;
         this.planService = planService;
         this.dataScopeService = dataScopeService;
         this.signedUrlService = signedUrlService;
+        this.materialService = materialService;
         this.objectMapper = objectMapper;
     }
 
@@ -50,13 +56,17 @@ public class ExportService {
             throw new BizException(ErrorCode.PARAM_INVALID, "导出类型不合法");
         }
         if (!"INDICATORS".equals(request.getType()) && !"STATS_REPORT".equals(request.getType())
-                && !"AUDIT_LOGS".equals(request.getType())) {
+                && !"AUDIT_LOGS".equals(request.getType()) && !"MATERIAL_ZIP".equals(request.getType())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "该导出类型将在后续阶段支持");
         }
         LoginUser user = SecurityUtils.getLoginUser();
 
         Map<String, Object> jobParams = new LinkedHashMap<>();
-        if ("AUDIT_LOGS".equals(request.getType())) {
+        if ("MATERIAL_ZIP".equals(request.getType())) {
+            List<Long> fileIds = parseFileIds(request.getParams().get("fileIds"));
+            materialService.requireExportable(fileIds);
+            jobParams.put("fileIds", fileIds.stream().map(String::valueOf).toList());
+        } else if ("AUDIT_LOGS".equals(request.getType())) {
             // 操作日志导出：仅 audit-log:export（当前仅管理员，API 约定 4.3）；过滤条件原样透传
             if (!user.getPermissions().contains("audit-log:export")) {
                 throw new BizException(ErrorCode.FORBIDDEN, "没有操作权限");
@@ -126,6 +136,24 @@ public class ExportService {
             expiresAt = signed.expiresAt();
         }
         return toView(job, downloadUrl, expiresAt);
+    }
+
+    private List<Long> parseFileIds(Object raw) {
+        if (!(raw instanceof Collection<?> values)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "导出参数 fileIds 必须为文件 ID 数组");
+        }
+        Set<Long> fileIds = new LinkedHashSet<>();
+        try {
+            for (Object value : values) {
+                if (value == null) {
+                    throw new NumberFormatException("null");
+                }
+                fileIds.add(value instanceof Number number ? number.longValue() : Long.valueOf(String.valueOf(value)));
+            }
+        } catch (NumberFormatException e) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "fileIds 包含不正确的文件 ID");
+        }
+        return List.copyOf(fileIds);
     }
 
     private Long parsePlanId(Object raw) {

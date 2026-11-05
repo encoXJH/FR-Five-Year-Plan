@@ -1,45 +1,36 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElNotification } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import ResponsiveRecordView from '@/components/ResponsiveRecordView.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import YearProgressPanel from './components/YearProgressPanel.vue'
 import { listPlans, getPlan } from '@/api/plan'
-import { listIndicators } from '@/api/indicator'
 import {
-  getStatsByIndicator,
   getStatsByUnit,
   getStatsOverview,
   getStatsTree,
   getIndicatorTrend,
 } from '@/api/stats'
 import { getYearSettlement } from '@/api/settlement'
-import { createExport, pollExport } from '@/api/export'
 import {
   CHART_ACTUAL_COLOR,
   CHART_TARGET_COLOR,
   CHART_TIME_PROGRESS_COLOR,
   useEChart,
 } from '@/utils/chart'
-import { newIdempotencyKey } from '@/utils/idempotency'
-import { ApiError } from '@/utils/request'
-import { enumLabel } from '@/utils/enumLabels'
 import { EMPTY_DISPLAY, formatCount, formatNumber, formatPercent } from '@/utils/format'
 import { formatTargetValue, isPercentCaliber } from '@/utils/indicator'
 import { progressPercentage } from '@/utils/task'
 import { getCurrentPlan, setCurrentPlan } from '@/utils/currentPlan'
-import { aggregateSubjectDimension } from '@/utils/stats'
 import { useAutoRefresh } from '@/utils/autoRefresh'
-import { triggerFileDownload } from '@/utils/file'
+import { useUserStore } from '@/stores/user'
 import type { PlanCard, PlanDetail } from '@/types/plan'
-import type { IndicatorTreeNode } from '@/types/indicator'
-import type { ExportType } from '@/types/export'
 import type {
-  IndicatorStat,
   IndicatorTrend,
   StatsOverview,
   StatsTreeNode,
+  TrendYearItem,
   UnitStatItem,
   YearSettlement,
 } from '@/types/stats'
@@ -47,6 +38,8 @@ import type { StatCaliber } from '@/types/enums'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
+const isUnitOwnerOnly = computed(() => userStore.isUnitOwnerOnly)
 
 const trendVisible = ref(false)
 const trendLoading = ref(false)
@@ -66,18 +59,25 @@ async function openIndicatorDetail(id: string): Promise<void> {
   }
 }
 
-const plans = ref<PlanCard[]>([])
+type StatsPlan = Pick<PlanCard, 'id' | 'name' | 'startYear' | 'endYear' | 'status'>
+  & Partial<Pick<PlanDetail, 'years'>>
+
+const plans = ref<StatsPlan[]>([])
 const planId = ref<string>((route.query.planId as string) || '')
-const plan = ref<PlanDetail | null>(null)
+const plan = ref<StatsPlan | null>(null)
 /** null 表示五年累计 */
 const year = ref<number | null>(route.query.year ? Number(route.query.year) : null)
+const yearSelection = computed({
+  get: () => year.value ?? 0,
+  set: (value: number) => {
+    year.value = value === 0 ? null : value
+  },
+})
 
 const loading = ref(false)
 const overview = ref<StatsOverview | null>(null)
 const byUnit = ref<UnitStatItem[]>([])
-const byIndicator = ref<IndicatorStat[]>([])
 const tree = ref<StatsTreeNode[]>([])
-const subjectIndicators = ref<IndicatorTreeNode[]>([])
 
 type LazyStatsNode = Omit<StatsTreeNode, 'children'> & {
   children: LazyStatsNode[]
@@ -144,113 +144,16 @@ const yearOptions = computed<number[]>(() => {
 })
 
 const planName = computed(() => plan.value?.name ?? plans.value.find((p) => p.id === planId.value)?.name ?? '')
+const emptyDescription = '暂无统计数据（计划未选择或接口未就绪）'
 
-// ---------- 统计维度（UI 规范 P11：执行单元 / 指标 / 指标层级 / 指标性质 / 主体） ----------
-type StatsDimension = 'UNIT' | 'INDICATOR' | 'LEVEL' | 'NATURE' | 'SUBJECT'
-
-const dimension = ref<StatsDimension>('UNIT')
-
-const dimensionOptions: { value: StatsDimension; label: string }[] = [
-  { value: 'UNIT', label: '执行单元' },
-  { value: 'INDICATOR', label: '指标' },
-  { value: 'LEVEL', label: '指标层级' },
-  { value: 'NATURE', label: '指标性质' },
-  { value: 'SUBJECT', label: '主体' },
-]
-
-interface DimRow {
-  key: string
-  name: string
-  taskCount: number
-  achievedCount: number | null
-  completionRate: number | null
-  /** 五年累计完成率（UNIT/INDICATOR 来自后端；LEVEL/NATURE 由树节点前端聚合） */
-  cumulativeRate: number | null
-}
-
-/** 指标层级 / 性质 / 主体维度复用现有指标树与 stats/tree 在前端聚合。 */
-const dimensionNote = computed(() => {
-  if (dimension.value === 'SUBJECT') return '按指标所属主体汇总学院任务'
-  if (dimension.value === 'LEVEL' || dimension.value === 'NATURE') {
-    return '该维度由下钻树（stats/tree）在前端聚合'
-  }
-  return ''
-})
-
-const detailRows = computed<DimRow[]>(() => {
-  if (dimension.value === 'UNIT') {
-    return byUnit.value.map((item) => ({
-      key: item.unit?.id ?? item.unit?.name ?? '',
-      name: item.unit?.name ?? EMPTY_DISPLAY,
-      taskCount: item.taskCount,
-      achievedCount: item.achievedCount,
-      completionRate: item.completionRate,
-      cumulativeRate: item.cumulativeRate,
-    }))
-  }
-  if (dimension.value === 'INDICATOR') {
-    return byIndicator.value.map((item) => ({
-      key: item.indicatorId,
-      name: item.name,
-      taskCount: item.taskCount,
-      achievedCount: item.achievedCount,
-      completionRate: item.completionRate,
-      cumulativeRate: item.cumulativeRate,
-    }))
-  }
-  if (dimension.value === 'SUBJECT') {
-    return aggregateSubjectDimension(tree.value, subjectIndicators.value).map((item) => ({
-      ...item,
-      name: enumLabel('SubjectType', item.key),
-    }))
-  }
-  if (dimension.value === 'LEVEL' || dimension.value === 'NATURE') {
-    const grouped = new Map<string, { name: string; taskCount: number; achievedCount: number; cumRates: number[] }>()
-    const walk = (nodes: StatsTreeNode[]): void => {
-      for (const node of nodes) {
-        if (dimension.value === 'LEVEL') {
-          const key = node.level
-          const entry = grouped.get(key) ?? { name: enumLabel('IndicatorLevel', key), taskCount: 0, achievedCount: 0, cumRates: [] }
-          entry.taskCount += 1
-          if (node.achieveStatus === 'ACHIEVED' || node.achieveStatus === 'EXCEEDED') {
-            entry.achievedCount += 1
-          }
-          if (typeof node.cumulativeRate === 'number') entry.cumRates.push(node.cumulativeRate)
-          grouped.set(key, entry)
-        } else if (node.level === 'B') {
-          const key = node.nature ?? 'UNKNOWN'
-          const name = node.nature ? enumLabel('IndicatorNature', node.nature) : '未标注'
-          const entry = grouped.get(key) ?? { name, taskCount: 0, achievedCount: 0, cumRates: [] }
-          entry.taskCount += 1
-          if (node.achieveStatus === 'ACHIEVED' || node.achieveStatus === 'EXCEEDED') {
-            entry.achievedCount += 1
-          }
-          if (typeof node.cumulativeRate === 'number') entry.cumRates.push(node.cumulativeRate)
-          grouped.set(key, entry)
-        }
-        if (node.children?.length) walk(node.children)
-      }
-    }
-    walk(tree.value)
-    return [...grouped.entries()].map(([key, entry]) => ({
-      key,
-      name: entry.name,
-      taskCount: entry.taskCount,
-      achievedCount: entry.achievedCount,
-      completionRate: entry.taskCount > 0 ? entry.achievedCount / entry.taskCount : null,
-      cumulativeRate: entry.cumRates.length > 0
-        ? entry.cumRates.reduce((a, b) => a + b, 0) / entry.cumRates.length
-        : null,
-    }))
-  }
-  return []
-})
-
-const dimensionEmptyText = computed(() =>
-  dimension.value === 'SUBJECT'
-    ? '当前计划暂无可按主体统计的任务'
-    : dimensionNote.value || '暂无数据',
-)
+const detailRows = computed(() => byUnit.value.map((item) => ({
+  key: item.unit?.id ?? item.unit?.name ?? '',
+  name: item.unit?.name ?? EMPTY_DISPLAY,
+  taskCount: item.taskCount,
+  achievedCount: item.achievedCount,
+  completionRate: item.completionRate,
+  cumulativeRate: item.cumulativeRate,
+})))
 
 async function loadPlanContext(): Promise<void> {
   if (!planId.value) return
@@ -264,18 +167,14 @@ async function loadStats(silent = false): Promise<void> {
   if (!silent) loading.value = true
   try {
     const y = year.value ?? undefined
-    const [o, u, d, t, indicators] = await Promise.all([
+    const [o, u, t] = await Promise.all([
       getStatsOverview(planId.value, y),
       getStatsByUnit(planId.value, y),
-      getStatsByIndicator(planId.value, y),
       getStatsTree(planId.value, y),
-      listIndicators(planId.value).catch(() => [] as IndicatorTreeNode[]),
     ])
     overview.value = o
     byUnit.value = u
-    byIndicator.value = d
     tree.value = t
-    subjectIndicators.value = indicators
     await syncExpandedNodes()
     if (chartFrame !== null) cancelAnimationFrame(chartFrame)
     chartFrame = requestAnimationFrame(() => {
@@ -347,7 +246,7 @@ function renderUnitChart(): void {
   })
 }
 
-// ---------- 目标 vs 完成（柱）+ 完成率（折线，右轴）组合图（按当前统计维度） ----------
+// ---------- 执行单元目标 vs 完成（柱）+ 完成率（折线，右轴） ----------
 const comboChart = useEChart()
 
 function renderComboChart(): void {
@@ -397,20 +296,20 @@ function renderComboChart(): void {
   })
 }
 
-watch(dimension, async () => {
-  await nextTick()
-  renderComboChart()
-})
-
 // ---------- 树表工具 ----------
 function nodeTargetText(node: StatsTreeNode): string {
   return formatTargetValue(node.target, node.statCaliber ?? ('INCREMENT' as StatCaliber))
 }
 
 function nodeActualText(node: StatsTreeNode): string {
-  if (node.actualValue == null) return EMPTY_DISPLAY
-  if (node.statCaliber && isPercentCaliber(node.statCaliber)) return formatPercent(node.actualValue)
-  return formatNumber(node.actualValue)
+  const value = node.statCaliber === 'GROWTH' ? node.actualTotal : node.actualValue
+  if (value == null) return EMPTY_DISPLAY
+  if (node.statCaliber && isPercentCaliber(node.statCaliber)) return formatPercent(value)
+  return formatNumber(value)
+}
+
+function trendYearActualText(item: TrendYearItem, caliber: StatCaliber | null): string {
+  return formatTargetValue(caliber === 'GROWTH' ? item.actualTotal : item.actualValue, caliber)
 }
 
 /** 下钻树行颜色：A 白底、B 浅绿。 */
@@ -422,49 +321,27 @@ function treeCardClass(row: StatsTreeNode): string {
   return row.level === 'B' ? 'tree-card-b' : ''
 }
 
-// ---------- 导出 ----------
-const exporting = ref(false)
+// ---------- 导出 PDF 报告 ----------
+const printing = ref(false)
+const generatedAt = ref('')
+const yearLabel = computed(() => year.value === null ? '五年累计' : `${year.value} 年`)
 
-async function handleExport(type: ExportType, params: Record<string, string | number | undefined>): Promise<void> {
-  exporting.value = true
-  const notification = ElNotification({
-    title: '导出 Excel',
-    message: '导出任务已创建，排队中 → 生成中…',
-    type: 'info',
-    duration: 0,
-  })
+/** 整页报告导出：通过浏览器打印生成 PDF，包含 KPI、进度、图表与全部表格 */
+async function exportPdf(): Promise<void> {
+  if (!planId.value || printing.value) return
+  printing.value = true
+  generatedAt.value = new Date().toLocaleString('zh-CN', { hour12: false })
+  const originalTitle = document.title
+  document.title = `统计报表-${planName.value || '计划'}-${yearLabel.value}`
+  await nextTick()
+  document.body.classList.add('stats-print-mode')
   try {
-    const { exportId } = await createExport({ type, params }, newIdempotencyKey())
-    const job = await pollExport(exportId)
-    notification.close()
-    if (job.status === 'SUCCEEDED' && job.downloadUrl) {
-      triggerFileDownload(job.downloadUrl, '统计报表.xlsx')
-      ElNotification({ title: '导出 Excel', message: '导出完成，已开始下载', type: 'success' })
-    } else {
-      ElNotification({
-        title: '导出失败',
-        message: job.errorMessage ?? '导出任务失败，请稍后重试',
-        type: 'error',
-      })
-    }
-  } catch (error) {
-    notification.close()
-    // 导出失败通知带 requestId（UI 规范 7.10 / 7.11）
-    const message =
-      error instanceof ApiError && error.requestId
-        ? `${error.message}（请求编号：${error.requestId}）`
-        : error instanceof Error
-          ? error.message
-          : '导出任务失败，请稍后重试'
-    ElNotification({ title: '导出失败', message, type: 'error' })
+    window.print()
   } finally {
-    exporting.value = false
+    document.body.classList.remove('stats-print-mode')
+    document.title = originalTitle
+    printing.value = false
   }
-}
-
-function exportStats(): void {
-  if (!planId.value) return
-  handleExport('STATS_REPORT', { planId: planId.value, year: year.value ?? undefined })
 }
 
 // ---------- 年度核算结果 ----------
@@ -474,7 +351,7 @@ const settlement = ref<YearSettlement | null>(null)
 const settlementLoading = ref(false)
 
 function openSettlement(): void {
-  settlementYear.value = year.value ?? plan.value?.years.find((y) => y.status === 'LOCKED')?.year ?? null
+  settlementYear.value = year.value ?? plan.value?.years?.find((y) => y.status === 'LOCKED')?.year ?? null
   settlement.value = null
   settlementVisible.value = true
   if (settlementYear.value != null) loadSettlement()
@@ -543,6 +420,14 @@ useAutoRefresh(async () => {
 
 <template>
   <div v-loading="loading" class="stats-page">
+    <div class="print-report-header">
+      <div class="print-report-title">福州软件职业技术学院 · 五年计划统计报表</div>
+      <div class="print-report-meta">
+        <span>{{ planName }}</span>
+        <span>{{ yearLabel }}</span>
+        <span v-if="generatedAt">生成时间：{{ generatedAt }}</span>
+      </div>
+    </div>
     <div class="page-header">
       <div>
         <h1 class="page-title">统计报表</h1>
@@ -550,10 +435,21 @@ useAutoRefresh(async () => {
       </div>
     </div>
     <div class="app-action-row header-actions">
-      <el-button type="primary" :loading="exporting" :disabled="!planId" @click="exportStats">
-        导出 Excel
-      </el-button>
-      <el-button @click="openSettlement">年度核算结果</el-button>
+      <el-tooltip
+        v-if="!isUnitOwnerOnly"
+        content="打开打印窗口，选择“另存为 PDF”即可导出整页统计报告"
+        placement="bottom"
+      >
+        <el-button
+          type="primary"
+          :loading="printing"
+          :disabled="!planId"
+          @click="exportPdf"
+        >
+          导出 PDF 报告
+        </el-button>
+      </el-tooltip>
+      <el-button v-if="!isUnitOwnerOnly" @click="openSettlement">年度核算结果</el-button>
     </div>
 
     <el-card shadow="never" class="filter-card">
@@ -564,21 +460,10 @@ useAutoRefresh(async () => {
           </el-select>
         </el-form-item>
         <el-form-item label="年度">
-          <el-select v-model="year" class="year-select" @change="handleYearChange">
-            <el-option label="五年累计" :value="null" />
+          <el-select v-model="yearSelection" class="year-select" @change="handleYearChange">
+            <el-option label="五年累计" :value="0" />
             <el-option v-for="y in yearOptions" :key="y" :label="`${y} 年`" :value="y" />
           </el-select>
-        </el-form-item>
-        <el-form-item label="统计维度" class="dimension-item">
-          <el-radio-group v-model="dimension" size="small" class="dimension-options">
-            <el-radio-button
-              v-for="option in dimensionOptions"
-              :key="option.value"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </el-radio-button>
-          </el-radio-group>
         </el-form-item>
       </el-form>
     </el-card>
@@ -586,10 +471,17 @@ useAutoRefresh(async () => {
     <template v-if="overview">
       <div class="kpi-row">
         <el-card shadow="never" class="kpi-card">
-          <div class="kpi-value">{{ formatPercent(overview.cumulativeCompletionRate) }}</div>
+          <div class="kpi-value">
+            {{ formatPercent(year === null ? overview.cumulativeCompletionRate : overview.overallCompletionRate) }}
+          </div>
           <div class="kpi-label">
-            五年累计完成率
-            <el-tooltip content="五年累计口径：各指标「累计完成 ÷ 五年总量目标」的平均；与年度选择无关" placement="top">
+            {{ year === null ? '五年累计完成率' : `${year} 年完成率` }}
+            <el-tooltip
+              :content="year === null
+                ? '五年累计口径：各指标「累计完成 ÷ 五年总量目标」的平均'
+                : '所选年度：达标任务数 ÷ 有正目标的任务数'"
+              placement="top"
+            >
               <span class="kpi-tip">ⓘ</span>
             </el-tooltip>
           </div>
@@ -629,24 +521,15 @@ useAutoRefresh(async () => {
           <div v-show="byUnit.length > 0" :ref="unitChart.container" class="chart-box" />
         </el-card>
         <el-card shadow="never" class="chart-card">
-          <template #header>
-            <span class="card-title">
-              目标 vs 完成（按{{ dimensionOptions.find((o) => o.value === dimension)?.label }}）
-            </span>
-          </template>
-          <div v-if="detailRows.length === 0" class="chart-empty">
-            {{ dimensionEmptyText }}
-          </div>
+          <template #header><span class="card-title">执行单元目标与完成情况</span></template>
+          <div v-if="detailRows.length === 0" class="chart-empty">暂无数据</div>
           <div v-show="detailRows.length > 0" :ref="comboChart.container" class="chart-box" />
         </el-card>
       </div>
 
       <el-card shadow="never" class="table-card">
         <template #header>
-          <div class="card-header">
-            <span class="card-title">明细表（按{{ dimensionOptions.find((o) => o.value === dimension)?.label }}）</span>
-            <span v-if="dimensionNote" class="card-tip">{{ dimensionNote }}</span>
-          </div>
+          <div class="card-header"><span class="card-title">执行单元明细</span></div>
         </template>
         <ResponsiveRecordView>
           <template #table>
@@ -684,17 +567,11 @@ useAutoRefresh(async () => {
                   </div>
                 </template>
               </el-table-column>
-              <template #empty>
-                <el-empty :image-size="80" :description="dimensionEmptyText" />
-              </template>
+              <template #empty><el-empty :image-size="80" description="暂无数据" /></template>
             </el-table>
           </template>
           <template #cards>
-            <el-empty
-              v-if="detailRows.length === 0"
-              :image-size="80"
-              :description="dimensionEmptyText"
-            />
+            <el-empty v-if="detailRows.length === 0" :image-size="80" description="暂无数据" />
             <div v-else class="responsive-card-list">
               <article v-for="row in detailRows" :key="row.key" class="responsive-card">
                 <div class="responsive-card__header">
@@ -934,7 +811,7 @@ useAutoRefresh(async () => {
 
     </template>
 
-    <el-empty v-else-if="!loading" description="暂无统计数据（计划未选择或接口未就绪）" />
+    <el-empty v-else-if="!loading" :description="emptyDescription" />
 
     <el-dialog v-model="settlementVisible" title="年度核算结果" width="min(880px, calc(100vw - 32px))">
       <el-form inline @submit.prevent>
@@ -1008,7 +885,7 @@ useAutoRefresh(async () => {
               <template #default="{ row }">{{ formatTargetValue(row.target, indicatorTrend.statCaliber) }}</template>
             </el-table-column>
             <el-table-column label="完成值（审核通过）" min-width="135" align="right">
-              <template #default="{ row }">{{ formatTargetValue(row.actualValue, indicatorTrend.statCaliber) }}</template>
+              <template #default="{ row }">{{ trendYearActualText(row, indicatorTrend.statCaliber) }}</template>
             </el-table-column>
             <el-table-column label="完成率" width="100" align="right">
               <template #default="{ row }">{{ formatPercent(row.completionRate) }}</template>
@@ -1028,6 +905,28 @@ useAutoRefresh(async () => {
 .stats-page {
   min-width: 0;
   max-width: 100%;
+}
+
+/* 仅在 PDF 打印时显示的报表抬头 */
+.print-report-header {
+  display: none;
+}
+
+.print-report-title {
+  color: #17233c;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 28px;
+}
+
+.print-report-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-top: 6px;
+  color: #606266;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .page-header {
@@ -1089,12 +988,6 @@ useAutoRefresh(async () => {
 .year-select {
   width: 140px;
   max-width: 100%;
-}
-
-.dimension-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) 0;
 }
 
 .kpi-row {
@@ -1175,11 +1068,6 @@ useAutoRefresh(async () => {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: var(--space-2);
-}
-
-.card-tip {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
 }
 
 .chart-box {
@@ -1356,5 +1244,84 @@ useAutoRefresh(async () => {
 
   .trend-summary { grid-template-columns: 1fr; }
   .trend-summary > div { padding: 10px 12px; }
+}
+
+</style>
+
+<style>
+/* PDF 报告打印：隐藏导航与操作区，完整输出标题、KPI、进度、图表和表格 */
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+
+  body.stats-print-mode .app-header,
+  body.stats-print-mode .app-aside,
+  body.stats-print-mode .plan-toolbar,
+  body.stats-print-mode .app-action-row,
+  body.stats-print-mode .filter-card {
+    display: none !important;
+  }
+
+  body.stats-print-mode .app-layout,
+  body.stats-print-mode .app-body,
+  body.stats-print-mode .app-right,
+  body.stats-print-mode .app-main {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  body.stats-print-mode .stats-page {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  body.stats-print-mode .print-report-header {
+    display: block !important;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #2b5bc0;
+  }
+
+  body.stats-print-mode .kpi-row {
+    grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  body.stats-print-mode .chart-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  body.stats-print-mode .el-card {
+    border: 1px solid #dcdfe6 !important;
+    box-shadow: none !important;
+  }
+
+  body.stats-print-mode .chart-card,
+  body.stats-print-mode .year-progress-panel {
+    break-inside: avoid;
+  }
+
+  body.stats-print-mode .el-table {
+    font-size: 11px !important;
+  }
+
+  body.stats-print-mode .el-table__inner-wrapper::before {
+    display: none !important;
+  }
+
+  body.stats-print-mode .el-table__body-wrapper,
+  body.stats-print-mode .el-scrollbar__wrap {
+    overflow: visible !important;
+  }
+
+  body.stats-print-mode .chart-box canvas {
+    max-width: 100% !important;
+    height: auto !important;
+  }
 }
 </style>

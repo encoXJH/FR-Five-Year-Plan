@@ -19,7 +19,7 @@ public final class MaterialDtos {
 
     /** 材料库筛选/关联用的指标选项，附所属建设方向便于分组 */
     public record IndicatorOption(@JsonSerialize(using = ToStringSerializer.class) Long id, String code,
-                                  String name, String directionName) {
+                                  String name, String directionCode, String directionName) {
     }
 
     public record UnitRef(@JsonSerialize(using = ToStringSerializer.class) Long id, String code, String name) {

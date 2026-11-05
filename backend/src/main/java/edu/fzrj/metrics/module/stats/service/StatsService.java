@@ -45,8 +45,8 @@ import java.util.stream.Collectors;
 
 /**
  * 统计（API 约定 15.8）：总览 / 按单元 / 按 A 级指标 / A→A+→B 下钻树 / 指标趋势。
- * 数据范围：overview / tree / trend 按数据范围过滤（越权 20005）；
- * by-unit / by-indicator 为全校聚合视图（PRD Q12：学院可见全校概览与排名，不见明细）。
+ * 数据范围：全校角色按全校统计；纯学院角色须获得计划报表下发，且所有视图只归集本单元任务；
+ * 多角色按既有范围访问，越权或未下发返回 20005。
  * 口径：完成率一律「达标任务数 ÷ 有正目标的任务数」（数据库设计查询 h）；
  * 树与汇总的完成值由可见 B 的 task_year 缓存按 MetricCalculator 逐级汇总（与审核时落库口径一致）。
  */
@@ -108,6 +108,12 @@ public class StatsService {
     }
 
     // ---------------- 数据范围 ----------------
+
+    private boolean isPureUnitOwner(LoginUser user) {
+        return dataScopeService.isUnitScope(user)
+                && !dataScopeService.isAllData(user)
+                && !dataScopeService.isOwnerScope(user);
+    }
 
     /** 当前登录人的可见范围（单元 ∪ 本人负责指标，多角色取并集） */
     public ScopeFilter currentScope() {
@@ -206,6 +212,8 @@ public class StatsService {
                 ctx.indicators().values().stream()
                         .filter(i -> i.getParentId() == null && Boolean.TRUE.equals(i.getIsQuantifiable()))
                         .filter(i -> indicatorVisible(i, scope, ctx))
+                        .filter(this::hasCumulativeTarget)
+                        .filter(i -> hasCumulativeBasis(i, ctx))
                         .map(i -> cumulativeOfIndicator(i, ctx, scope).rate())
                         .toList());
         return new StatsDtos.Overview(plan.getId(), resolvedYear, timeProgress,
@@ -261,26 +269,32 @@ public class StatsService {
         }
     }
 
-    // ---------------- 按单元 / 按 A 级指标（全校聚合，PRD Q12） ----------------
+    // ---------------- 按单元 / 按 A 级指标 ----------------
 
     public List<StatsDtos.UnitStat> byUnit(Long planId, Integer year) {
+        return byUnit(planId, year, currentScope());
+    }
+
+    public List<StatsDtos.UnitStat> byUnit(Long planId, Integer year, ScopeFilter scope) {
         Plan plan = planService.requirePlan(planId);
         int resolvedYear = resolveYear(plan, year);
-        PlanContext ctx = loadContext(plan, resolvedYear, ScopeFilter.allData());
+        PlanContext ctx = loadContext(plan, resolvedYear, scope);
 
         Map<Long, List<TaskYear>> byUnit = ctx.taskYears().stream()
-                .filter(ty -> StatsAggregator.countable(ty.getTarget()))
                 .collect(Collectors.groupingBy(TaskYear::getUnitId));
         List<StatsDtos.UnitStat> stats = new ArrayList<>();
         for (Map.Entry<Long, List<TaskYear>> entry : byUnit.entrySet()) {
             List<TaskYear> currentRows = entry.getValue().stream()
+                    .filter(ty -> StatsAggregator.countable(ty.getTarget()))
                     .filter(ty -> isCurrentTask(ty, ctx)).toList();
-            if (currentRows.isEmpty()) {
+            List<TaskYear> cumulativeRows = entry.getValue().stream()
+                    .filter(ty -> hasCumulativeTarget(ty, ctx)).toList();
+            if (currentRows.isEmpty() && cumulativeRows.isEmpty()) {
                 continue;
             }
             long achieved = currentRows.stream()
                     .filter(ty -> StatsAggregator.isAchievedStatus(ty.getYearStatus())).count();
-            BigDecimal cumulativeRate = CumulativeCalculator.avgRate(entry.getValue().stream()
+            BigDecimal cumulativeRate = CumulativeCalculator.avgRate(cumulativeRows.stream()
                     .map(ty -> cumulativeOfTask(ty, ctx).rate()).toList());
             stats.add(new StatsDtos.UnitStat(unitRef(ctx.units().get(entry.getKey())),
                     currentRows.size(), achieved,
@@ -300,9 +314,13 @@ public class StatsService {
     }
 
     public List<StatsDtos.IndicatorStat> byIndicator(Long planId, Integer year) {
+        return byIndicator(planId, year, currentScope());
+    }
+
+    public List<StatsDtos.IndicatorStat> byIndicator(Long planId, Integer year, ScopeFilter scope) {
         Plan plan = planService.requirePlan(planId);
         int resolvedYear = resolveYear(plan, year);
-        PlanContext ctx = loadContext(plan, resolvedYear, ScopeFilter.allData());
+        PlanContext ctx = loadContext(plan, resolvedYear, scope);
 
         Map<Long, List<TaskYear>> taskYearsByA = new LinkedHashMap<>();
         for (TaskYear ty : ctx.taskYears()) {
@@ -314,6 +332,7 @@ public class StatsService {
         }
         return ctx.indicators().values().stream()
                 .filter(i -> i.getParentId() == null && Boolean.TRUE.equals(i.getIsQuantifiable()))
+                .filter(i -> indicatorVisible(i, scope, ctx))
                 .sorted(Comparator.comparing(Indicator::getSort).thenComparing(Indicator::getCode))
                 .map(a -> {
                     List<TaskYear> allRows = taskYearsByA.getOrDefault(a.getId(), List.of()).stream()
@@ -322,8 +341,10 @@ public class StatsService {
                             .filter(ty -> isCurrentTask(ty, ctx)).toList();
                     long achieved = currentRows.stream()
                             .filter(ty -> StatsAggregator.isAchievedStatus(ty.getYearStatus())).count();
-                    BigDecimal cumulativeRate = CumulativeCalculator.avgRate(allRows.stream()
-                            .map(ty -> cumulativeOfTask(ty, ctx).rate()).toList());
+                    BigDecimal cumulativeRate = hasCumulativeTarget(a) && hasCumulativeBasis(a, ctx)
+                            ? Objects.requireNonNullElse(
+                                    cumulativeOfIndicator(a, ctx, scope).rate(), BigDecimal.ZERO)
+                            : null;
                     long aPlusCount = ctx.indicators().values().stream()
                             .filter(i -> a.getId().equals(i.getParentId())).count();
                     return new StatsDtos.IndicatorStat(a.getId(), a.getCode(), a.getName(), aPlusCount,
@@ -470,8 +491,12 @@ public class StatsService {
         if (indicator == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "指标不存在");
         }
-        // 数据范围：全校 / 指标有效负责人；纯学院视角不开放指标级聚合（20005）
         LoginUser user = SecurityUtils.getLoginUser();
+        Plan plan = planService.requirePlan(indicator.getPlanId());
+        if (isPureUnitOwner(user)) {
+            return unitTrend(indicator, plan, user.getUnitId());
+        }
+        // 数据范围：全校 / 指标有效负责人；其他角色越权返回 20005。
         if (!dataScopeService.isAllData(user)) {
             Long effectiveOwner = indicator.getOwnerId();
             if (effectiveOwner == null && indicator.getParentId() != null) {
@@ -485,7 +510,6 @@ public class StatsService {
                 throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
             }
         }
-        Plan plan = planService.requirePlan(indicator.getPlanId());
         Map<Integer, IndicatorYearTarget> byYear = yearTargetMapper.selectList(
                         new LambdaQueryWrapper<IndicatorYearTarget>()
                                 .eq(IndicatorYearTarget::getIndicatorId, indicatorId)
@@ -514,6 +538,50 @@ public class StatsService {
         // 五年累计进度（与 tree / overview 同口径）
         CumulativeCalculator.Cumulative cumulative = CumulativeCalculator.of(
                 indicator.getStatCaliber(), yearResults, indicator.getTotalTarget());
+        return new StatsDtos.TrendView(indicator.getId(), indicator.getCode(), indicator.getName(),
+                indicator.getStatCaliber(), indicator.getUnitLabel(), indicator.getBaselineValue(),
+                indicator.getTotalTarget(), cumulative.actual(), cumulative.rate(), years);
+    }
+
+    /** 学院趋势按本单元 B 重新归集，不能读取包含全校完成值的 indicator_year_target 缓存。 */
+    private StatsDtos.TrendView unitTrend(Indicator indicator, Plan plan, Long unitId) {
+        ScopeFilter scope = new ScopeFilter(false, unitId, Set.of());
+        PlanContext ctx = loadContext(plan, plan.getStartYear(), scope);
+        boolean visible = ctx.tasks().values().stream().anyMatch(task ->
+                indicator.getId().equals(task.getIndicatorId())
+                        || indicator.getId().equals(task.getTopIndicatorId()));
+        if (!visible) {
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
+        }
+        List<StatsDtos.TrendYear> years = new ArrayList<>();
+        List<MetricCalculator.YearResult> results = new ArrayList<>();
+        BigDecimal previousTotal = indicator.getBaselineValue();
+        for (int year = plan.getStartYear(); year <= plan.getEndYear(); year++) {
+            int currentYear = year;
+            List<MetricCalculator.YearResult> sources = ctx.taskYearsByTask().values().stream()
+                    .flatMap(List::stream)
+                    .filter(ty -> ty.getYear() == currentYear)
+                    .filter(ty -> {
+                        Task task = ctx.tasks().get(ty.getTaskId());
+                        return indicator.getId().equals(ty.getIndicatorId())
+                                || task != null && indicator.getId().equals(task.getTopIndicatorId());
+                    })
+                    .map(ty -> new MetricCalculator.YearResult(ty.getActualValue(), ty.getActualNumerator(),
+                            ty.getActualDenominator(), ty.getActualTotal(), null, null))
+                    .toList();
+            MetricCalculator.YearResult result = MetricCalculator.rollup(
+                    indicator.getStatCaliber(), sources, previousTotal);
+            BigDecimal target = yearTarget(ctx, indicator.getId(), year);
+            years.add(new StatsDtos.TrendYear(year, targetView(indicator.getStatCaliber(), target),
+                    result.actualValue(), result.total(), result.numerator(), result.denominator(),
+                    MetricCalculator.completionRate(indicator.getStatCaliber(), result, target),
+                    MetricCalculator.achieveStatus(indicator.getTargetDirection(), indicator.getStatCaliber(),
+                            result, target)));
+            results.add(result);
+            previousTotal = result.total();
+        }
+        CumulativeCalculator.Cumulative cumulative = CumulativeCalculator.of(
+                indicator.getStatCaliber(), results, indicator.getTotalTarget());
         return new StatsDtos.TrendView(indicator.getId(), indicator.getCode(), indicator.getName(),
                 indicator.getStatCaliber(), indicator.getUnitLabel(), indicator.getBaselineValue(),
                 indicator.getTotalTarget(), cumulative.actual(), cumulative.rate(), years);
@@ -591,12 +659,37 @@ public class StatsService {
         return task != null && !Boolean.TRUE.equals(task.getIsHistorical());
     }
 
-    /** 指标五年累计进度：范围视图按可见 B 重新归集，MANUAL 仍取人工认定缓存。 */
+    private boolean hasCumulativeTarget(Indicator indicator) {
+        return indicator.getTotalTarget() != null
+                && indicator.getTotalTarget().compareTo(BigDecimal.ZERO) != 0;
+    }
+
+    private boolean hasCumulativeTarget(TaskYear taskYear, PlanContext ctx) {
+        Indicator indicator = ctx.indicators().get(taskYear.getIndicatorId());
+        if (indicator == null) {
+            return false;
+        }
+        List<TaskYear> years = ctx.taskYearsByTask().getOrDefault(taskYear.getTaskId(), List.of(taskYear));
+        BigDecimal target = CumulativeCalculator.taskTotalTarget(indicator.getStatCaliber(), years);
+        return target != null && target.compareTo(BigDecimal.ZERO) != 0;
+    }
+
+    /** 未下发的 AUTO_SUM 指标不进入统计；MANUAL 指标可直接由校级负责人认定。 */
+    private boolean hasCumulativeBasis(Indicator indicator, PlanContext ctx) {
+        if ("MANUAL".equals(indicator.getRollupMode())) {
+            return true;
+        }
+        return ctx.tasks().values().stream().anyMatch(task ->
+                indicator.getId().equals(task.getTopIndicatorId())
+                        || indicator.getId().equals(task.getIndicatorId()));
+    }
+
+    /** 指标五年累计进度：AUTO_SUM 统一按可见 B 重新归集，MANUAL 取人工认定缓存。 */
     private CumulativeCalculator.Cumulative cumulativeOfIndicator(Indicator indicator, PlanContext ctx,
                                                                   ScopeFilter scope) {
         boolean manual = "MANUAL".equals(indicator.getRollupMode());
         Plan plan = ctx.plan();
-        if (!scope.all() && !manual) {
+        if (!manual) {
             List<TaskYear> visibleYears = ctx.taskYearsByTask().values().stream()
                     .flatMap(List::stream)
                     .filter(ty -> {

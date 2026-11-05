@@ -28,6 +28,9 @@ public final class SubmissionValueRules {
                 if (error == null && amount.compareTo(BigDecimal.ZERO) < 0) {
                     error = "amount（本次新增数量）不能小于 0";
                 }
+                if (error == null) {
+                    error = scaleError(amount, "amount（本次新增数量）", 4);
+                }
                 yield error;
             }
             case "STOCK", "GROWTH" -> {
@@ -35,6 +38,9 @@ public final class SubmissionValueRules {
                         amount, numerator, denominator, percent, achieved);
                 if (error == null && total.compareTo(BigDecimal.ZERO) < 0) {
                     error = "total（当前总量）不能小于 0";
+                }
+                if (error == null) {
+                    error = scaleError(total, "total（当前总量）", 4);
                 }
                 yield error;
             }
@@ -47,6 +53,12 @@ public final class SubmissionValueRules {
                 if (error == null && denominator.compareTo(BigDecimal.ZERO) <= 0) {
                     error = "denominator（分母）必须大于 0";
                 }
+                if (error == null) {
+                    error = scaleError(numerator, "numerator（分子）", 4);
+                }
+                if (error == null) {
+                    error = scaleError(denominator, "denominator（分母）", 4);
+                }
                 yield error;
             }
             case "DIRECT_PERCENT" -> {
@@ -54,6 +66,12 @@ public final class SubmissionValueRules {
                         amount, total, numerator, denominator, achieved);
                 if (error == null && percent.compareTo(BigDecimal.ZERO) < 0) {
                     error = "percent（百分比，小数）不能小于 0";
+                }
+                if (error == null && percent.compareTo(BigDecimal.ONE) > 0) {
+                    error = "percent（百分比，小数）不能大于 1";
+                }
+                if (error == null) {
+                    error = scaleError(percent, "percent（百分比，小数）", 6);
                 }
                 yield error;
             }
@@ -99,6 +117,13 @@ public final class SubmissionValueRules {
     }
 
     // ---------------- 内部 ----------------
+
+    private static String scaleError(BigDecimal value, String fieldLabel, int maxScale) {
+        if (value.stripTrailingZeros().scale() > maxScale) {
+            return fieldLabel + "最多支持 " + maxScale + " 位小数";
+        }
+        return null;
+    }
 
     private static String requireOnly(boolean requiredPresent, String requiredHint, Object... mustBeNull) {
         if (!requiredPresent) {

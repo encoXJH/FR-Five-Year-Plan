@@ -10,6 +10,7 @@ import edu.fzrj.metrics.module.indicator.entity.Direction;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.mapper.DirectionMapper;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
+import edu.fzrj.metrics.module.indicator.service.support.IndicatorRules;
 import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.plan.service.PlanService;
 import edu.fzrj.metrics.module.system.entity.MajorGroup;
@@ -80,6 +81,11 @@ public class DirectionService {
         planService.requireNotArchived(plan);
         Direction direction = new Direction();
         direction.setPlanId(planId);
+        List<String> existingCodes = directionMapper.selectList(new LambdaQueryWrapper<Direction>()
+                        .eq(Direction::getPlanId, planId)
+                        .select(Direction::getCode))
+                .stream().map(Direction::getCode).toList();
+        direction.setCode(IndicatorRules.nextDirectionCode(existingCodes));
         applySubject(direction, request.getSubjectType(), request.getMajorGroupId());
         direction.setName(request.getName());
         direction.setLeaderId(requireLeaderIfPresent(request.getLeaderId()));
@@ -224,8 +230,8 @@ public class DirectionService {
             resolvedLeaderMap = userRefResolver.mapOf(List.of(direction.getLeaderId()));
         }
         UserRef leader = userRefResolver.refOf(direction.getLeaderId(), resolvedLeaderMap);
-        return new DirectionDtos.Item(direction.getId(), direction.getPlanId(), direction.getSubjectType(),
-                groupRef, direction.getName(), direction.getLeaderId(), leader, direction.getSort(),
+        return new DirectionDtos.Item(direction.getId(), direction.getPlanId(), direction.getCode(),
+                direction.getSubjectType(), groupRef, direction.getName(), direction.getLeaderId(), leader, direction.getSort(),
                 countMap.getOrDefault(direction.getId(), 0L).intValue(),
                 direction.getVersion(), direction.getCreatedAt(), direction.getUpdatedAt());
     }

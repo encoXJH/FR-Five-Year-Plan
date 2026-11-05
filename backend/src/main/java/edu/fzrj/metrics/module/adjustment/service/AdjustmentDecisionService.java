@@ -407,7 +407,7 @@ public class AdjustmentDecisionService {
 
     // ---------------- 生效内部 ----------------
 
-    /** 接收方原无该 A+ 的 B 时自动新建（规则 6.3）：编号 {A+编号}-{单元编码}，初始目标 0，待接收方确认接收 */
+    /** 接收方原无对应指标的 B 时自动新建（规则 6.3）：编号 {指标编号}-{单元编码}，初始目标 0，待接收方确认接收 */
     private Task createReceiverTask(Adjustment adjustment, Task fromTask, Indicator indicator, Plan plan,
                                     OrgUnit unit, Long userId) {
         LocalDateTime now = LocalDateTime.now();

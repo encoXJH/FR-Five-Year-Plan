@@ -26,6 +26,9 @@ public class Direction {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long planId;
 
+    /** 计划内字母编号：A…Z、AA…ZZ、AAA…；创建后不复用、不重排 */
+    private String code;
+
     /** 主体：SCHOOL 校级 / MAJOR_GROUP 专业群 */
     private String subjectType;
 

@@ -125,6 +125,10 @@ export function serializeExpandedIndicatorIds(ids: Iterable<string>): string {
   return JSON.stringify([...new Set(ids)])
 }
 
+export function parseDirectionIdQuery(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
 export interface DirectionalIndicator {
   directionId?: string | null
   directionName?: string | null

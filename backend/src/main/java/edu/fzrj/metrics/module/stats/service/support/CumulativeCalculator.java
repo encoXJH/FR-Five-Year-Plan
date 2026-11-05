@@ -86,15 +86,18 @@ public final class CumulativeCalculator {
         return actual.divide(totalTarget, SCALE, RoundingMode.HALF_UP);
     }
 
-    /** 多个累计完成率的算术平均（如全计划各 A 指标累计完成率的平均）；全空返回 null */
+    /**
+     * 多个累计完成率的算术平均。调用方只传入有有效目标且有执行载体的指标/任务；
+     * 其中尚未产生完成值的 null 按 0 计入分母；没有任何可统计项时返回 null。
+     */
     public static BigDecimal avgRate(List<BigDecimal> rates) {
-        List<BigDecimal> safe = rates == null ? List.of() : rates.stream()
-                .filter(Objects::nonNull).toList();
-        if (safe.isEmpty()) {
+        if (rates == null || rates.isEmpty()) {
             return null;
         }
-        return safe.stream().reduce(BigDecimal.ZERO, BigDecimal::add)
-                .divide(BigDecimal.valueOf(safe.size()), SCALE, RoundingMode.HALF_UP);
+        return rates.stream()
+                .map(rate -> rate == null ? BigDecimal.ZERO : rate)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .divide(BigDecimal.valueOf(rates.size()), SCALE, RoundingMode.HALF_UP);
     }
 
     private static List<MetricCalculator.YearResult> toYearResults(List<TaskYear> years) {

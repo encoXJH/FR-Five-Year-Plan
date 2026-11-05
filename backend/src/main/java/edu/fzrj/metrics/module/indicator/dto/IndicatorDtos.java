@@ -45,7 +45,7 @@ public final class IndicatorDtos {
         @JsonSerialize(using = ToStringSerializer.class)
         private Long directionId;
 
-        /** 编号，可空（空则系统生成：A01 / A01-1） */
+        /** 编号，可空（A 按所属方向生成 A01、B01…；未分配方向暂用 A 系列） */
         private String code;
 
         @NotBlank(message = "指标名称必填")
@@ -136,6 +136,7 @@ public final class IndicatorDtos {
     public record TreeNode(
             @JsonSerialize(using = ToStringSerializer.class) Long id,
             @JsonSerialize(using = ToStringSerializer.class) Long directionId,
+            String directionCode,
             String directionName,
             @JsonSerialize(using = ToStringSerializer.class) Long parentId,
             String level,
@@ -200,6 +201,7 @@ public final class IndicatorDtos {
             @JsonSerialize(using = ToStringSerializer.class) Long id,
             @JsonSerialize(using = ToStringSerializer.class) Long planId,
             @JsonSerialize(using = ToStringSerializer.class) Long directionId,
+            String directionCode,
             String directionName,
             @JsonSerialize(using = ToStringSerializer.class) Long parentId,
             IndicatorRef parent,

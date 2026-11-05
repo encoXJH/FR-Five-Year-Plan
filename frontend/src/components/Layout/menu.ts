@@ -105,8 +105,7 @@ export const menuGroups: MenuGroup[] = [
     key: 'stats',
     title: '统计分析',
     items: [
-      // 纯学院负责人（UNIT_OWNER）不显示统计报表（UI 规范 6.1 / A4）
-      { path: '/stats', title: '统计报表', icon: DataAnalysis, hideForRolesOnly: ['UNIT_OWNER'] },
+      { path: '/stats', title: '统计报表', icon: DataAnalysis, permissions: ['stats:view'] },
       { path: '/screen', title: '可视化大屏', icon: Monitor, permissions: ['screen:view'] },
     ],
   },

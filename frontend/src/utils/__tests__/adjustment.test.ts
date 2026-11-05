@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  adjustmentTypeHint,
   adjustmentTypeOptions,
   buildConservationLines,
   canApplyForTask,
@@ -50,6 +51,16 @@ describe('adjustmentTypeOptions', () => {
     const noTask = Object.fromEntries(adjustmentTypeOptions(null, false).map((o) => [o.type, o]))
     expect(noTask.POSTPONE.enabled).toBe(false)
     expect(noTask.TARGET_CHANGE.enabled).toBe(false)
+  })
+})
+
+describe('adjustmentTypeHint', () => {
+  it('按任务口径即时提示可调整类型', () => {
+    expect(adjustmentTypeHint(null, false)).toContain('请先勾选')
+    expect(adjustmentTypeHint('INCREMENT', false)).toContain('延期、转移、延期 + 转移')
+    expect(adjustmentTypeHint('BOOLEAN', false)).toContain('仅可延期')
+    expect(adjustmentTypeHint('RATIO', false)).toContain('联系管理员')
+    expect(adjustmentTypeHint('RATIO', true)).toContain('可发起目标调整')
   })
 })
 

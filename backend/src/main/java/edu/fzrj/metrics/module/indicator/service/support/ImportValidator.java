@@ -27,7 +27,7 @@ public final class ImportValidator {
             boolean formatOk = "A".equals(level)
                     ? IndicatorRules.isACode(row.code) : IndicatorRules.isAPlusCode(row.code);
             if (!formatOk) {
-                errors.add("编号格式不正确（指标为 A01 形式，历史量化记录为 A01-1 形式）");
+                errors.add("编号格式不正确（指标为 A01、B01、AA01 形式，历史量化记录为 A01-1 形式）");
             }
             if (ctx.existingCodes.contains(row.code)) {
                 errors.add("编号已存在：" + row.code);

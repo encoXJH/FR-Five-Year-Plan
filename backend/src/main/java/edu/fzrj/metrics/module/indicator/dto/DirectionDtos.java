@@ -39,6 +39,7 @@ public final class DirectionDtos {
     public record Item(
             @JsonSerialize(using = ToStringSerializer.class) Long id,
             @JsonSerialize(using = ToStringSerializer.class) Long planId,
+            String code,
             String subjectType,
             MajorGroupRef majorGroup,
             String name,

@@ -134,11 +134,11 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '发起调整申请', permissions: ['adjustment:apply'] },
       },
       {
-        // P11 统计报表（纯学院负责人不可见，UI 规范 6.1 / A4）
+        // P11 统计报表（纯学院负责人仅可查看已下发到本单元的计划）
         path: 'stats',
         name: 'Stats',
         component: () => import('@/views/stats/index.vue'),
-        meta: { title: '统计报表', hideForRolesOnly: ['UNIT_OWNER'] },
+        meta: { title: '统计报表', permissions: ['stats:view'] },
       },
       {
         // P13 操作日志

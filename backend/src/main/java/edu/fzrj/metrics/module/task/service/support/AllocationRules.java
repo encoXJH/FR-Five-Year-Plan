@@ -20,7 +20,7 @@ public final class AllocationRules {
     private AllocationRules() {
     }
 
-    /** B 任务编号：{指标编号}-{单元编码}，如 A01-2-C03 */
+    /** 新 B 任务编号：{指标编号}-{数字单元编码}，如 B01-03；历史编号保持原样 */
     public static String taskCode(String indicatorCode, String unitCode) {
         return indicatorCode + "-" + unitCode;
     }

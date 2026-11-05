@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -162,9 +163,13 @@ class CumulativeCalculatorTest {
     }
 
     @Test
-    void avgRateAveragesNonNull() {
+    void avgRateCountsNoDataAsZeroForEligibleItems() {
         assertEquals(new BigDecimal("0.500000"), CumulativeCalculator.avgRate(
                 List.of(new BigDecimal("0.4"), new BigDecimal("0.6"))));
+        assertEquals(new BigDecimal("0.200000"), CumulativeCalculator.avgRate(
+                Arrays.asList(new BigDecimal("0.4"), null)));
+        assertEquals(new BigDecimal("0.000000"), CumulativeCalculator.avgRate(
+                Arrays.asList(null, null)));
         assertNull(CumulativeCalculator.avgRate(List.of()));
     }
 }

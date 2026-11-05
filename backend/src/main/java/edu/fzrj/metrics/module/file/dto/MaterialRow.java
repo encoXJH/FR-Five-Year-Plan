@@ -20,6 +20,8 @@ public class MaterialRow {
     private Long indicatorId;
     private String indicatorCode;
     private String indicatorName;
+    private String directionName;
+    private LocalDateTime reviewedAt;
     private Long unitId;
     private String unitCode;
     private String unitName;

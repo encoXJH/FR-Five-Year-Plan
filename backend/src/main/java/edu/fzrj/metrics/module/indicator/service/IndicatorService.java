@@ -183,9 +183,11 @@ public class IndicatorService {
                 throw new BizException(ErrorCode.PARAM_INVALID, "指标必须指定是否可量化");
             }
             indicator.setIsQuantifiable(request.getIsQuantifiable());
+            Direction direction = null;
             if (request.getDirectionId() != null) {
                 requireAdmin();
-                indicator.setDirectionId(requireDirectionInPlan(request.getDirectionId(), planId).getId());
+                direction = requireDirectionInPlan(request.getDirectionId(), planId);
+                indicator.setDirectionId(direction.getId());
             }
             // 校级负责人创建 A 时未指定负责人，默认本人（草稿也受数据范围约束）
             Long ownerId = request.getOwnerId();
@@ -198,8 +200,15 @@ public class IndicatorService {
             indicator.setOwnerId(ownerId);
             requireUserIfPresent(ownerId);
             indicator.setCode(StringUtils.hasText(request.getCode())
-                    ? request.getCode().trim() : IndicatorRules.nextACode(existingCodes));
+                    ? request.getCode().trim()
+                    : direction == null
+                        ? IndicatorRules.nextACode(existingCodes)
+                        : IndicatorRules.nextACode(direction.getCode(), existingCodes));
             IndicatorRules.requireCodeFormat(IndicatorRules.LEVEL_A, indicator.getCode());
+            if (direction != null && !IndicatorRules.isACodeForDirection(indicator.getCode(), direction.getCode())) {
+                throw new BizException(ErrorCode.PARAM_INVALID,
+                        "指标编号应以所属建设方向编码 " + direction.getCode() + " 开头");
+            }
         } else {
             if (request.getParentId() == null) {
                 throw new BizException(ErrorCode.LEVEL_INVALID, "A+ 必须挂在可量化的 A 下面");
@@ -397,11 +406,17 @@ public class IndicatorService {
         planService.requireNotArchived(plan);
         requireSubtreeEditable(indicator);
         planService.requireVersion(indicator.getVersion(), request.getVersion());
-        if (request.getDirectionId() != null) {
-            requireDirectionInPlan(request.getDirectionId(), indicator.getPlanId());
-        }
+        Direction direction = request.getDirectionId() == null ? null
+                : requireDirectionInPlan(request.getDirectionId(), indicator.getPlanId());
 
         Long userId = SecurityUtils.getUserId();
+        if (!Objects.equals(indicator.getDirectionId(), request.getDirectionId())) {
+            Set<String> codes = existingCodes(indicator.getPlanId());
+            codes.remove(indicator.getCode());
+            indicator.setCode(direction == null
+                    ? IndicatorRules.nextACode(codes)
+                    : IndicatorRules.nextACode(direction.getCode(), codes));
+        }
         indicator.setDirectionId(request.getDirectionId());
         indicator.setUpdatedBy(userId);
         if (indicatorMapper.updateById(indicator) == 0) {
@@ -911,6 +926,7 @@ public class IndicatorService {
         Direction direction = indicator.getDirectionId() == null ? null : directions.get(indicator.getDirectionId());
         boolean quantifiable = IndicatorRules.isQuantifiable(indicator.getLevel(), indicator.getIsQuantifiable());
         return new IndicatorDtos.TreeNode(indicator.getId(), indicator.getDirectionId(),
+                direction == null ? null : direction.getCode(),
                 direction == null ? null : direction.getName(),
                 indicator.getParentId(), indicator.getLevel(), indicator.getCode(), indicator.getName(),
                 indicator.getNature(), quantifiable ? indicator.getMeasureType() : null,
@@ -974,6 +990,7 @@ public class IndicatorService {
                         c.getTotalTarget(), c.getStatus()))
                 .toList();
         return new IndicatorDtos.Detail(indicator.getId(), indicator.getPlanId(), indicator.getDirectionId(),
+                direction == null ? null : direction.getCode(),
                 direction == null ? null : direction.getName(),
                 indicator.getParentId(), parentRef, indicator.getLevel(), indicator.getCode(), indicator.getName(),
                 indicator.getNature(), quantifiable ? indicator.getMeasureType() : null,

@@ -21,7 +21,7 @@ public class ExportJob {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
-    /** 导出类型：INDICATORS 指标体系 / TASKS B任务 / STATS_REPORT 统计报表 / SETTLEMENT 核算结果 / AUDIT_LOGS 操作日志 */
+    /** 导出类型：INDICATORS 指标体系 / TASKS B任务 / STATS_REPORT 统计报表 / SETTLEMENT 核算结果 / AUDIT_LOGS 操作日志 / MATERIAL_ZIP 材料 ZIP */
     private String type;
 
     /** 导出参数（过滤条件） */

@@ -584,7 +584,7 @@ useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.val
                   <el-input-number
                     v-model="form.amount"
                     :min="0"
-                    :precision="0"
+                    :precision="4"
                     controls-position="right"
                     @change="markDirty"
                   />
@@ -671,7 +671,7 @@ useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.val
                     v-model="form.percent"
                     :min="0"
                     :max="100"
-                    :precision="1"
+                    :precision="4"
                     controls-position="right"
                     @change="markDirty"
                   />

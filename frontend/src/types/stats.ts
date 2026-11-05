@@ -29,7 +29,7 @@ export interface StatsOverview {
   timeProgress: number | null
   /** 完成率（小数，计数制：达标任务数 ÷ 有正目标任务数） */
   overallCompletionRate: number | null
-  /** 五年累计完成率（小数）：各 A 指标累计完成率的算术平均；五年总量才是 100% */
+  /** 五年累计完成率（小数）：有效 A 指标累计完成率的算术平均；未产生完成值按 0 计入 */
   cumulativeCompletionRate: number | null
   constraintTotal: number
   constraintAchieved: number
@@ -51,7 +51,7 @@ export interface UnitStatItem {
   taskCount: number
   achievedCount: number
   completionRate: number | null
-  /** 五年累计完成率（小数）：该单元可见任务累计完成率的平均 */
+  /** 五年累计完成率（小数）：该单元有效任务累计完成率的平均，未产生完成值按 0 计入 */
   cumulativeRate: number | null
   rank: number
 }

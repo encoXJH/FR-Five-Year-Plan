@@ -109,7 +109,7 @@ class DecompositionServiceTest {
     }
 
     private IndicatorDtos.Detail aPlus() {
-        return new IndicatorDtos.Detail(A_PLUS_ID, PLAN_ID, null, null, PARENT_ID, null,
+        return new IndicatorDtos.Detail(A_PLUS_ID, PLAN_ID, null, null, null, PARENT_ID, null,
                 "A_PLUS", "A01-1", "新增省级教学成果奖", "CONSTRAINT", "NUMBER", "INCREMENT",
                 "项", "HIGHER_BETTER", null, null, null, null, 0, null, BigDecimal.TEN,
                 null, 0, "DRAFT", List.of(), List.of(), List.of(), CREATED_VERSION, null, null);

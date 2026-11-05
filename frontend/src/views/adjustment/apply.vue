@@ -4,6 +4,7 @@ import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AdjustmentCompareTable from './components/AdjustmentCompareTable.vue'
 import BackButton from '@/components/BackButton.vue'
+import StatusTag from '@/components/StatusTag.vue'
 import MaterialUploader from '@/views/submission/components/MaterialUploader.vue'
 import { createAdjustment, previewAdjustment } from '@/api/adjustment'
 import { getTask, listAllTasks } from '@/api/task'
@@ -16,6 +17,7 @@ import { newIdempotencyKey } from '@/utils/idempotency'
 import { ApiError } from '@/utils/request'
 import { enumLabel } from '@/utils/enumLabels'
 import {
+  adjustmentTypeHint,
   adjustmentTypeOptions,
   checkTargetYear,
   isTransferType,
@@ -26,6 +28,7 @@ import { canAssignNewB, percentToStore } from '@/utils/allocation'
 import { canWriteTask, primaryTaskIndicator } from '@/utils/task'
 import type { FieldError } from '@/types/api'
 import type { PlanCard } from '@/types/plan'
+import type { IndicatorTreeNode } from '@/types/indicator'
 import type { TaskDetail, TaskListItem } from '@/types/task'
 import type {
   AdjustmentItem,
@@ -43,10 +46,17 @@ const isAdmin = computed(() => userStore.roles.includes('ADMIN'))
 // ---------- 步骤 ----------
 const step = ref(1)
 
-// ---------- 学院任务选择 ----------
+// ---------- 计划与学院任务选择 ----------
+const planOptions = ref<PlanCard[]>([])
+const selectedPlanId = ref('')
 const taskOptions = ref<TaskListItem[]>([])
 const taskLoading = ref(false)
 const task = ref<TaskDetail | null>(null)
+const directionByIndicator = ref<Map<string, string>>(new Map())
+let planRequestSeq = 0
+let taskDetailRequestSeq = 0
+
+const currentPlan = computed(() => planOptions.value.find((item) => item.id === selectedPlanId.value) ?? null)
 
 const form = reactive({
   taskId: '',
@@ -59,7 +69,8 @@ const form = reactive({
   fileIds: [] as string[],
 })
 
-const primaryIndicator = computed(() => primaryTaskIndicator(task.value))
+const selectedTaskOption = computed(() => taskOptions.value.find((item) => item.id === form.taskId) ?? null)
+const primaryIndicator = computed(() => primaryTaskIndicator(task.value ?? selectedTaskOption.value))
 const caliber = computed<StatCaliber | null>(() => primaryIndicator.value?.statCaliber ?? null)
 const isBoolean = computed(() => caliber.value === 'BOOLEAN')
 const isTargetChange = computed(() => form.type === 'TARGET_CHANGE')
@@ -70,6 +81,7 @@ const formReadonly = computed(() => step.value === 2 || isHistoricalTask.value)
 
 /** 类型选项按口径过滤（70006 引导；TARGET_CHANGE 仅管理员） */
 const typeOptions = computed(() => adjustmentTypeOptions(caliber.value, isAdmin.value))
+const selectedTypeHint = computed(() => adjustmentTypeHint(caliber.value, isAdmin.value))
 
 function typeLabel(type: AdjustmentType | ''): string {
   return type ? enumLabel('AdjustmentType', type, userStore.enums) : '—'
@@ -142,17 +154,41 @@ const receiverOptions = computed(() =>
   unitOptions.value.filter((unit) => unit.id !== task.value?.unit?.id && canAssignNewB(unit)),
 )
 
-async function selectTask(taskId: string): Promise<void> {
+function directionOf(option: TaskListItem): string {
+  const indicatorId = primaryTaskIndicator(option)?.id
+  return (indicatorId ? directionByIndicator.value.get(indicatorId) : null) ?? '未分配建设方向'
+}
+
+function remainingText(option: TaskListItem): string {
+  if (typeof option.adjustableAmount !== 'number') return '—'
+  return formatTargetValue(option.adjustableAmount, primaryTaskIndicator(option)?.statCaliber)
+}
+
+function selectedTaskRowClass({ row }: { row: TaskListItem }): string {
+  return row.id === form.taskId ? 'is-selected-task' : ''
+}
+
+async function selectTask(taskId: string, presetDetail?: TaskDetail): Promise<void> {
+  const changed = form.taskId !== taskId
   form.taskId = taskId
   task.value = null
+  if (changed) {
+    form.type = ''
+    form.fileIds = []
+  }
   form.fromYear = null
   form.amount = undefined
   form.toYear = null
   form.toUnitId = ''
   preview.value = null
+  previewErrors.value = []
+  previewFailed.value = ''
+  const requestSeq = ++taskDetailRequestSeq
   if (!taskId) return
   try {
-    task.value = await getTask(taskId)
+    const detail = presetDetail ?? await getTask(taskId)
+    if (requestSeq !== taskDetailRequestSeq || form.taskId !== taskId) return
+    task.value = detail
     const planYear = fromYearOptions.value
     if (isBoolean.value && planYear.length === 1) {
       form.fromYear = planYear[0]
@@ -173,7 +209,6 @@ async function selectTask(taskId: string): Promise<void> {
 }
 
 // ---------- TARGET_CHANGE（指标级，仅管理员） ----------
-const planOptions = ref<PlanCard[]>([])
 const indicatorOptions = ref<{ id: string; label: string; caliber: StatCaliber }[]>([])
 const tcForm = reactive({
   planId: '',
@@ -207,37 +242,69 @@ const compareCaliber = computed<StatCaliber>(() =>
   isTargetChange.value ? (tcIndicator.value?.caliber ?? 'INCREMENT') : (caliber.value ?? 'INCREMENT'),
 )
 
-async function selectTcPlan(planId: string): Promise<void> {
+function resetPlanSelection(planId: string): void {
+  selectedPlanId.value = planId
+  planRequestSeq += 1
+  taskDetailRequestSeq += 1
+  taskOptions.value = []
+  directionByIndicator.value = new Map()
+  indicatorOptions.value = []
+  task.value = null
+  form.taskId = ''
+  form.type = ''
+  form.fromYear = null
+  form.amount = undefined
+  form.toYear = null
+  form.toUnitId = ''
+  form.fileIds = []
   tcForm.planId = planId
   tcForm.indicatorId = ''
   tcForm.year = null
-  indicatorOptions.value = []
+  tcForm.target = undefined
+  tcForm.percentTarget = undefined
+  preview.value = null
+  previewErrors.value = []
+  previewFailed.value = ''
+  step.value = 1
+}
+
+async function loadPlanData(planId: string, indicatorId?: string): Promise<void> {
   if (!planId) return
+  const requestSeq = ++planRequestSeq
+  taskLoading.value = true
   try {
-    const tree = await listIndicators(planId)
-    const options: { id: string; label: string; caliber: StatCaliber }[] = []
-    for (const node of tree) {
-      if (node.level === 'A' && hasQuantitativeFields(node.level, node.isQuantifiable) && node.statCaliber) {
-        options.push({ id: node.id, label: `${node.code} ${node.name}`, caliber: node.statCaliber })
+    const [tasks, tree] = await Promise.all([
+      listAllTasks({ planId, indicatorId: indicatorId || undefined, isHistorical: false }),
+      listIndicators(planId),
+    ])
+    if (requestSeq !== planRequestSeq || selectedPlanId.value !== planId) return
+    taskOptions.value = tasks.filter((item) => canWriteTask(item))
+    const directions = new Map<string, string>()
+    const collectDirections = (nodes: IndicatorTreeNode[]): void => {
+      for (const node of nodes) {
+        directions.set(node.id, node.directionName ?? '未分配建设方向')
+        collectDirections(node.children ?? [])
       }
     }
-    indicatorOptions.value = options
+    collectDirections(tree)
+    directionByIndicator.value = directions
+    indicatorOptions.value = tree
+      .filter((node) => node.level === 'A' && hasQuantitativeFields(node.level, node.isQuantifiable) && node.statCaliber)
+      .map((node) => ({
+        id: node.id,
+        label: `${node.code} ${node.name}`,
+        caliber: node.statCaliber!,
+      }))
   } catch {
-    // 拦截器已提示
+    // 拦截器已提示；旧计划响应不会覆盖当前选择
+  } finally {
+    if (requestSeq === planRequestSeq) taskLoading.value = false
   }
 }
 
-async function presetTargetChange(indicatorId: string): Promise<void> {
-  const detail = await getIndicator(indicatorId)
-  if (detail.level !== 'A') {
-    ElMessage.warning('目标调整请选择 指标')
-    return
-  }
-  form.type = 'TARGET_CHANGE'
-  await selectTcPlan(detail.planId)
-  if (indicatorOptions.value.some((item) => item.id === detail.id)) {
-    tcForm.indicatorId = detail.id
-  }
+async function changePlan(planId: string): Promise<void> {
+  resetPlanSelection(planId)
+  await loadPlanData(planId)
 }
 
 /** 组装试算 / 提交共用请求体 */
@@ -427,30 +494,32 @@ function backToEdit(): void {
 onMounted(async () => {
   const presetTaskId = typeof route.query.taskId === 'string' ? route.query.taskId : ''
   const presetIndicatorId = typeof route.query.indicatorId === 'string' ? route.query.indicatorId : ''
-  taskLoading.value = true
-  const tasksPromise = listAllTasks({
-    indicatorId: presetIndicatorId || undefined,
-    isHistorical: false,
-  })
-    .then((items) => (taskOptions.value = items.filter((item) => canWriteTask(item))))
-    .catch(() => undefined)
-    .finally(() => (taskLoading.value = false))
+  const presetPlanId = typeof route.query.planId === 'string' ? route.query.planId : ''
   listOrgUnits()
     .then((list) => (unitOptions.value = list))
     .catch(() => undefined)
-  if (isAdmin.value) {
-    listPlans()
-      .then((list) => (planOptions.value = list))
-      .catch(() => undefined)
-  }
   try {
-    if (presetTaskId) {
-      await selectTask(presetTaskId)
-    } else if (presetIndicatorId && isAdmin.value) {
-      await presetTargetChange(presetIndicatorId)
+    const plans = await listPlans()
+    planOptions.value = plans
+    const presetTask = presetTaskId ? await getTask(presetTaskId) : null
+    const presetIndicator = !presetTask && presetIndicatorId ? await getIndicator(presetIndicatorId) : null
+    const requestedPlanId = presetTask?.planId ?? presetIndicator?.planId ?? presetPlanId
+    const defaultPlan = plans.find((item) => item.id === requestedPlanId)
+      ?? plans.find((item) => item.status === 'ACTIVE')
+      ?? plans[0]
+    const planId = defaultPlan?.id ?? ''
+    resetPlanSelection(planId)
+    if (presetIndicator && isAdmin.value) {
+      if (presetIndicator.level === 'A') form.type = 'TARGET_CHANGE'
+      else ElMessage.warning('目标调整请选择 A 类关键产出指标')
     }
-    await tasksPromise
-    if (!presetTaskId && presetIndicatorId && !isAdmin.value && taskOptions.value.length === 1) {
+    await loadPlanData(planId, !isAdmin.value ? presetIndicatorId : undefined)
+    if (presetTask && presetTask.planId === planId) {
+      await selectTask(presetTask.id, presetTask)
+    } else if (form.type === 'TARGET_CHANGE' && presetIndicator
+      && indicatorOptions.value.some((item) => item.id === presetIndicator.id)) {
+      tcForm.indicatorId = presetIndicator.id
+    } else if (!presetTask && presetIndicatorId && !isAdmin.value && taskOptions.value.length === 1) {
       await selectTask(taskOptions.value[0].id)
     }
   } catch {
@@ -476,6 +545,114 @@ onMounted(async () => {
       <el-step title="试算对比与提交" />
     </el-steps>
 
+    <el-card shadow="never" class="plan-switch-card">
+      <div class="plan-switch-row">
+        <div class="plan-switch-label">
+          <strong>当前计划</strong>
+          <span>切换计划后重新选择任务</span>
+        </div>
+        <el-select
+          v-model="selectedPlanId"
+          filterable
+          placeholder="请选择计划"
+          class="plan-select"
+          @change="changePlan"
+        >
+          <el-option
+            v-for="plan in planOptions"
+            :key="plan.id"
+            :label="`${plan.name}（${plan.startYear}–${plan.endYear}）`"
+            :value="plan.id"
+          >
+            <div class="plan-option">
+              <span>{{ plan.name }}</span>
+              <span class="plan-option-years">{{ plan.startYear }}–{{ plan.endYear }}</span>
+            </div>
+          </el-option>
+        </el-select>
+        <template v-if="currentPlan">
+          <StatusTag kind="PlanStatus" :value="currentPlan.status" />
+          <span class="current-plan-years">{{ currentPlan.startYear }}–{{ currentPlan.endYear }}</span>
+        </template>
+      </div>
+    </el-card>
+
+    <el-card v-if="!isTargetChange" shadow="never" class="task-select-card">
+      <template #header>
+        <div class="task-card-header">
+          <span class="card-title">勾选需要调整的学院任务</span>
+          <span class="field-tip-inline">每次申请选择 1 个任务</span>
+        </div>
+      </template>
+      <el-table
+        v-loading="taskLoading"
+        :data="taskOptions"
+        border
+        size="small"
+        max-height="420"
+        :row-class-name="selectedTaskRowClass"
+        @row-click="step === 1 && selectTask($event.id)"
+      >
+        <el-table-column width="52" align="center" fixed="left">
+          <template #default="{ row }">
+            <el-radio
+              :model-value="form.taskId"
+              :value="row.id"
+              :disabled="step === 2"
+              :aria-label="`选择任务 ${row.code}`"
+              @change="selectTask(row.id)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="学院" min-width="165">
+          <template #default="{ row }">
+            <div class="primary-cell"><span class="mono">{{ row.unit?.code ?? '—' }}</span> {{ row.unit?.name ?? '—' }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="建设方向" min-width="150">
+          <template #default="{ row }">{{ directionOf(row) }}</template>
+        </el-table-column>
+        <el-table-column label="关键产出指标" min-width="230">
+          <template #default="{ row }">
+            <div class="primary-cell"><span class="mono">{{ primaryTaskIndicator(row)?.code ?? '—' }}</span></div>
+            <div class="secondary-cell">{{ primaryTaskIndicator(row)?.name ?? '—' }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="任务编号" min-width="145">
+          <template #default="{ row }"><span class="mono">{{ row.code }}</span></template>
+        </el-table-column>
+        <el-table-column label="当前年度目标" width="145" align="right">
+          <template #default="{ row }">
+            <div>{{ row.displayYear ? `${row.displayYear} 年` : '—' }}</div>
+            <div class="secondary-cell">
+              {{ formatTargetValue(row.yearTarget, primaryTaskIndicator(row)?.statCaliber) }}
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="剩余可调整量" width="150" align="right">
+          <template #default="{ row }">
+            <span :class="{ 'remaining-value': typeof row.adjustableAmount === 'number' }">
+              {{ remainingText(row) }}
+            </span>
+            <span v-if="typeof row.adjustableAmount === 'number' && primaryTaskIndicator(row)?.unitLabel">
+              {{ primaryTaskIndicator(row)?.unitLabel }}
+            </span>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty :image-size="70" description="当前计划暂无可调整的学院任务" />
+        </template>
+      </el-table>
+      <div class="task-table-tip">剩余可调整量 = 当前年度目标 − 已认定 − 已冻结；其他统计口径显示“—”</div>
+      <el-alert
+        v-if="form.taskId"
+        :title="selectedTypeHint"
+        type="info"
+        :closable="false"
+        class="selection-type-hint"
+      />
+    </el-card>
+
     <div class="apply-layout">
       <!-- 申请表单 -->
       <el-card shadow="never" class="form-card">
@@ -487,25 +664,6 @@ onMounted(async () => {
           class="form-alert"
         />
         <el-form label-width="110px" label-position="left" @submit.prevent>
-          <el-form-item v-if="!isTargetChange" label="学院任务" required>
-            <el-select
-              v-model="form.taskId"
-              filterable
-              :loading="taskLoading"
-              placeholder="选择要调整的任务"
-              style="width: 100%"
-              :disabled="step === 2"
-              @change="selectTask"
-            >
-              <el-option
-                v-for="option in taskOptions"
-                :key="option.id"
-                :label="`${option.code} ${primaryTaskIndicator(option)?.name ?? ''}`"
-                :value="option.id"
-              />
-            </el-select>
-          </el-form-item>
-
           <el-form-item label="调整类型" required>
             <el-radio-group v-model="form.type" :disabled="formReadonly">
               <el-radio
@@ -605,21 +763,10 @@ onMounted(async () => {
 
           <!-- TARGET_CHANGE（指标级，仅管理员） -->
           <template v-else-if="isTargetChange">
-            <el-form-item label="所属计划" required>
-              <el-select
-                v-model="tcForm.planId"
-                placeholder="选择计划"
-                style="width: 100%"
-                :disabled="formReadonly"
-                @change="selectTcPlan"
-              >
-                <el-option
-                  v-for="plan in planOptions"
-                  :key="plan.id"
-                  :label="plan.name"
-                  :value="plan.id"
-                />
-              </el-select>
+            <el-form-item label=" ">
+              <el-button link type="primary" :disabled="step === 2" @click="form.type = ''">
+                返回学院任务调整
+              </el-button>
             </el-form-item>
             <el-form-item label="调整指标" required>
               <el-select
@@ -691,6 +838,7 @@ onMounted(async () => {
 
           <el-form-item label="附件">
             <MaterialUploader
+              :key="`${selectedPlanId}:${form.taskId}`"
               v-model="form.fileIds"
               biz-type="ADJUSTMENT_ATTACHMENT"
               :disabled="formReadonly"
@@ -821,9 +969,103 @@ onMounted(async () => {
   align-items: start;
 }
 
+.plan-switch-card,
+.task-select-card,
 .form-card,
 .preview-card {
   border-radius: var(--radius-card);
+}
+
+.plan-switch-card,
+.task-select-card {
+  margin-bottom: var(--space-4);
+}
+
+.plan-switch-row,
+.plan-option,
+.task-card-header {
+  display: flex;
+  align-items: center;
+}
+
+.plan-switch-row {
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.plan-switch-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  gap: 2px;
+}
+
+.plan-switch-label span,
+.current-plan-years,
+.plan-option-years,
+.task-table-tip,
+.secondary-cell {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.plan-select {
+  flex: 1;
+  min-width: 260px;
+  max-width: 620px;
+}
+
+.plan-option,
+.task-card-header {
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.task-card-header .field-tip-inline {
+  margin-left: 0;
+}
+
+.mono {
+  font-family: var(--app-font-mono);
+}
+
+.primary-cell {
+  color: var(--el-text-color-primary);
+  line-height: 20px;
+}
+
+.secondary-cell {
+  line-height: 18px;
+}
+
+.remaining-value {
+  color: var(--el-color-primary);
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.task-table-tip {
+  margin-top: var(--space-2);
+}
+
+.selection-type-hint {
+  margin-top: var(--space-3);
+}
+
+:deep(.task-select-card .el-radio) {
+  margin-right: 0;
+}
+
+:deep(.task-select-card .el-radio__label) {
+  display: none;
+}
+
+:deep(.task-select-card .is-selected-task > td.el-table__cell) {
+  background: var(--el-color-primary-light-9);
+}
+
+:deep(.task-select-card .el-table__row) {
+  cursor: pointer;
 }
 
 .card-title {
@@ -890,6 +1132,21 @@ onMounted(async () => {
 @media (max-width: 768px) {
   .apply-layout {
     grid-template-columns: 1fr;
+  }
+
+  .plan-switch-label {
+    min-width: 100%;
+  }
+
+  .plan-select {
+    min-width: 100%;
+    max-width: none;
+  }
+
+  .task-card-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-1);
   }
 }
 </style>

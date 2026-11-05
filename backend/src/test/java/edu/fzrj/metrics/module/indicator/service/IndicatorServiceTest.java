@@ -7,6 +7,7 @@ import edu.fzrj.metrics.common.datascope.DataScopeService;
 import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.common.util.PatchHelper;
 import edu.fzrj.metrics.module.indicator.dto.IndicatorDtos;
+import edu.fzrj.metrics.module.indicator.entity.Direction;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.entity.IndicatorYearTarget;
 import edu.fzrj.metrics.module.indicator.mapper.DirectionMapper;
@@ -19,6 +20,7 @@ import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.service.UserRefResolver;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
+import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -26,6 +28,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -71,6 +75,7 @@ class IndicatorServiceTest {
     static void initMybatisLambdaCache() {
         MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(), "");
         TableInfoHelper.initTableInfo(assistant, Indicator.class);
+        TableInfoHelper.initTableInfo(assistant, Direction.class);
         TableInfoHelper.initTableInfo(assistant, IndicatorYearTarget.class);
         TableInfoHelper.initTableInfo(assistant, Task.class);
     }
@@ -215,6 +220,45 @@ class IndicatorServiceTest {
         assertEquals(40006, error.getErrorCode().getCode());
         verify(indicatorMapper, never()).updateById(any(Indicator.class));
         verify(yearTargetMapper, never()).selectList(any());
+    }
+
+    @Test
+    void 草稿指标变更建设方向后自动按新方向取号() {
+        LoginUser user = new LoginUser(99L, "admin", "管理员", null,
+                List.of("ADMIN"), List.of());
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(user, null, List.of()));
+        try {
+            Indicator indicator = indicator(1L, null, "A", "A03", "DRAFT", "10", "AUTO_SUM");
+            indicator.setVersion(1);
+            indicator.setSort(0);
+            Indicator existingB = indicator(2L, null, "A", "B01", "DRAFT", "5", "AUTO_SUM");
+            existingB.setDirectionId(50L);
+            Direction direction = new Direction();
+            direction.setId(50L);
+            direction.setPlanId(11L);
+            direction.setCode("B");
+            direction.setName("方向 B");
+            when(indicatorMapper.selectOne(any())).thenReturn(indicator);
+            when(indicatorMapper.selectCount(any())).thenReturn(0L);
+            when(taskMapper.selectCount(any())).thenReturn(0L);
+            when(indicatorMapper.selectList(any())).thenReturn(List.of(indicator, existingB));
+            when(indicatorMapper.updateById(any(Indicator.class))).thenReturn(1);
+            when(directionMapper.selectOne(any())).thenReturn(direction);
+            when(directionMapper.selectById(50L)).thenReturn(direction);
+            when(planService.requirePlan(11L)).thenReturn(plan());
+            IndicatorDtos.DirectionAssignRequest request = new IndicatorDtos.DirectionAssignRequest();
+            request.setDirectionId(50L);
+            request.setVersion(1);
+
+            IndicatorDtos.Detail detail = indicatorService.assignDirection(1L, request);
+
+            assertEquals("B02", detail.code());
+            assertEquals("B", detail.directionCode());
+            assertEquals(50L, indicator.getDirectionId());
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
     }
 
     private static Plan plan() {

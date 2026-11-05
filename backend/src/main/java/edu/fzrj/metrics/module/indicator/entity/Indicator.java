@@ -38,7 +38,7 @@ public class Indicator {
     /** 层级：A / A_PLUS */
     private String level;
 
-    /** 指标编号，同一计划内唯一，如 A01、A01-2 */
+    /** 指标编号，同一计划内唯一；A 按方向生成 A01、B01…，历史 A+ 原编号保留 */
     private String code;
 
     /** 关键产出指标名称 */

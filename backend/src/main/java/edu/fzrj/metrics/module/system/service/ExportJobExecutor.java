@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.fzrj.metrics.module.audit.service.AuditLogService;
 import edu.fzrj.metrics.module.file.entity.FileInfo;
 import edu.fzrj.metrics.module.file.mapper.FileInfoMapper;
+import edu.fzrj.metrics.module.file.service.MaterialZipService;
 import edu.fzrj.metrics.module.file.service.StorageService;
 import edu.fzrj.metrics.module.indicator.service.IndicatorExcelService;
 import edu.fzrj.metrics.module.stats.service.StatsExcelService;
@@ -18,6 +19,7 @@ import java.io.ByteArrayInputStream;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -33,6 +35,7 @@ public class ExportJobExecutor {
     private final IndicatorExcelService indicatorExcelService;
     private final StatsExcelService statsExcelService;
     private final AuditLogService auditLogService;
+    private final MaterialZipService materialZipService;
     private final StorageService storageService;
     private final FileInfoMapper fileInfoMapper;
     private final ObjectMapper objectMapper;
@@ -42,12 +45,14 @@ public class ExportJobExecutor {
 
     public ExportJobExecutor(ExportJobMapper exportJobMapper, IndicatorExcelService indicatorExcelService,
                              StatsExcelService statsExcelService, AuditLogService auditLogService,
-                             StorageService storageService, FileInfoMapper fileInfoMapper,
+                             MaterialZipService materialZipService, StorageService storageService,
+                             FileInfoMapper fileInfoMapper,
                              ObjectMapper objectMapper) {
         this.exportJobMapper = exportJobMapper;
         this.indicatorExcelService = indicatorExcelService;
         this.statsExcelService = statsExcelService;
         this.auditLogService = auditLogService;
+        this.materialZipService = materialZipService;
         this.storageService = storageService;
         this.fileInfoMapper = fileInfoMapper;
         this.objectMapper = objectMapper;
@@ -66,7 +71,12 @@ public class ExportJobExecutor {
             Map<?, ?> params = objectMapper.readValue(job.getParams(), Map.class);
             byte[] bytes;
             String fileLabel;
-            if ("AUDIT_LOGS".equals(job.getType())) {
+            if ("MATERIAL_ZIP".equals(job.getType())) {
+                List<Long> fileIds = ((List<?>) params.get("fileIds")).stream()
+                        .map(value -> Long.valueOf(String.valueOf(value))).toList();
+                bytes = materialZipService.buildZip(fileIds);
+                fileLabel = "材料库ZIP";
+            } else if ("AUDIT_LOGS".equals(job.getType())) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> filter = (Map<String, Object>) params;
                 bytes = auditLogService.buildExport(filter);
@@ -87,7 +97,8 @@ public class ExportJobExecutor {
                     fileLabel = "指标体系-" + planId;
                 }
             }
-            FileInfo fileInfo = storeFile(bytes, fileLabel, job.getCreatedBy());
+            String extension = "MATERIAL_ZIP".equals(job.getType()) ? "zip" : "xlsx";
+            FileInfo fileInfo = storeFile(bytes, fileLabel, job.getCreatedBy(), extension);
             job.setStatus("SUCCEEDED");
             job.setFileId(fileInfo.getId());
             job.setFinishedAt(LocalDateTime.now());
@@ -102,9 +113,9 @@ public class ExportJobExecutor {
         }
     }
 
-    private FileInfo storeFile(byte[] bytes, String fileLabel, Long operatorId) throws Exception {
+    private FileInfo storeFile(byte[] bytes, String fileLabel, Long operatorId, String extension) throws Exception {
         String storageKey = "exports/" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy/MM"))
-                + "/" + UUID.randomUUID().toString().replace("-", "") + ".xlsx";
+                + "/" + UUID.randomUUID().toString().replace("-", "") + "." + extension;
         storageService.save(new ByteArrayInputStream(bytes), storageKey);
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         byte[] hash = digest.digest(bytes);
@@ -115,11 +126,12 @@ public class ExportJobExecutor {
         }
         FileInfo fileInfo = new FileInfo();
         fileInfo.setFileName(fileLabel + "-"
-                + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss")) + ".xlsx");
-        fileInfo.setExt("xlsx");
+                + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss")) + "." + extension);
+        fileInfo.setExt(extension);
         fileInfo.setSize((long) bytes.length);
-        fileInfo.setMimeType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-        fileInfo.setCategory("DOCUMENT");
+        fileInfo.setMimeType("zip".equals(extension) ? "application/zip"
+                : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        fileInfo.setCategory("zip".equals(extension) ? "ARCHIVE" : "DOCUMENT");
         // V1 chk_file_biz_type 无 EXPORT_FILE 取值，阶段 2 复用 IMPORT_FILE（见开发决策记录）
         fileInfo.setBizType("IMPORT_FILE");
         fileInfo.setStatus("BOUND");

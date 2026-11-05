@@ -60,10 +60,6 @@ async function submit(): Promise<void> {
     ElMessage.warning('请填写单元名称')
     return
   }
-  if (!editing.value && !form.code.trim()) {
-    ElMessage.warning('请填写单元编码')
-    return
-  }
   saving.value = true
   try {
     if (editing.value) {
@@ -76,7 +72,6 @@ async function submit(): Promise<void> {
       ElMessage.success('执行单元已更新')
     } else {
       await createOrgUnit({
-        code: form.code.trim().toUpperCase(),
         name: form.name.trim(),
         type: form.type,
         sort: form.sort,
@@ -179,13 +174,12 @@ useAutoRefresh(() => load(true))
       width="480px"
     >
       <el-form label-width="90px">
-        <el-form-item label="编码" required>
-          <el-input
-            v-model="form.code"
-            :disabled="!!editing"
-            placeholder="如 C11（上线后不可修改）"
-          />
-          <div v-if="editing" class="field-tip">编码上线后不可修改</div>
+        <el-form-item v-if="editing" label="编码">
+          <el-input v-model="form.code" disabled />
+          <div class="field-tip">编码上线后不可修改</div>
+        </el-form-item>
+        <el-form-item v-else label="编码">
+          <span class="field-tip">保存后按 01、02、03… 自动生成</span>
         </el-form-item>
         <el-form-item label="名称" required>
           <el-input v-model="form.name" placeholder="如 智能产业学院" />

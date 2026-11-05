@@ -17,6 +17,7 @@
             ELSE NULL END AND i.deleted = 0
         JOIN indicator ti ON ti.id = COALESCE(i.parent_id, i.id)
             AND ti.level = 'A' AND ti.deleted = 0
+        LEFT JOIN direction d ON d.id = ti.direction_id AND d.deleted = 0
         LEFT JOIN sys_user su ON su.id = f.uploaded_by
         LEFT JOIN org_unit ou ON ou.id = COALESCE(s.unit_id, su.unit_id) AND ou.deleted = 0
         WHERE fr.biz_type IN ('INDICATOR', 'SUBMISSION', 'ADJUSTMENT', 'MILESTONE')
@@ -46,6 +47,12 @@
             AND (LOWER(f.file_name) LIKE CONCAT('%', #{query.keyword}, '%')
                 OR LOWER(ti.code) LIKE CONCAT('%', #{query.keyword}, '%')
                 OR LOWER(ti.name) LIKE CONCAT('%', #{query.keyword}, '%'))
+        </if>
+        <if test="query.fileIds != null and !query.fileIds.isEmpty()">
+            AND f.id IN
+            <foreach collection="query.fileIds" item="fileId" open="(" separator="," close=")">
+                #{fileId}
+            </foreach>
         </if>
         <if test="query.ownerScope != null or query.unitScope != null">
             AND (
@@ -87,14 +94,18 @@
             ti.id AS indicator_id,
             ti.code AS indicator_code,
             ti.name AS indicator_name,
+            d.name AS direction_name,
+            s.reviewed_at,
             ou.id AS unit_id,
             ou.code AS unit_code,
             ou.name AS unit_name,
             su.id AS uploader_id,
             su.name AS uploader_name
         <include refid="materialFromWhere"/>
-        ORDER BY f.uploaded_at DESC, f.id DESC
-        LIMIT #{query.limit} OFFSET #{query.offset}
+        ORDER BY f.uploaded_at DESC, f.id DESC, fr.id ASC
+        <if test="query.limit > 0">
+            LIMIT #{query.limit} OFFSET #{query.offset}
+        </if>
     </select>
 
     <select id="countByIndicator" resultType="edu.fzrj.metrics.module.file.dto.MaterialDtos$IndicatorMaterialCount">

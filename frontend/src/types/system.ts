@@ -13,7 +13,6 @@ export interface OrgUnitAdmin {
 }
 
 export interface OrgUnitSaveRequest {
-  code?: string
   name?: string
   type?: string | null
   sort?: number | null

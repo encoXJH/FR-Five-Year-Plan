@@ -12,6 +12,7 @@ import {
   withdrawAdjustment,
 } from '@/api/adjustment'
 import { getTask } from '@/api/task'
+import { getIndicator } from '@/api/indicator'
 import { useUserStore } from '@/stores/user'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { ApiError } from '@/utils/request'
@@ -81,6 +82,7 @@ function itemsSummary(row: AdjustmentListItem): string {
 const drawerVisible = ref(false)
 const detailLoading = ref(false)
 const detail = ref<AdjustmentDetail | null>(null)
+const detailDirectionName = ref('—')
 /** 快照年度列（优先任务计划起止年，否则快照中出现过的年份） */
 const snapshotYears = ref<number[]>([])
 
@@ -88,6 +90,7 @@ async function openDetail(row: Pick<AdjustmentListItem, 'id'>): Promise<void> {
   drawerVisible.value = true
   detailLoading.value = true
   detail.value = null
+  detailDirectionName.value = '—'
   try {
     const data = await getAdjustment(row.id)
     detail.value = data
@@ -102,14 +105,18 @@ async function openDetail(row: Pick<AdjustmentListItem, 'id'>): Promise<void> {
       if (item.year != null) years.add(item.year)
     }
     snapshotYears.value = [...years].sort((a, b) => a - b)
-    if (data.task?.id) {
-      const task = await getTask(data.task.id).catch(() => null)
-      const plan = task?.plan
-      if (plan) {
-        const list: number[] = []
-        for (let year = plan.startYear; year <= plan.endYear; year += 1) list.push(year)
-        if (list.length > 0) snapshotYears.value = list
-      }
+    const [task, indicator] = await Promise.all([
+      data.task?.id ? getTask(data.task.id).catch(() => null) : Promise.resolve(null),
+      data.indicator?.id ? getIndicator(data.indicator.id).catch(() => null) : Promise.resolve(null),
+    ])
+    detailDirectionName.value = indicator
+      ? (indicator.directionName?.trim() || '未分配建设方向')
+      : '—'
+    const plan = task?.plan
+    if (plan) {
+      const list: number[] = []
+      for (let year = plan.startYear; year <= plan.endYear; year += 1) list.push(year)
+      if (list.length > 0) snapshotYears.value = list
     }
   } catch {
     // 拦截器已提示
@@ -462,10 +469,32 @@ useAutoRefresh(() => loadList(true), { skip: () => drawerVisible.value })
             <el-descriptions-item label="状态">
               <StatusTag kind="AdjustmentStatus" :value="detail.status" />
             </el-descriptions-item>
-            <el-descriptions-item label="学院任务" :span="2">
+            <el-descriptions-item label="所属学院" :span="2">
+              <template v-if="detail.fromUnit">
+                <span class="mono">{{ detail.fromUnit.code }}</span>
+                {{ detail.fromUnit.name }}
+              </template>
+              <template v-else>指标级调整（无学院任务）</template>
+            </el-descriptions-item>
+            <el-descriptions-item label="建设方向" :span="2">
+              {{ detailDirectionName }}
+            </el-descriptions-item>
+            <el-descriptions-item label="关键产出指标" :span="2">
+              <template v-if="detail.indicator">
+                <span class="mono">{{ detail.indicator.code }}</span>
+                {{ detail.indicator.name }}
+                <StatusTag
+                  v-if="detail.indicator.statCaliber"
+                  kind="StatCaliber"
+                  :value="detail.indicator.statCaliber"
+                  class="caliber-tag"
+                />
+              </template>
+              <template v-else>—</template>
+            </el-descriptions-item>
+            <el-descriptions-item label="任务编号" :span="2">
               <template v-if="detail.task">
                 <span class="mono">{{ detail.task.code }}</span>
-                {{ detail.indicator?.name ?? '' }}
                 <el-tag
                   v-if="detail.task.isHistorical"
                   size="small"
@@ -475,12 +504,6 @@ useAutoRefresh(() => loadList(true), { skip: () => drawerVisible.value })
                 >
                   历史只读
                 </el-tag>
-                <StatusTag
-                  v-if="detail.indicator?.statCaliber"
-                  kind="StatCaliber"
-                  :value="detail.indicator.statCaliber"
-                  class="caliber-tag"
-                />
               </template>
               <template v-else>指标级调整（目标调整）</template>
             </el-descriptions-item>

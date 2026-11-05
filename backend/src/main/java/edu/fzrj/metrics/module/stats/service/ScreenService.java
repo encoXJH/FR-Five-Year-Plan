@@ -103,8 +103,9 @@ public class ScreenService {
 
     private ScreenDtos.ScreenView compute(Plan plan, int year) {
         StatsDtos.Overview overview = statsService.overview(plan.getId(), year, StatsService.ScopeFilter.allData());
-        List<StatsDtos.UnitStat> byUnit = statsService.byUnit(plan.getId(), year);
-        List<StatsDtos.IndicatorStat> byIndicator = statsService.byIndicator(plan.getId(), year);
+        List<StatsDtos.UnitStat> byUnit = statsService.byUnit(plan.getId(), year, StatsService.ScopeFilter.allData());
+        List<StatsDtos.IndicatorStat> byIndicator = statsService.byIndicator(plan.getId(), year,
+                StatsService.ScopeFilter.allData());
         List<ScreenDtos.YearTrend> trend = yearTrend(plan);
         ScreenDtos.AdjustmentStats adjustmentStats = adjustmentStats(plan.getId());
         List<ScreenDtos.ActivityItem> activities = recentActivities(plan.getId());

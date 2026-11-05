@@ -27,9 +27,6 @@ public final class SystemDtos {
 
     @Data
     public static class OrgUnitCreateRequest {
-        @NotBlank(message = "单元编码必填")
-        @Size(max = 16, message = "单元编码不超过 16 字")
-        private String code;
         @NotBlank(message = "单元名称必填")
         @Size(max = 200, message = "单元名称不超过 200 字")
         private String name;

@@ -14,6 +14,7 @@ import {
   isPercentCaliber,
   isValidCaliberCombo,
   parseCollapsedDirectionKeys,
+  parseDirectionIdQuery,
   parseExpandedIndicatorIds,
   serializeCollapsedDirectionKeys,
   serializeExpandedIndicatorIds,
@@ -222,6 +223,18 @@ describe('统计树进度索引', () => {
       yearStatus: 'ACHIEVED',
     })
     expect(index.tasks.has('task-year-1')).toBe(false)
+  })
+})
+
+describe('建设方向 URL 筛选', () => {
+  it('只接受单个字符串并忽略空白与重复 query 值', () => {
+    expect(parseDirectionIdQuery('123')).toBe('123')
+    expect(parseDirectionIdQuery(' 123 ')).toBe('123')
+    expect(parseDirectionIdQuery('')).toBe('')
+    expect(parseDirectionIdQuery('   ')).toBe('')
+    expect(parseDirectionIdQuery(['123', '456'])).toBe('')
+    expect(parseDirectionIdQuery(null)).toBe('')
+    expect(parseDirectionIdQuery(undefined)).toBe('')
   })
 })
 

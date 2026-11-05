@@ -130,6 +130,8 @@ public final class TaskDtos {
     @Data
     public static class TaskQuery extends PageQuery {
         @JsonSerialize(using = ToStringSerializer.class)
+        private Long planId;
+        @JsonSerialize(using = ToStringSerializer.class)
         private Long unitId;
         @JsonSerialize(using = ToStringSerializer.class)
         private Long indicatorId;
@@ -155,6 +157,8 @@ public final class TaskDtos {
             /** 全规划期年度目标，供列表展开后直接展示，避免逐任务查询详情 */
             List<YearTargetView> yearTargets,
             BigDecimal actualValue,
+            /** INCREMENT 展示年度剩余可调整量 = 目标 − 已认定 − 已冻结；其他口径为 null */
+            BigDecimal adjustableAmount,
             BigDecimal completionRate,
             /** 五年累计完成值（INCREMENT 各年之和，STOCK/GROWTH 最新总量，RATIO/DIRECT_PERCENT 最新比率，BOOLEAN 0/1） */
             BigDecimal cumulativeActual,
@@ -165,6 +169,15 @@ public final class TaskDtos {
             LocalDateTime acceptedAt,
             /** 展示年度填报截止日（YYYY-MM-DD，系统参数 plan.fillDeadline 拼年度；无展示年度时为 null） */
             String deadline,
+            /** 当前行年度字段与材料摘要对应的年度 */
+            Integer displayYear,
+            /** 展示年度当前填报记录及其最新状态 */
+            @JsonSerialize(using = ToStringSerializer.class) Long latestSubmissionId,
+            String latestSubmissionStatus,
+            /** 当前填报已关联材料数（包含未提交材料，不按审核状态过滤） */
+            long fileCount,
+            /** 最少材料数；DIRECT_PERCENT 即使配置为 0 也至少要求 1 份 */
+            int requiredFileCount,
             Integer version) {
     }
 

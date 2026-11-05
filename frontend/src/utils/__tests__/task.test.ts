@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { averageTaskYearCompletion, canWriteTask, formatDeadline, primaryTaskIndicator, progressPercentage } from '../task'
+import { averageTaskYearCompletion, canWriteTask, formatDeadline, primaryTaskIndicator, progressPercentage, taskMaterialState } from '../task'
 
 const NOW = new Date('2026-10-22T12:00:00+08:00')
 
@@ -62,6 +62,40 @@ describe('progressPercentage', () => {
     expect(progressPercentage(null)).toBe(0)
     expect(progressPercentage(undefined)).toBe(0)
     expect(progressPercentage(-0.2)).toBe(0)
+  })
+})
+
+describe('taskMaterialState', () => {
+  it('无提交记录时为未上传，并按材料要求计算缺口', () => {
+    expect(taskMaterialState({
+      latestSubmissionStatus: null,
+      fileCount: 0,
+      requiredFileCount: 1,
+    })).toMatchObject({ status: 'NOT_UPLOADED', label: '未上传', missingCount: 1 })
+  })
+
+  it.each(['DRAFT', 'REJECTED', 'WITHDRAWN'] as const)('%s 无材料时为未上传，有材料时为未提交', (status) => {
+    expect(taskMaterialState({ latestSubmissionStatus: status, fileCount: 0, requiredFileCount: 0 }))
+      .toMatchObject({ status: 'NOT_UPLOADED', label: '未上传' })
+    expect(taskMaterialState({ latestSubmissionStatus: status, fileCount: 2, requiredFileCount: 0 }))
+      .toMatchObject({ status: 'NOT_SUBMITTED', label: '未提交' })
+  })
+
+  it('待审核与已通过优先展示流程状态，不再提示缺材料', () => {
+    expect(taskMaterialState({ latestSubmissionStatus: 'PENDING_REVIEW', fileCount: 0, requiredFileCount: 2 }))
+      .toMatchObject({ status: 'PENDING_REVIEW', label: '审核中', missingCount: 0 })
+    expect(taskMaterialState({ latestSubmissionStatus: 'APPROVED', fileCount: 1, requiredFileCount: 2 }))
+      .toMatchObject({ status: 'APPROVED', label: '已通过', missingCount: 0 })
+  })
+
+  it('草稿材料不足时突出缺失份数', () => {
+    expect(taskMaterialState({ latestSubmissionStatus: 'DRAFT', fileCount: 1, requiredFileCount: 3 }))
+      .toMatchObject({ status: 'NOT_SUBMITTED', missingCount: 2 })
+  })
+
+  it('DIRECT_PERCENT 后端返回至少一份要求时，零材料即缺一份', () => {
+    expect(taskMaterialState({ latestSubmissionStatus: 'DRAFT', fileCount: 0, requiredFileCount: 1 }))
+      .toMatchObject({ status: 'NOT_UPLOADED', requiredFileCount: 1, missingCount: 1 })
   })
 })
 

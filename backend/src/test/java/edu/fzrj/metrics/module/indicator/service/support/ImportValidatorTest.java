@@ -64,7 +64,7 @@ class ImportValidatorTest {
     @Test
     void 编号格式不正确() {
         ImportRowData row = validARow();
-        row.code = "B01";
+        row.code = "01";
         assertTrue(hasError(ImportValidator.validate(row, ctx()), "编号格式"));
         row.code = "A1";
         assertTrue(hasError(ImportValidator.validate(row, ctx()), "编号格式"));

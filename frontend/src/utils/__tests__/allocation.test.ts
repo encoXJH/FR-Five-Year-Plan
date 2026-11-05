@@ -265,4 +265,14 @@ describe('percentToDisplay / percentToStore', () => {
     expect(percentToDisplay(null)).toBeUndefined()
     expect(percentToStore(undefined)).toBeNull()
   })
+
+  it('六位存储小数与四位百分比小数互转不丢精度或产生浮点尾差', () => {
+    expect(percentToDisplay(0.123456)).toBe(12.3456)
+    expect(percentToStore(12.3456)).toBe(0.123456)
+    expect(percentToDisplay(0.001234)).toBe(0.1234)
+    expect(percentToStore(0.1234)).toBe(0.001234)
+    expect(percentToDisplay(0.000001)).toBe(0.0001)
+    expect(percentToStore(0.0001)).toBe(0.000001)
+    expect(percentToStore(100)).toBe(1)
+  })
 })

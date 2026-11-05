@@ -43,8 +43,10 @@ public class StatsExcelService {
                 ? StatsService.ScopeFilter.allData() : statsService.scopeForOwner(scopeOwner);
         StatsDtos.Overview overview = statsService.overview(planId, year, scope);
         int resolvedYear = overview.year();
-        List<StatsDtos.UnitStat> byUnit = statsService.byUnit(planId, resolvedYear);
-        List<StatsDtos.IndicatorStat> byIndicator = statsService.byIndicator(planId, resolvedYear);
+        List<StatsDtos.UnitStat> byUnit = statsService.byUnit(planId, resolvedYear,
+                StatsService.ScopeFilter.allData());
+        List<StatsDtos.IndicatorStat> byIndicator = statsService.byIndicator(planId, resolvedYear,
+                StatsService.ScopeFilter.allData());
         List<List<Object>> taskRows = taskRows(planId, resolvedYear, scope);
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -133,7 +135,8 @@ public class StatsExcelService {
                     row.add(unit == null ? "" : unit.getName());
                     Object target = StatsService.targetView(caliber, ty.getTarget());
                     row.add(target instanceof Boolean b ? (b ? "是" : "") : target == null ? "" : target);
-                    row.add(ty.getActualValue() == null ? "" : ty.getActualValue());
+                    BigDecimal actual = "GROWTH".equals(caliber) ? ty.getActualTotal() : ty.getActualValue();
+                    row.add(actual == null ? "" : actual);
                     row.add(percent(ty.getCompletionRate()));
                     row.add(YEAR_STATUS_LABEL.getOrDefault(ty.getYearStatus(), ty.getYearStatus()));
                     return row;

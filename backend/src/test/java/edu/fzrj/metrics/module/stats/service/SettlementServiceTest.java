@@ -246,6 +246,54 @@ class SettlementServiceTest {
         assertEquals(11L, result.items().get(0).indicatorId());
     }
 
+    @Test
+    void 年度核算使用关联有效缓存且不被自身完成值覆盖() {
+        Plan plan = activePlan();
+        int pastYear = Year.now().getValue() - 1;
+        plan.setStartYear(pastYear);
+        plan.setEndYear(pastYear + 5);
+        when(planService.requirePlan(1L)).thenReturn(plan);
+        PlanYear planYear = new PlanYear();
+        planYear.setStatus("ACTIVE");
+        when(planYearMapper.selectOne(any())).thenReturn(planYear);
+
+        Indicator indicator = finalIndicator(11L, "A01", 1);
+        indicator.setRollupMode("AUTO_SUM");
+        indicator.setIsQuantifiable(true);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(indicator));
+        Task task = finalTask(101L, 11L, 10L);
+        when(taskMapper.selectList(any())).thenReturn(List.of(task));
+
+        TaskYear taskYear = new TaskYear();
+        taskYear.setId(201L);
+        taskYear.setTaskId(101L);
+        taskYear.setIndicatorId(11L);
+        taskYear.setYear(pastYear);
+        taskYear.setTarget(new BigDecimal("5"));
+        taskYear.setOwnActualValue(new BigDecimal("2"));
+        taskYear.setActualValue(new BigDecimal("8"));
+        taskYear.setYearStatus("IN_PROGRESS");
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(taskYear));
+
+        IndicatorYearTarget cache = new IndicatorYearTarget();
+        cache.setIndicatorId(11L);
+        cache.setYear(pastYear);
+        cache.setTarget(new BigDecimal("5"));
+        cache.setActualValue(new BigDecimal("2"));
+        when(yearTargetMapper.selectList(any())).thenReturn(List.of(cache));
+
+        settlementService.settle(1L, pastYear, 3);
+
+        assertEquals(0, new BigDecimal("2").compareTo(taskYear.getOwnActualValue()));
+        assertEquals(0, new BigDecimal("8").compareTo(taskYear.getActualValue()));
+        assertEquals("ACHIEVED", taskYear.getYearStatus());
+        assertEquals(0, new BigDecimal("8").compareTo(cache.getActualValue()));
+        assertEquals(0, new BigDecimal("1.6").compareTo(cache.getCompletionRate()));
+        verify(submissionMapper, never()).selectList(any());
+        verify(taskYearMapper).updateById(taskYear);
+        verify(yearTargetMapper).updateById(cache);
+    }
+
     private static Plan activePlan() {
         Plan plan = new Plan();
         plan.setId(1L);

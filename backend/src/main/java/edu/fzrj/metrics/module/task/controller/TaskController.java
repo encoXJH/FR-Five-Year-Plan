@@ -32,7 +32,7 @@ public class TaskController {
         this.taskService = taskService;
     }
 
-    @Operation(summary = "B 任务分页列表（过滤 unitId / indicatorId / year / status / yearStatus / isHistorical）",
+    @Operation(summary = "B 任务分页列表（过滤 planId / unitId / indicatorId / year / status / yearStatus / isHistorical）",
             description = "已登录，按数据范围：管理员 / 校领导全部；校级负责人看本人负责指标；学院负责人看本单元")
     @GetMapping
     public PageResult<TaskDtos.TaskListItem> page(@ModelAttribute TaskDtos.TaskQuery query) {

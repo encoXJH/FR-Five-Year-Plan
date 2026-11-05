@@ -57,7 +57,7 @@ import java.util.stream.Collectors;
 
 /**
  * 年度核算与五年核算（API 约定 15.8、PRD 5.8、数据库设计规则 4 第 3 条 / 规则 7）。
- * 年度核算：锁定 plan_year → 逐 task_year 全量重算并终态化（ACHIEVED / NOT_ACHIEVED / MAKEUP_PENDING）
+ * 年度核算：锁定 plan_year → 逐 task_year 按有效完成缓存终态化（ACHIEVED / NOT_ACHIEVED / MAKEUP_PENDING）
  * → 未达标的 INCREMENT / BOOLEAN 缺口生成 makeup 待补做 → 指标缓存终态化。
  * 解锁：敏感操作（必须 reason），plan_year 回 ACTIVE，核算类状态回退。
  * 五年核算：全部年度 LOCKED 后进行，按口径计算五年完成值并终态判定，任务置 CLOSED。
@@ -160,10 +160,7 @@ public class SettlementService {
                         .eq(TaskYear::getDeleted, 0L))
                 .stream().sorted(Comparator.comparing(TaskYear::getId)).toList();
 
-        // 当年审核通过的填报按 task_year 分组（审核时间升序，STOCK / GROWTH / DIRECT_PERCENT 取最后一条）
-        Map<Long, List<Submission>> approvedByTaskYear = groupApprovedByTaskYear(planId, year);
-        // STOCK / GROWTH 上年总量
-        Map<Long, TaskYear> prevYearByTask = prevYearRows(tasks, year);
+        // 年度核算使用审核重算后的有效完成缓存，保留直接关联任务同步的进度。
         // 已有补做记录（PENDING / DONE）的年度行，防重新核算时重复生成
         Set<Long> makeupsCovered = coveredMakeupTaskYears(yearRows);
 
@@ -178,20 +175,9 @@ public class SettlementService {
                 continue;
             }
             String caliber = indicator.getStatCaliber();
-            List<MetricCalculator.ApprovedValue> values = approvedByTaskYear
-                    .getOrDefault(ty.getId(), List.of()).stream()
-                    .map(s -> effectiveValue(caliber, s)).toList();
-            BigDecimal prevTotal = year <= plan.getStartYear() ? indicator.getBaselineValue()
-                    : prevYearByTask.containsKey(task.getId())
-                    ? prevYearByTask.get(task.getId()).getActualTotal() : null;
-            MetricCalculator.YearResult result = MetricCalculator.yearActual(caliber, values, prevTotal);
-
-            ty.setActualValue(result.actualValue());
-            ty.setActualNumerator(result.numerator());
-            ty.setActualDenominator(result.denominator());
-            ty.setActualTotal(result.total());
-            ty.setCompletionRate(MetricCalculator.completionRate(caliber, result, ty.getTarget()));
-            ty.setIsAchieved(MetricCalculator.achieved(indicator.getTargetDirection(), caliber, result, ty.getTarget()));
+            MetricCalculator.YearResult result = new MetricCalculator.YearResult(
+                    ty.getActualValue(), ty.getActualNumerator(), ty.getActualDenominator(), ty.getActualTotal(),
+                    null, null);
 
             String settleStatus = SettlementRules.settleStatus(
                     indicator.getTargetDirection(), caliber, result, ty.getTarget());
