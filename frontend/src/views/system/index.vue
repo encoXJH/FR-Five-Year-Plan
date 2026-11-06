@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useUserStore } from '@/stores/user'
 import OrgUnitPanel from './components/OrgUnitPanel.vue'
+import OrgStructurePanel from './components/OrgStructurePanel.vue'
 import DirectionPanel from './components/DirectionPanel.vue'
 import MajorGroupPanel from './components/MajorGroupPanel.vue'
 import UserPanel from './components/UserPanel.vue'
@@ -23,6 +24,7 @@ const canManageDirections = computed(() => isAdmin.value && userStore.can('syste
     <el-card shadow="never">
       <el-tabs v-model="activeTab">
         <el-tab-pane label="执行单元" name="orgUnits" lazy><OrgUnitPanel /></el-tab-pane>
+        <el-tab-pane label="组织架构" name="orgDepartments" lazy><OrgStructurePanel /></el-tab-pane>
         <el-tab-pane v-if="canManageDirections" label="主要建设方向" name="directions" lazy><DirectionPanel /></el-tab-pane>
         <el-tab-pane label="专业群" name="majorGroups" lazy><MajorGroupPanel /></el-tab-pane>
         <el-tab-pane label="用户与角色" name="users" lazy><UserPanel /></el-tab-pane>

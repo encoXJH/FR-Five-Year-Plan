@@ -15,6 +15,7 @@ public final class FeishuDtos {
             int departmentCount,
             int feishuUserCount,
             int matchedCount,
+            /** 历史兼容字段：首次绑定须校内核验，组织同步不再绑定，恒为 0 */
             int openIdBoundCount,
             int nameUpdatedCount,
             int unitUpdatedCount,

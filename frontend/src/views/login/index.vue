@@ -8,13 +8,16 @@ import { fetchFeishuAuthorizeUrl } from '@/api/auth'
 import { ApiError } from '@/utils/request'
 import {
   detectClientEnv,
+  FEISHU_OAUTH_STATE_KEY,
   isFeishuUnavailableCode,
   normalizeAuthorizeInfo,
   type ClientEnv,
   type FeishuAuthorizeInfo,
 } from '@/utils/feishu'
 import { loadFeishuSdk, requestFeishuAccessCode } from '@/utils/feishuSdk'
-import type { LoginRequest } from '@/types/auth'
+import { createUuid } from '@/utils/uuid'
+import FeishuBindForm from './components/FeishuBindForm.vue'
+import type { FeishuBindingChallenge, LoginRequest } from '@/types/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -41,6 +44,7 @@ const feishuAuth = ref<FeishuAuthorizeInfo | null>(null)
 /** 飞书客户端内自动免登进行中：不显示登录表单 */
 const autoLoginPending = ref(clientEnv !== 'WEB')
 const feishuLoginLoading = ref(false)
+const bindingChallenge = ref<FeishuBindingChallenge | null>(null)
 
 function redirectTarget(): string {
   if (userStore.isUnitOwnerOnly) return userStore.homePath
@@ -48,16 +52,19 @@ function redirectTarget(): string {
   return typeof route.query.redirect === 'string' ? route.query.redirect : '/'
 }
 
-/** 飞书免登 code 换 Token 的统一收尾（20007 未绑定单独引导） */
+/** 飞书免登：已绑定直接跳转，首次登录切换到校内身份核验表单 */
 async function doFeishuLogin(code: string): Promise<boolean> {
   try {
-    await userStore.loginFeishu(code, clientEnv)
+    const challenge = await userStore.loginFeishu(code, clientEnv)
+    if (challenge) {
+      bindingChallenge.value = challenge
+      autoLoginPending.value = false
+      return true
+    }
     router.push(redirectTarget())
     return true
   } catch (error) {
-    if (error instanceof ApiError && error.code === 20007) {
-      ElMessage.error('飞书账号未绑定平台用户，请联系管理员完成绑定后重试')
-    } else if (error instanceof ApiError && error.message) {
+    if (error instanceof ApiError && error.message) {
       ElMessage.error(error.message)
     } else {
       ElMessage.error('飞书登录失败，请改用账号密码登录')
@@ -66,12 +73,21 @@ async function doFeishuLogin(code: string): Promise<boolean> {
   }
 }
 
-/** 浏览器环境：跳转飞书 OAuth 授权页（API 约定 4.1） */
-function goFeishuAuthorize(): void {
-  const url = feishuAuth.value?.url
-  if (!url) return
+/** 浏览器环境：生成并保存 OAuth state，再跳转飞书授权页 */
+async function goFeishuAuthorize(): Promise<void> {
+  if (!feishuAuth.value) return
   feishuLoginLoading.value = true
-  window.location.assign(url)
+  const state = createUuid()
+  try {
+    sessionStorage.setItem(FEISHU_OAUTH_STATE_KEY, state)
+    const info = normalizeAuthorizeInfo(await fetchFeishuAuthorizeUrl(state))
+    if (!info?.url) throw new Error('飞书授权地址不可用')
+    window.location.assign(info.url)
+  } catch {
+    sessionStorage.removeItem(FEISHU_OAUTH_STATE_KEY)
+    feishuLoginLoading.value = false
+    ElMessage.error('暂时无法发起飞书登录，请稍后重试')
+  }
 }
 
 /**
@@ -95,6 +111,16 @@ async function tryAutoFeishuLogin(): Promise<void> {
     ElMessage.warning('飞书免登不可用，请使用账号密码登录')
     autoLoginPending.value = false
   }
+}
+
+function handleBindSuccess(): void {
+  bindingChallenge.value = null
+  router.push(redirectTarget())
+}
+
+function handleBindCancel(): void {
+  bindingChallenge.value = null
+  autoLoginPending.value = false
 }
 
 onMounted(async () => {
@@ -161,8 +187,18 @@ async function quickLogin(username: string): Promise<void> {
       <div class="brand-footer">© 2026 福州软件职业技术学院 发展规划处</div>
     </div>
     <div class="form-pane">
+      <el-card v-if="bindingChallenge" class="login-card" shadow="never">
+        <FeishuBindForm
+          :binding-ticket="bindingChallenge.bindingTicket"
+          :binding-ticket-expires-at="bindingChallenge.bindingTicketExpiresAt"
+          :client-type="clientEnv"
+          @success="handleBindSuccess"
+          @cancel="handleBindCancel"
+        />
+      </el-card>
+
       <!-- 飞书客户端内自动免登中：不显示登录表单 -->
-      <el-card v-if="autoLoginPending" class="login-card" shadow="never">
+      <el-card v-else-if="autoLoginPending" class="login-card" shadow="never">
         <div v-loading="true" class="auto-login-pane" element-loading-text="正在使用飞书免登…" />
       </el-card>
 

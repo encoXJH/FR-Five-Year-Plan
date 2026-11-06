@@ -11,7 +11,6 @@ import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -22,8 +21,9 @@ import java.util.Map;
 
 /**
  * 飞书组织同步（API 约定第 11 章 / 15.11，P1 管理员手动触发）：
- * 拉取飞书通讯录部门与成员，按手机号匹配 sys_user，回写 feishu_open_id / union_id / 姓名 / 所属单元
- * （单元按飞书部门名与 org_unit.name 精确匹配）。不创建平台用户、不改角色；同步结果写审计日志。
+ * 拉取飞书通讯录部门与成员，按手机号匹配 sys_user，回写姓名 / 所属单元
+ * （单元按飞书部门名与 org_unit.name 精确匹配）。不创建平台用户、不改角色，也不自动绑定 open_id；
+ * 首次飞书绑定必须经校内教师接口核验。同步结果写审计日志。
  */
 @Slf4j
 @Service
@@ -104,7 +104,6 @@ public class FeishuSyncService {
 
         int feishuUserCount = 0;
         int matched = 0;
-        int openIdBound = 0;
         int nameUpdated = 0;
         int unitUpdated = 0;
         int unmatched = 0;
@@ -130,15 +129,6 @@ public class FeishuSyncService {
                 }
                 matched++;
                 boolean changed = false;
-                if (StringUtils.hasText(member.openId()) && !member.openId().equals(user.getFeishuOpenId())) {
-                    // 已绑定其他 open_id 时不覆盖，避免顶号
-                    if (!StringUtils.hasText(user.getFeishuOpenId())) {
-                        user.setFeishuOpenId(member.openId());
-                        user.setFeishuUnionId(member.unionId());
-                        openIdBound++;
-                        changed = true;
-                    }
-                }
                 if (StringUtils.hasText(member.name()) && !member.name().equals(user.getName())) {
                     user.setName(member.name());
                     nameUpdated++;
@@ -152,16 +142,12 @@ public class FeishuSyncService {
                 }
                 if (changed) {
                     user.setUpdatedAt(LocalDateTime.now());
-                    try {
-                        sysUserMapper.updateById(user);
-                    } catch (DuplicateKeyException e) {
-                        log.warn("飞书组织同步 open_id 冲突，跳过 userId={}", user.getId());
-                    }
+                    sysUserMapper.updateById(user);
                 }
             }
         }
         FeishuDtos.SyncOrgView view = new FeishuDtos.SyncOrgView(departments.size(), feishuUserCount,
-                matched, openIdBound, nameUpdated, unitUpdated, unmatched, LocalDateTime.now());
+                matched, 0, nameUpdated, unitUpdated, unmatched, LocalDateTime.now());
         log.info("飞书组织同步完成：{}", view);
         return view;
     }

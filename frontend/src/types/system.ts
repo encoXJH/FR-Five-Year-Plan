@@ -21,6 +21,17 @@ export interface OrgUnitSaveRequest {
   version?: number
 }
 
+/** 组织架构节点（GET /org-departments/tree；只读） */
+export interface OrgDepartmentNode {
+  id: string
+  parentId: string
+  name: string
+  category: string
+  sort: number
+  isEnabled: boolean
+  children: OrgDepartmentNode[]
+}
+
 /** 专业群（GET /major-groups） */
 export interface MajorGroup {
   id: string

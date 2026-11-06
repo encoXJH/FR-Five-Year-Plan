@@ -81,6 +81,17 @@ app:
     push-batch-size: ${FEISHU_PUSH_BATCH_SIZE:50}
     connect-timeout-ms: ${FEISHU_CONNECT_TIMEOUT_MS:3000}
     read-timeout-ms: ${FEISHU_READ_TIMEOUT_MS:5000}
+    binding-ticket-expire-minutes: ${FEISHU_BINDING_TICKET_EXPIRE_MINUTES:10}
+  teacher-api:
+    # 校内教师身份核验；密钥只从环境变量读取
+    base-url: ${TEACHER_API_BASE_URL:}
+    access-key: ${TEACHER_API_ACCESS_KEY:}
+    connect-timeout-ms: ${TEACHER_API_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${TEACHER_API_READ_TIMEOUT_MS:5000}
+    # 本机联调临时模拟：必须同时启用 local Profile，生产环境保持默认关闭
+    mock-enabled: ${TEACHER_API_MOCK_ENABLED:false}
+    mock-employee-id: ${TEACHER_API_MOCK_EMPLOYEE_ID:}
+    mock-name: ${TEACHER_API_MOCK_NAME:}
   login:
     max-fail-count: 5
     lock-minutes: 15

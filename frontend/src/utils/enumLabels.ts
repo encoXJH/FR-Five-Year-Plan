@@ -65,6 +65,17 @@ export const FALLBACK_ENUM_LABELS: Record<string, Record<string, string>> = {
     MARXISM_COLLEGE: '马克思主义学院',
     SCHOOL_OFFICE: '校办公室',
   },
+  OrgDepartmentCategory: {
+    SCHOOL: '学校',
+    LEADERSHIP: '学校领导',
+    FUNCTIONAL: '职能部门',
+    TEACHING: '教学单位',
+    ENTERPRISE: '校企合作',
+    SUPERMARKET: '学校超市',
+    PROPERTY: '物业',
+    CLINIC: '医务室',
+    BUSINESS: '商务',
+  },
   ClientType: {
     WEB: '网页端',
     FEISHU_PC: '飞书 PC',

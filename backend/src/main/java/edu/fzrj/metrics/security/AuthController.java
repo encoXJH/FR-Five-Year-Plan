@@ -60,11 +60,21 @@ public class AuthController {
     }
 
     @Operation(summary = "飞书免登",
-            description = "公开；飞书 JSAPI / OAuth 的一次性 code 换平台 Token；未配置飞书或身份核验失败 20006，账号停用 / 未绑定 20007")
+            description = "公开；飞书 JSAPI / OAuth 的一次性 code 换身份。已绑定 open_id 返回平台 Token；"
+                    + "首次登录返回 bindRequired=true 和短时一次性 bindingTicket，不签发 Token")
     @PostMapping("/feishu/login")
-    public TokenResponse feishuLogin(@Valid @RequestBody FeishuAuthDtos.FeishuLoginRequest request,
-                                     HttpServletRequest http) {
+    public FeishuAuthDtos.FeishuLoginResponse feishuLogin(
+            @Valid @RequestBody FeishuAuthDtos.FeishuLoginRequest request, HttpServletRequest http) {
         return feishuLoginService.login(request.code(), clientType(http), clientIp(http));
+    }
+
+    @Operation(summary = "飞书首次绑定",
+            description = "公开；凭一次性 bindingTicket 提交姓名和工号，经校内教师 API 核验后，"
+                    + "严格匹配已有启用账号并绑定飞书身份；成功返回平台 Token，不自动创建用户")
+    @PostMapping("/feishu/bind")
+    public TokenResponse feishuBind(@Valid @RequestBody FeishuAuthDtos.FeishuBindRequest request,
+                                    HttpServletRequest http) {
+        return feishuLoginService.bind(request, clientType(http), clientIp(http));
     }
 
     @Operation(summary = "飞书授权跳转地址",

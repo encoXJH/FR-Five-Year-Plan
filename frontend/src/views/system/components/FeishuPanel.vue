@@ -36,7 +36,6 @@ const lastSyncText = computed(() => {
   if (typeof result.departmentCount === 'number') parts.push(`部门 ${result.departmentCount}`)
   if (typeof result.feishuUserCount === 'number') parts.push(`飞书人员 ${result.feishuUserCount}`)
   if (typeof result.matchedCount === 'number') parts.push(`匹配 ${result.matchedCount}`)
-  if (typeof result.openIdBoundCount === 'number') parts.push(`绑定 ${result.openIdBoundCount}`)
   if (typeof result.unmatchedCount === 'number') parts.push(`未匹配 ${result.unmatchedCount}`)
   return parts.length > 0 ? parts.join(' / ') : null
 })
@@ -158,7 +157,6 @@ useAutoRefresh(() => load(true))
           同步完成：
           <template v-if="typeof syncResult.departmentCount === 'number'">部门 {{ syncResult.departmentCount }} 个，</template>
           <template v-if="typeof syncResult.feishuUserCount === 'number'">飞书人员 {{ syncResult.feishuUserCount }} 人，</template>
-          <template v-if="typeof syncResult.openIdBoundCount === 'number'">绑定平台用户 {{ syncResult.openIdBoundCount }} 人，</template>
           <template v-if="typeof syncResult.unmatchedCount === 'number'">未匹配 {{ syncResult.unmatchedCount }} 人</template>
         </template>
       </el-alert>

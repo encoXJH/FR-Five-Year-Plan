@@ -42,6 +42,15 @@ public final class SystemDtos {
             Boolean isBAssignable, Integer version) {
     }
 
+    // ---------------- 组织架构 ----------------
+
+    public record OrgDepartmentNode(
+            @JsonSerialize(using = ToStringSerializer.class) Long id,
+            @JsonSerialize(using = ToStringSerializer.class) Long parentId,
+            String name, String category, Integer sort, Boolean isEnabled,
+            List<OrgDepartmentNode> children) {
+    }
+
     // ---------------- 专业群 ----------------
 
     @Data

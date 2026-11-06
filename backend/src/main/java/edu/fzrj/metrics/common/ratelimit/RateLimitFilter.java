@@ -91,7 +91,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private boolean isLoginRequest(HttpServletRequest request, String path) {
         return "POST".equalsIgnoreCase(request.getMethod())
-                && ("/api/v1/auth/login".equals(path) || "/api/v1/auth/feishu/login".equals(path));
+                && ("/api/v1/auth/login".equals(path)
+                || "/api/v1/auth/feishu/login".equals(path)
+                || "/api/v1/auth/feishu/bind".equals(path));
     }
 
     private boolean isExportCreate(HttpServletRequest request, String path) {

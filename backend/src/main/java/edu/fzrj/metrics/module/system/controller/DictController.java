@@ -82,6 +82,7 @@ public class DictController {
             m.put("TargetDirection", items("HIGHER_BETTER:越大越好", "LOWER_BETTER:越小越好"));
             m.put("RollupMode", items("AUTO_SUM:自动汇总", "MANUAL:手工认定"));
             m.put("OrgUnitType", items("COLLEGE:二级学院", "INTERNATIONAL_COLLEGE:国际学院", "MARXISM_COLLEGE:马克思主义学院", "SCHOOL_OFFICE:校办公室"));
+            m.put("OrgDepartmentCategory", items("SCHOOL:学校", "LEADERSHIP:学校领导", "FUNCTIONAL:职能部门", "TEACHING:教学单位", "ENTERPRISE:校企合作", "SUPERMARKET:学校超市", "PROPERTY:物业", "CLINIC:医务室", "BUSINESS:商务"));
             m.put("Role", items("ADMIN:平台管理员", "LEADER:校领导", "SCHOOL_OWNER:校级项目负责人", "UNIT_OWNER:学院项目负责人"));
             m.put("TaskStatus", items("PENDING_DISTRIBUTION:待下发", "DISTRIBUTED:已下发", "IN_PROGRESS:执行中", "TRANSFERRED_OUT:已全部转出", "CLOSED:已结束"));
             m.put("TaskYearStatus", items("NOT_ACTIVATED:未激活", "IN_PROGRESS:进行中", "PENDING_REVIEW:待审核", "ADJUSTING:调整审批中", "ACHIEVED:已达标", "NOT_ACHIEVED:未达标", "MAKEUP_PENDING:待补做", "MADE_UP:已补做"));

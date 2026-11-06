@@ -1,42 +1,54 @@
 package edu.fzrj.metrics.module.integration.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
+import edu.fzrj.metrics.common.util.Sha256;
 import edu.fzrj.metrics.module.integration.client.FeishuClient;
+import edu.fzrj.metrics.module.integration.client.TeacherApiClient;
 import edu.fzrj.metrics.module.integration.config.FeishuConfig;
-import edu.fzrj.metrics.module.integration.service.support.FeishuBindMatcher;
+import edu.fzrj.metrics.module.integration.entity.FeishuBindingTicket;
+import edu.fzrj.metrics.module.integration.mapper.FeishuBindingTicketMapper;
 import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.security.AuthService;
+import edu.fzrj.metrics.security.dto.FeishuAuthDtos;
 import edu.fzrj.metrics.security.dto.TokenResponse;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
-import java.util.List;
+import java.util.Base64;
 
 /**
- * 飞书免登与 OAuth（API 约定 4.1 / 15.1）：
- * code → 飞书 user_access_token → 用户信息 → 按 open_id / 手机号匹配 sys_user → 签发平台 JWT。
- * 未配置飞书或身份核验失败返回 20006；匹配到但账号停用返回 20007；飞书侧任何异常不影响账号密码登录。
+ * 飞书免登与首次绑定：已绑定 open_id 直接登录；首次绑定必须经校内教师 API 核验，
+ * 且严格匹配已有启用账号，不再按手机号自动绑定。
  */
 @Slf4j
 @Service
 public class FeishuLoginService {
 
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
     private final FeishuConfig config;
     private final FeishuClient feishuClient;
+    private final TeacherApiClient teacherApiClient;
+    private final FeishuBindingTicketMapper ticketMapper;
+    private final FeishuBindingService bindingService;
     private final SysUserMapper sysUserMapper;
     private final AuthService authService;
 
     public FeishuLoginService(FeishuConfig config, FeishuClient feishuClient,
-                              SysUserMapper sysUserMapper, AuthService authService) {
+                              TeacherApiClient teacherApiClient, FeishuBindingTicketMapper ticketMapper,
+                              FeishuBindingService bindingService, SysUserMapper sysUserMapper,
+                              AuthService authService) {
         this.config = config;
         this.feishuClient = feishuClient;
+        this.teacherApiClient = teacherApiClient;
+        this.ticketMapper = ticketMapper;
+        this.bindingService = bindingService;
         this.sysUserMapper = sysUserMapper;
         this.authService = authService;
     }
@@ -54,8 +66,8 @@ public class FeishuLoginService {
         return feishuClient.buildAuthorizeUrl(state);
     }
 
-    /** 飞书免登：code 换身份 → 匹配平台用户 → 发平台 Token */
-    public TokenResponse login(String code, String clientType, String ip) {
+    /** code 只兑换一次；未绑定时返回一次性票据，不签发平台 Token。 */
+    public FeishuAuthDtos.FeishuLoginResponse login(String code, String clientType, String ip) {
         if (!config.isConfigured()) {
             throw new BizException(ErrorCode.FEISHU_LOGIN_FAILED, "平台未配置飞书集成，请使用账号密码登录");
         }
@@ -71,42 +83,59 @@ public class FeishuLoginService {
             throw new BizException(ErrorCode.FEISHU_LOGIN_FAILED, "飞书用户信息不完整");
         }
 
-        List<FeishuBindMatcher.Candidate> candidates = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
-                        .eq(SysUser::getDeleted, 0L)
-                        .select(SysUser::getId, SysUser::getPhone, SysUser::getFeishuOpenId))
-                .stream()
-                .map(u -> new FeishuBindMatcher.Candidate(u.getId(), u.getPhone(), u.getFeishuOpenId()))
-                .toList();
-        FeishuBindMatcher.Decision decision = FeishuBindMatcher.match(info.openId(), info.mobile(), candidates);
-        if (decision.result() == FeishuBindMatcher.MatchResult.NOT_FOUND) {
-            throw new BizException(ErrorCode.FEISHU_LOGIN_FAILED, "飞书账号未绑定平台用户，请联系管理员");
+        SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getFeishuOpenId, info.openId())
+                .eq(SysUser::getDeleted, 0L));
+        if (user != null) {
+            if (!Boolean.TRUE.equals(user.getIsEnabled())) {
+                throw new BizException(ErrorCode.ACCOUNT_DISABLED);
+            }
+            return FeishuAuthDtos.FeishuLoginResponse.authenticated(
+                    authService.loginWithUser(user, clientType, ip));
         }
-
-        SysUser user = sysUserMapper.selectById(decision.user().id());
-        if (user == null || Boolean.FALSE.equals(user.getIsEnabled())) {
-            throw new BizException(ErrorCode.ACCOUNT_DISABLED);
-        }
-        if (decision.needBind()) {
-            bindOpenId(user, info);
-        }
-        return authService.loginWithUser(user, clientType, ip);
+        return createBindingChallenge(info);
     }
 
-    /** 手机号命中后回写 open_id / union_id；该用户已绑定其他 open_id 时拒绝（防顶号） */
-    private void bindOpenId(SysUser user, FeishuClient.FeishuUserInfo info) {
-        if (StringUtils.hasText(user.getFeishuOpenId()) && !info.openId().equals(user.getFeishuOpenId())) {
-            throw new BizException(ErrorCode.FEISHU_LOGIN_FAILED, "该手机号已绑定其他飞书账号，请联系管理员");
+    /** 首次绑定：先校验票据和飞书姓名，再调用校内教师 API，最后进入独立绑定事务。 */
+    public TokenResponse bind(FeishuAuthDtos.FeishuBindRequest request, String clientType, String ip) {
+        String name = request.name().trim();
+        String employeeId = request.employeeId().trim();
+        FeishuBindingTicket ticket = ticketMapper.selectOne(new LambdaQueryWrapper<FeishuBindingTicket>()
+                .eq(FeishuBindingTicket::getTicketHash, Sha256.hex(request.bindingTicket())));
+        LocalDateTime now = LocalDateTime.now();
+        if (ticket == null || ticket.getConsumedAt() != null || !ticket.getExpiresAt().isAfter(now)) {
+            throw new BizException(ErrorCode.FEISHU_LOGIN_FAILED, "绑定票据已失效，请重新使用飞书登录");
         }
+        if (ticket.getFeishuName() == null || !ticket.getFeishuName().equals(name)) {
+            throw new BizException(ErrorCode.FEISHU_LOGIN_FAILED, "飞书姓名与填写姓名不一致");
+        }
+
+        TeacherApiClient.TeacherIdentity identity;
         try {
-            sysUserMapper.update(null, new LambdaUpdateWrapper<SysUser>()
-                    .eq(SysUser::getId, user.getId())
-                    .set(SysUser::getFeishuOpenId, info.openId())
-                    .set(SysUser::getFeishuUnionId, info.unionId())
-                    .set(SysUser::getUpdatedAt, LocalDateTime.now()));
-        } catch (DuplicateKeyException e) {
-            // open_id 唯一索引冲突：其他用户已绑定该 open_id，视为绑定失败但不影响已匹配用户登录
-            log.warn("飞书 open_id 绑定冲突 userId={}", user.getId());
-            throw new BizException(ErrorCode.FEISHU_LOGIN_FAILED, "该飞书账号已绑定其他用户，请联系管理员");
+            identity = teacherApiClient.verify(name, employeeId);
+        } catch (TeacherApiClient.TeacherApiException e) {
+            throw new BizException(ErrorCode.MIDDLE_PLATFORM_UNAVAILABLE, "校内教师核验服务暂不可用，请稍后重试");
         }
+        if (identity == null) {
+            throw new BizException(ErrorCode.FEISHU_LOGIN_FAILED, "姓名或工号核验未通过，请核对后重试");
+        }
+        return bindingService.completeBinding(ticket.getId(), name, employeeId, clientType, ip);
+    }
+
+    private FeishuAuthDtos.FeishuLoginResponse createBindingChallenge(FeishuClient.FeishuUserInfo info) {
+        byte[] random = new byte[32];
+        SECURE_RANDOM.nextBytes(random);
+        String ticket = Base64.getUrlEncoder().withoutPadding().encodeToString(random);
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime expiresAt = now.plusMinutes(config.getBindingTicketExpireMinutes());
+        FeishuBindingTicket stored = new FeishuBindingTicket();
+        stored.setTicketHash(Sha256.hex(ticket));
+        stored.setFeishuOpenId(info.openId());
+        stored.setFeishuUnionId(info.unionId());
+        stored.setFeishuName(info.name());
+        stored.setExpiresAt(expiresAt);
+        stored.setCreatedAt(now);
+        ticketMapper.insert(stored);
+        return FeishuAuthDtos.FeishuLoginResponse.bindingRequired(ticket, expiresAt);
     }
 }

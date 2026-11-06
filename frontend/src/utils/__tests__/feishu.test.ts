@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   detectClientEnv,
   extractAppIdFromUrl,
+  isFeishuOAuthStateValid,
   isFeishuUnavailableCode,
   isFeishuUA,
   normalizeAuthorizeInfo,
@@ -65,6 +66,11 @@ describe('parseFeishuCallbackSearch', () => {
     expect(parseFeishuCallbackSearch('code=abc123').code).toBe('abc123')
   })
 
+  it('同时解析 OAuth state', () => {
+    const result = parseFeishuCallbackSearch('?code=abc123&state=state-1')
+    expect(result.state).toBe('state-1')
+  })
+
   it('授权失败时返回 error 与 error_description', () => {
     const result = parseFeishuCallbackSearch('?error=access_denied&error_description=%E7%94%A8%E6%88%B7%E5%8F%96%E6%B6%88')
     expect(result.code).toBeNull()
@@ -74,7 +80,17 @@ describe('parseFeishuCallbackSearch', () => {
 
   it('空查询串返回全 null', () => {
     const result = parseFeishuCallbackSearch('')
-    expect(result).toEqual({ code: null, error: null, errorDescription: null })
+    expect(result).toEqual({ code: null, state: null, error: null, errorDescription: null })
+  })
+})
+
+describe('isFeishuOAuthStateValid', () => {
+  it('仅非空且完全一致时通过', () => {
+    expect(isFeishuOAuthStateValid('state-1', 'state-1')).toBe(true)
+    expect(isFeishuOAuthStateValid('state-2', 'state-1')).toBe(false)
+    expect(isFeishuOAuthStateValid(null, 'state-1')).toBe(false)
+    expect(isFeishuOAuthStateValid('state-1', null)).toBe(false)
+    expect(isFeishuOAuthStateValid('', '')).toBe(false)
   })
 })
 
@@ -83,6 +99,11 @@ describe('extractAppIdFromUrl', () => {
     expect(
       extractAppIdFromUrl('https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=cli_a1b2c3&redirect_uri=https%3A%2F%2Fx.com%2Fcb'),
     ).toBe('cli_a1b2c3')
+  })
+
+  it('兼容后端 OAuth 地址使用的 client_id 参数', () => {
+    expect(extractAppIdFromUrl('https://accounts.feishu.cn/open-apis/authen/v1/authorize?client_id=cli_a1b2c3&redirect_uri=x'))
+      .toBe('cli_a1b2c3')
   })
 
   it('无 app_id 或非法地址返回 null', () => {

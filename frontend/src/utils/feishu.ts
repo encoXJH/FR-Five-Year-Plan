@@ -31,6 +31,7 @@ export function isFeishuUnavailableCode(code: number | undefined | null): boolea
 /** 飞书授权回调页的查询参数解析结果 */
 export interface FeishuCallbackQuery {
   code: string | null
+  state: string | null
   error: string | null
   errorDescription: string | null
 }
@@ -40,6 +41,7 @@ export function parseFeishuCallbackSearch(search: string): FeishuCallbackQuery {
   const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search)
   return {
     code: params.get('code'),
+    state: params.get('state'),
     error: params.get('error'),
     errorDescription: params.get('error_description'),
   }
@@ -66,8 +68,15 @@ export function normalizeAuthorizeInfo(raw: unknown): FeishuAuthorizeInfo | null
   }
 }
 
-/** 从飞书 OAuth 授权地址中解析 app_id 参数 */
+/** OAuth state 的会话存储键；仅用于防止回调 CSRF，不保存 Token 或绑定票据 */
+export const FEISHU_OAUTH_STATE_KEY = 'fzsu.feishu.oauthState'
+
+export function isFeishuOAuthStateValid(actual: string | null, expected: string | null): boolean {
+  return actual !== null && expected !== null && actual.length > 0 && actual === expected
+}
+
+/** 从飞书 OAuth 授权地址中解析应用 ID（兼容 app_id / client_id） */
 export function extractAppIdFromUrl(url: string): string | null {
-  const match = /[?&]app_id=([^&#]+)/.exec(url)
+  const match = /[?&](?:app_id|client_id)=([^&#]+)/.exec(url)
   return match ? decodeURIComponent(match[1]) : null
 }

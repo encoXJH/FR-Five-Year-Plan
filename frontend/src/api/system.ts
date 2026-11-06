@@ -4,6 +4,7 @@ import type {
   DictItem,
   MajorGroup,
   MajorGroupSaveRequest,
+  OrgDepartmentNode,
   OrgUnitAdmin,
   OrgUnitSaveRequest,
   SetUserRolesRequest,
@@ -12,6 +13,11 @@ import type {
   SystemUser,
   SystemUserSaveRequest,
 } from '@/types/system'
+
+/** GET /org-departments/tree（system:manage；全校组织架构只读树） */
+export function getOrgDepartmentTree(): Promise<OrgDepartmentNode[]> {
+  return http.get('/org-departments/tree')
+}
 
 /** GET /org-units（已登录；含 isEnabled 等管理字段） */
 export function listOrgUnitsAdmin(): Promise<OrgUnitAdmin[]> {

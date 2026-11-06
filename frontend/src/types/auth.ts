@@ -24,6 +24,34 @@ export interface LoginResponse {
   user: CurrentUser
 }
 
+/** 飞书首次绑定挑战：此分支不包含可用 Token */
+export interface FeishuBindingChallenge {
+  accessToken: null
+  accessTokenExpiresAt: null
+  refreshToken: null
+  refreshTokenExpiresAt: null
+  user: null
+  bindRequired: true
+  bindingTicket: string
+  bindingTicketExpiresAt: string
+}
+
+/** 飞书已绑定登录响应（Token 字段与密码登录一致） */
+export type FeishuLoginSuccess = LoginResponse & {
+  bindRequired: false
+  bindingTicket: null
+  bindingTicketExpiresAt: null
+}
+
+export type FeishuLoginResult = FeishuLoginSuccess | FeishuBindingChallenge
+
+/** POST /auth/feishu/bind 请求体 */
+export interface FeishuBindRequest {
+  bindingTicket: string
+  name: string
+  employeeId: string
+}
+
 /** POST /auth/refresh 请求体 */
 export interface RefreshRequest {
   refreshToken: string

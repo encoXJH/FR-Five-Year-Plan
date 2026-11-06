@@ -1,7 +1,14 @@
 import { defineStore } from 'pinia'
 import * as authApi from '@/api/auth'
 import * as dictApi from '@/api/dict'
-import type { CurrentUser, DataScope, LoginRequest } from '@/types/auth'
+import type {
+  CurrentUser,
+  DataScope,
+  FeishuBindingChallenge,
+  FeishuBindRequest,
+  LoginRequest,
+  LoginResponse,
+} from '@/types/auth'
 import type { EnumDict, Role } from '@/types/enums'
 import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from '@/utils/request'
 import { clearCurrentPlan } from '@/utils/currentPlan'
@@ -45,22 +52,28 @@ export const useUserStore = defineStore('user', {
       this.refreshToken = refreshToken
       saveTokens(accessToken, refreshToken)
     },
-    async login(payload: LoginRequest) {
-      const data = await authApi.login(payload)
+    async completeLogin(data: LoginResponse) {
       this.setTokens(data.accessToken, data.refreshToken)
       this.userInfo = data.user
       this.roles = data.user.roles
       await this.fetchMe()
       this.fetchEnums().catch(() => undefined)
     },
-    /** 飞书免登：code 换 Token 后的收尾与账号密码登录一致 */
-    async loginFeishu(code: string, clientType: ClientEnv) {
+    async login(payload: LoginRequest) {
+      const data = await authApi.login(payload)
+      await this.completeLogin(data)
+    },
+    /** 飞书免登：已绑定直接登录；首次登录只返回绑定挑战，不写 Token */
+    async loginFeishu(code: string, clientType: ClientEnv): Promise<FeishuBindingChallenge | null> {
       const data = await authApi.feishuLogin(code, clientType)
-      this.setTokens(data.accessToken, data.refreshToken)
-      this.userInfo = data.user
-      this.roles = data.user.roles
-      await this.fetchMe()
-      this.fetchEnums().catch(() => undefined)
+      if (data.bindRequired) return data
+      await this.completeLogin(data)
+      return null
+    },
+    /** 首次绑定经校内核验成功后，复用正常登录收尾 */
+    async bindFeishu(payload: FeishuBindRequest, clientType: ClientEnv): Promise<void> {
+      const data = await authApi.feishuBind(payload, clientType)
+      await this.completeLogin(data)
     },
     async logout() {
       try {

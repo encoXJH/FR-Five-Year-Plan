@@ -60,8 +60,8 @@ public class FeishuIntegrationController {
 
     @Operation(summary = "手动同步组织架构",
             description = "权限：system:manage；幂等。从飞书通讯录拉部门与人员，按手机号匹配更新 "
-                    + "sys_user 的 feishu_open_id / 姓名 / 所属单元（单元按部门名匹配）；未配置飞书 20006，飞书接口失败 90001；"
-                    + "同步结果写入审计日志")
+                    + "sys_user 的姓名 / 所属单元（单元按部门名匹配）；不自动绑定 open_id，"
+                    + "首次绑定必须经校内教师接口核验；未配置飞书 20006，飞书接口失败 90001；同步结果写入审计日志")
     @PostMapping("/sync-org")
     @PreAuthorize("hasAuthority('system:manage')")
     @Idempotent

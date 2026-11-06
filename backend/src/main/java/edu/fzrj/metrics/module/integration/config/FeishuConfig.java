@@ -47,6 +47,10 @@ public class FeishuConfig {
     @Value("${app.feishu.push-enabled:true}")
     private boolean pushEnabled;
 
+    /** 首次绑定票据有效期（分钟） */
+    @Value("${app.feishu.binding-ticket-expire-minutes:10}")
+    private int bindingTicketExpireMinutes;
+
     /** 推送单次批量上限 */
     @Value("${app.feishu.push-batch-size:50}")
     private int pushBatchSize;
