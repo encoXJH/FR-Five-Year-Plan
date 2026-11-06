@@ -10,11 +10,13 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.converter.StringHttpMessageConverter;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /** 校内教师身份核验：姓名和工号必须同时精确匹配，接口凭证不离开服务端。 */
@@ -48,6 +50,9 @@ public class TeacherApiClient {
         factory.setConnectTimeout(config.getConnectTimeoutMs());
         factory.setReadTimeout(config.getReadTimeoutMs());
         this.restTemplate = new RestTemplate(factory);
+        // 校内接口返回 application/json 且不带 charset，按 UTF-8 解码避免中文姓名乱码
+        this.restTemplate.getMessageConverters().add(0,
+                new StringHttpMessageConverter(StandardCharsets.UTF_8));
     }
 
     /** 返回 null 表示教师信息未通过核验；接口不可用或响应异常抛 TeacherApiException。 */

@@ -1,5 +1,6 @@
 package edu.fzrj.metrics.module.integration.controller;
 
+import edu.fzrj.metrics.module.integration.config.FeishuConfig;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
@@ -15,16 +16,29 @@ import org.springframework.web.util.UriComponentsBuilder;
 @RestController
 public class FeishuOAuthCallbackController {
 
+    private final FeishuConfig feishuConfig;
+
+    public FeishuOAuthCallbackController(FeishuConfig feishuConfig) {
+        this.feishuConfig = feishuConfig;
+    }
+
     @Operation(summary = "飞书 OAuth 登录回调",
-            description = "公开完整路径 /api/callback；接收飞书授权结果并 302 跳转前端免登页，"
+            description = "公开路径 /api/callback 与 /callback；接收飞书授权结果并 302 跳转前端免登页，"
                     + "仅转发 code、state、error、error_description，不在 URL 中返回平台 Token")
-    @GetMapping("/api/callback")
+    @GetMapping({"/api/callback", "/callback"})
     public ResponseEntity<Void> callback(
             @RequestParam(required = false) String code,
             @RequestParam(required = false) String state,
             @RequestParam(required = false) String error,
             @RequestParam(name = "error_description", required = false) String errorDescription) {
-        UriComponentsBuilder target = UriComponentsBuilder.fromPath("/login/feishu-callback");
+        String baseUrl = feishuConfig.getAppBaseUrl();
+        if (!StringUtils.hasText(baseUrl)) {
+            baseUrl = "";
+        }
+        if (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        UriComponentsBuilder target = UriComponentsBuilder.fromHttpUrl(baseUrl + "/login/feishu-callback");
         addQueryParam(target, "code", code);
         addQueryParam(target, "state", state);
         addQueryParam(target, "error", error);

@@ -41,7 +41,8 @@ class TeacherApiClientTest {
             requestMethod.set(exchange.getRequestMethod());
             requestQuery.set(exchange.getRequestURI().getRawQuery());
             byte[] response = responseBody.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+            // 校内接口实际响应头不带 charset，响应体为 UTF-8
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, response.length);
             exchange.getResponseBody().write(response);
             exchange.close();

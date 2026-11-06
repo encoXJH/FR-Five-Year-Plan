@@ -21,10 +21,12 @@ const failures = []
 const results = []
 
 async function login(page) {
-  await page.goto(`${BASE}/login`)
+  await page.goto(`${BASE}/login`, { waitUntil: 'networkidle' })
+  // 飞书UA下会自动尝试JSAPI免登，等待降级到账号密码表单
+  await page.locator('input[placeholder="工号"]').waitFor({ state: 'visible', timeout: 30000 })
   await page.locator('input[placeholder="工号"]').fill('admin')
   await page.locator('input[placeholder="密码"]').fill(PASSWORD)
-  await page.getByRole('button', { name: /登\s*录/ }).click()
+  await page.getByRole('button', { name: '登 录', exact: true }).click()
   await page.waitForURL('**/plans')
   await page.locator('.plan-grid').waitFor()
 }
@@ -124,6 +126,8 @@ try {
     const page = await context.newPage()
     const pageErrors = []
     page.on('pageerror', (error) => pageErrors.push(error.message))
+    // 非飞书环境下飞书SDK CDN可能不可达，拦截使其快速失败降级到账号密码表单
+    await page.route('**/lf1-cdn-tos.bytegoofy.com/**', (route) => route.abort())
     await login(page)
     await checkLayout(page, `${viewport.name}-plans`)
     await page.screenshot({ path: path.join(ARTIFACTS, `${viewport.name}-plans.png`) })
@@ -165,7 +169,7 @@ try {
     await openPage(page, `/plans/${planId}/allocation`, '.matrix-card', `${viewport.name}-allocation`)
     await page.screenshot({ path: path.join(ARTIFACTS, `${viewport.name}-allocation.png`) })
     await openPage(page, '/stats', '.stats-filter', `${viewport.name}-stats`)
-    await openPage(page, '/workbench', '.kpi-row', `${viewport.name}-workbench`)
+    await openPage(page, '/workbench', '.workbench-page', `${viewport.name}-workbench`)
     await openPage(page, '/todos', '.el-tabs', `${viewport.name}-todos`)
     await openPage(page, '/materials', '.page-title', `${viewport.name}-materials`)
     await openPage(page, '/reviews', '.page-title', `${viewport.name}-reviews`)

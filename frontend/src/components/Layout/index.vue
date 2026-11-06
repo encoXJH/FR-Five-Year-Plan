@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { Expand, Fold } from '@element-plus/icons-vue'
 import HeaderBar from './HeaderBar.vue'
+import MobileTabBar from './MobileTabBar.vue'
 import PlanSwitcher from './PlanSwitcher.vue'
 import SideMenu from './SideMenu.vue'
 
@@ -71,6 +72,7 @@ function closeMenuDrawer(): void {
         <SideMenu />
       </div>
     </el-drawer>
+    <MobileTabBar />
   </el-container>
 </template>
 
@@ -181,6 +183,7 @@ function closeMenuDrawer(): void {
 
   .app-main {
     padding: var(--space-3);
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
   }
 }
 </style>
