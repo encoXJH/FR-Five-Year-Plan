@@ -1,0 +1,116 @@
+import type { UnitRef, UserRef } from './api'
+import type { StatCaliber, SubmissionStatus, TargetDirection, TaskStatus, TaskYearStatus } from './enums'
+
+/** 任务关联的指标引用 */
+export interface TaskIndicatorRef {
+  id: string
+  code: string
+  name: string
+  statCaliber?: StatCaliber | null
+  unitLabel?: string | null
+  /** 佐证材料要求（填报页展示） */
+  evidenceRequirement?: string | null
+  targetDirection?: TargetDirection | null
+}
+
+/** 任务所属计划引用 */
+export interface TaskPlanRef {
+  id: string
+  name: string
+  startYear: number
+  endYear: number
+}
+
+/** GET /tasks 列表项；年度字段取查询 year，未指定时取计划当前激活年度 */
+export interface TaskListItem {
+  id: string
+  planId: string
+  /** 新任务编号，如 B01-03；历史编号保持原样 */
+  code: string
+  indicator: TaskIndicatorRef | null
+  topIndicator?: TaskIndicatorRef | null
+  unit: UnitRef | null
+  owner: UserRef | null
+  status: TaskStatus
+  /** 五年目标（BOOLEAN 为 boolean；比率类为小数） */
+  totalTarget?: number | boolean | null
+  /** 展示年度的目标 / 完成值（年度见 yearStatus 对应行；未激活年度为 null） */
+  yearTarget?: number | boolean | null
+  /** 全规划期年度目标，列表展开时无需逐任务查询详情 */
+  yearTargets?: { year: number; target: number | boolean | null }[]
+  actualValue?: number | null
+  /** INCREMENT 展示年度剩余可调整量 = 目标 − 已认定 − 已冻结；其他口径为 null */
+  adjustableAmount?: number | null
+  /** 完成率（小数），null 显示 — */
+  completionRate?: number | null
+  /** 五年累计完成值（小数；INCREMENT 各年之和，STOCK/GROWTH 最新总量，比率类最新值） */
+  cumulativeActual?: number | null
+  /** 五年累计完成率（小数）= 累计完成 ÷ 五年总量目标 */
+  cumulativeRate?: number | null
+  yearStatus?: TaskYearStatus | null
+  /** 列表展示年度；未指定且没有激活年度时为 null */
+  displayYear?: number | null
+  /** 展示年度最新填报及材料汇总 */
+  latestSubmissionId?: string | null
+  latestSubmissionStatus?: SubmissionStatus | null
+  fileCount?: number
+  /** DIRECT_PERCENT 至少为 1，其余口径按指标材料配置 */
+  requiredFileCount?: number
+  distributedAt?: string | null
+  acceptedAt?: string | null
+  /** 历史任务保留只读详情，不参与任何执行写操作 */
+  isHistorical: boolean
+  /** 展示年度填报截止日（YYYY-MM-DD；无展示年度时为 null） */
+  deadline?: string | null
+  version: number
+}
+
+/** task_year 年度明细（GET /tasks/{taskId}） */
+export interface TaskYearItem {
+  year: number
+  target: number | boolean | null
+  originalTarget?: number | null
+  actualValue: number | null
+  /** 仅 RATIO 口径有值 */
+  actualNumerator?: number | null
+  actualDenominator?: number | null
+  completionRate: number | null
+  isAchieved?: boolean | null
+  yearStatus: TaskYearStatus
+  version?: number
+}
+
+/** GET /tasks/{taskId} 详情 */
+export interface TaskDetail extends TaskListItem {
+  years: TaskYearItem[]
+  plan?: TaskPlanRef | null
+}
+
+/** 待补做记录 */
+export interface MakeupItem {
+  id: string
+  task: { id: string; code: string }
+  fromTaskYearId: string
+  fromYear: number
+  toYear: number
+  gapAmount: number
+  madeUpAmount: number | null
+  status: 'PENDING' | 'DONE' | 'CANCELLED'
+  adjustmentId: string | null
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** GET /tasks 查询参数 */
+export interface TaskQuery {
+  planId?: string
+  unitId?: string
+  indicatorId?: string
+  year?: number
+  status?: TaskStatus
+  yearStatus?: TaskYearStatus
+  isHistorical?: boolean
+  page?: number
+  pageSize?: number
+}

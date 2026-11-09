@@ -24,6 +24,11 @@ cd backend
 cd frontend
 npm install
 npm run dev   # http://localhost:5173
+
+# 4. H5 手机端（另开终端，代理到后端 .env 的 SERVER_PORT，当前 8087）
+cd h5
+npm install
+npm run dev   # http://localhost:5174
 ```
 
 ## 启动（生产，一条命令）
@@ -51,6 +56,9 @@ cd backend && ./mvnw test                  # 后端单元测试
 cd frontend && npm run build               # 前端生产构建
 cd frontend && npm run test                # 前端单元测试
 cd frontend && npm run smoke               # 端到端冒烟（需后端 8080 + 前端 5173 已启动，Playwright）
+cd h5 && npm run build                     # H5 生产构建
+cd h5 && npm run test                      # H5 单元测试
+cd h5 && npm run test:e2e                  # H5 手机尺寸全页面巡检（需后端 8087 + H5 5174 已启动）
 ```
 
 冒烟脚本 `frontend/tests/smoke.mjs` 跑通主流程：登录 → 录入指标 → 分解下发 → 填报 → 审核 → 调整审批 → 大屏。

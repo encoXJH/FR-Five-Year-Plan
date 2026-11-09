@@ -1,0 +1,36 @@
+{
+  "name": "metrics-h5",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5174",
+    "build": "vue-tsc -b && vite build",
+    "test": "vitest run",
+    "preview": "vite preview --port 4174",
+    "test:e2e": "node tests/e2e/mobile.e2e.mjs",
+    "test:e2e:deep": "node tests/e2e/deep.e2e.mjs",
+    "test:e2e:workflow": "node tests/e2e/workflow.e2e.mjs",
+    "test:e2e:upload": "node tests/e2e/upload.e2e.mjs"
+  },
+  "dependencies": {
+    "@e965/xlsx": "^0.20.3",
+    "axios": "^1.20.0",
+    "docx-preview": "^0.4.1",
+    "echarts": "^6.1.0",
+    "pinia": "^4.1.0",
+    "pptx-preview": "^1.0.7",
+    "vant": "^4.10.2",
+    "vue": "^3.5.44",
+    "vue-router": "^5.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "playwright": "^1.64.1",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5",
+    "vue-tsc": "^3.3.13"
+  }
+}

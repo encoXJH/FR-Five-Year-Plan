@@ -1,0 +1,8 @@
+node_modules
+dist
+.vite
+*.local
+
+*.tsbuildinfo
+
+tests/e2e/screenshots
