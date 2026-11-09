@@ -90,8 +90,7 @@ app:
     read-timeout-ms: ${TEACHER_API_READ_TIMEOUT_MS:5000}
     # 本机联调临时模拟：必须同时启用 local Profile，生产环境保持默认关闭
     mock-enabled: ${TEACHER_API_MOCK_ENABLED:false}
-    mock-employee-id: ${TEACHER_API_MOCK_EMPLOYEE_ID:}
-    mock-name: ${TEACHER_API_MOCK_NAME:}
+    mock-identities: ${TEACHER_API_MOCK_IDENTITIES:}
   login:
     max-fail-count: 5
     lock-minutes: 15

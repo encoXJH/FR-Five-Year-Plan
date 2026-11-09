@@ -54,8 +54,8 @@ async function doFeishuLogin(code: string): Promise<boolean> {
   }
 }
 
-async function goFeishuAuthorize(): Promise<void> {
-  if (!feishuAuth.value) return
+async function goFeishuAuthorize(): Promise<boolean> {
+  if (!feishuAuth.value) return false
   feishuLoginLoading.value = true
   const state = createUuid()
   try {
@@ -63,10 +63,12 @@ async function goFeishuAuthorize(): Promise<void> {
     const info = normalizeAuthorizeInfo(await fetchFeishuAuthorizeUrl(state))
     if (!info?.url) throw new Error('飞书授权地址不可用')
     window.location.assign(info.url)
+    return true
   } catch {
     sessionStorage.removeItem(FEISHU_OAUTH_STATE_KEY)
     feishuLoginLoading.value = false
     showToast('暂时无法发起飞书登录，请稍后重试')
+    return false
   }
 }
 
@@ -82,8 +84,8 @@ async function tryAutoFeishuLogin(): Promise<void> {
     const ok = await doFeishuLogin(code)
     if (!ok) autoLoginPending.value = false
   } catch {
-    showToast('飞书免登不可用，请使用账号密码登录')
-    autoLoginPending.value = false
+    const started = await goFeishuAuthorize()
+    if (!started) autoLoginPending.value = false
   }
 }
 
@@ -206,7 +208,7 @@ async function quickLogin(username: string): Promise<void> {
             @click="handleSubmit"
           >登 录</van-button>
 
-          <template v-if="feishuAuth && clientEnv === 'WEB'">
+          <template v-if="feishuAuth">
             <div class="divider-text"><span>或</span></div>
             <van-button
               block

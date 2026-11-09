@@ -1,5 +1,5 @@
 /**
- * 飞书客户端内 JSAPI 免登（仅浏览器环境使用，不做单测）。
+ * 飞书客户端内 JSAPI 免登（仅浏览器环境使用）。
  * 参考飞书官方文档：
  * - JSAPI 引入（h5-js-sdk）：https://open.feishu.cn/document/uYjL24iN/uYDMuYDMuYDM
  * - 免登获取登录预授权码 tt.requestAccess：https://open.feishu.cn/document/uYjL24iN/uITMuITMuITM
@@ -28,12 +28,31 @@ declare global {
   }
 }
 
+const FEISHU_SDK_TIMEOUT_MS = 8000
+const FEISHU_ACCESS_CODE_TIMEOUT_MS = 8000
+
 let sdkPromise: Promise<void> | null = null
 
-/** 注入飞书 JS SDK 脚本（幂等）；加载失败时 reject，由调用方降级到账号密码登录 */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
+/** 注入飞书 JS SDK 脚本（幂等）；加载失败或超时后允许降级、重试 */
 export function loadFeishuSdk(): Promise<void> {
   if (sdkPromise) return sdkPromise
-  sdkPromise = new Promise<void>((resolve, reject) => {
+  sdkPromise = withTimeout(new Promise<void>((resolve, reject) => {
     if (window.h5sdk && window.tt) {
       resolve()
       return
@@ -53,8 +72,7 @@ export function loadFeishuSdk(): Promise<void> {
       }
     })
     script.addEventListener('error', () => reject(new Error('飞书 SDK 加载失败')))
-  })
-  // 加载失败后允许重试
+  }), FEISHU_SDK_TIMEOUT_MS, '飞书 SDK 加载超时')
   sdkPromise.catch(() => {
     sdkPromise = null
   })
@@ -66,7 +84,7 @@ export function loadFeishuSdk(): Promise<void> {
  * 必须在 window.h5sdk.ready 回调中调用 tt.requestAccess（官方文档要求）。
  */
 export function requestFeishuAccessCode(appId: string): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
+  return withTimeout(new Promise<string>((resolve, reject) => {
     const { h5sdk, tt } = window
     if (!h5sdk || !tt) {
       reject(new Error('飞书 SDK 未加载'))
@@ -86,5 +104,5 @@ export function requestFeishuAccessCode(appId: string): Promise<string> {
         fail: (error) => reject(error instanceof Error ? error : new Error('飞书免登授权失败')),
       })
     })
-  })
+  }), FEISHU_ACCESS_CODE_TIMEOUT_MS, '飞书免登授权超时')
 }

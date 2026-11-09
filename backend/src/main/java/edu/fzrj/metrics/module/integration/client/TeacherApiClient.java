@@ -57,6 +57,10 @@ public class TeacherApiClient {
 
     /** 返回 null 表示教师信息未通过核验；接口不可用或响应异常抛 TeacherApiException。 */
     public TeacherIdentity verify(String name, String employeeId) {
+        TeacherIdentity mockIdentity = localMockIdentity(name, employeeId);
+        if (mockIdentity != null) {
+            return mockIdentity;
+        }
         if (!config.isConfigured()) {
             throw new TeacherApiException("校内教师核验接口未配置");
         }
@@ -76,8 +80,7 @@ public class TeacherApiClient {
                     HttpMethod.GET,
                     new HttpEntity<>(headers),
                     String.class);
-            TeacherIdentity identity = parseResponse(response.getBody(), name, employeeId);
-            return identity == null ? localMockIdentity(name, employeeId) : identity;
+            return parseResponse(response.getBody(), name, employeeId);
         } catch (TeacherApiException e) {
             throw e;
         } catch (Exception e) {
@@ -114,11 +117,14 @@ public class TeacherApiClient {
         if (!config.isMockEnabled() || !List.of(environment.getActiveProfiles()).contains("local")) {
             return null;
         }
-        if (!name.equals(config.getMockName()) || !employeeId.equals(config.getMockEmployeeId())) {
-            return null;
+        for (String item : config.getMockIdentities().split(",")) {
+            String[] pair = item.trim().split(":", 2);
+            if (pair.length == 2 && employeeId.equals(pair[0].trim()) && name.equals(pair[1].trim())) {
+                log.warn("本机临时教师核验模拟已命中，仅限 local Profile，account={}", employeeId);
+                return new TeacherIdentity(employeeId, name, null, null);
+            }
         }
-        log.warn("本机临时教师核验模拟已命中，仅限 local Profile");
-        return new TeacherIdentity(employeeId, name, null, null);
+        return null;
     }
 
     private String baseUrl() {

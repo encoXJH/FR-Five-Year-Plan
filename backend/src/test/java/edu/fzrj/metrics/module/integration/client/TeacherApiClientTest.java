@@ -106,26 +106,26 @@ class TeacherApiClientTest {
     }
 
     @Test
-    void local环境指定账号在真实接口无记录时使用临时模拟() {
-        responseBody = success("[]");
+    void local环境指定账号优先使用临时模拟且不请求真实接口() {
         ReflectionTestUtils.setField(config, "mockEnabled", true);
-        ReflectionTestUtils.setField(config, "mockEmployeeId", "10001");
-        ReflectionTestUtils.setField(config, "mockName", "张三");
+        ReflectionTestUtils.setField(config, "mockIdentities", "10001:张三,10002:李四");
         environment.setActiveProfiles("local");
 
-        TeacherApiClient.TeacherIdentity identity = client.verify("张三", "10001");
+        TeacherApiClient.TeacherIdentity first = client.verify("张三", "10001");
+        TeacherApiClient.TeacherIdentity second = client.verify("李四", "10002");
 
-        assertEquals("10001", identity.account());
-        assertEquals("张三", identity.name());
-        assertEquals("/dehoop-admin/api/fr/teacher/JSJBXX_SM", path.get());
+        assertEquals("10001", first.account());
+        assertEquals("张三", first.name());
+        assertEquals("10002", second.account());
+        assertEquals("李四", second.name());
+        assertNull(path.get());
     }
 
     @Test
     void 非local环境或身份不匹配时不使用临时模拟() {
         responseBody = success("[]");
         ReflectionTestUtils.setField(config, "mockEnabled", true);
-        ReflectionTestUtils.setField(config, "mockEmployeeId", "10001");
-        ReflectionTestUtils.setField(config, "mockName", "张三");
+        ReflectionTestUtils.setField(config, "mockIdentities", "10001:张三,10002:李四");
 
         assertNull(client.verify("张三", "10001"));
 

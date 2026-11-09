@@ -25,11 +25,9 @@ public class TeacherApiConfig {
     @Value("${app.teacher-api.mock-enabled:false}")
     private boolean mockEnabled;
 
-    @Value("${app.teacher-api.mock-employee-id:}")
-    private String mockEmployeeId;
-
-    @Value("${app.teacher-api.mock-name:}")
-    private String mockName;
+    /** 仅限 local 验收环境，格式：工号1:姓名1,工号2:姓名2 */
+    @Value("${app.teacher-api.mock-identities:}")
+    private String mockIdentities;
 
     public boolean isConfigured() {
         return StringUtils.hasText(baseUrl) && StringUtils.hasText(accessKey);

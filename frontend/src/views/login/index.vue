@@ -74,8 +74,8 @@ async function doFeishuLogin(code: string): Promise<boolean> {
 }
 
 /** 浏览器环境：生成并保存 OAuth state，再跳转飞书授权页 */
-async function goFeishuAuthorize(): Promise<void> {
-  if (!feishuAuth.value) return
+async function goFeishuAuthorize(): Promise<boolean> {
+  if (!feishuAuth.value) return false
   feishuLoginLoading.value = true
   const state = createUuid()
   try {
@@ -83,10 +83,12 @@ async function goFeishuAuthorize(): Promise<void> {
     const info = normalizeAuthorizeInfo(await fetchFeishuAuthorizeUrl(state))
     if (!info?.url) throw new Error('飞书授权地址不可用')
     window.location.assign(info.url)
+    return true
   } catch {
     sessionStorage.removeItem(FEISHU_OAUTH_STATE_KEY)
     feishuLoginLoading.value = false
     ElMessage.error('暂时无法发起飞书登录，请稍后重试')
+    return false
   }
 }
 
@@ -108,8 +110,8 @@ async function tryAutoFeishuLogin(): Promise<void> {
     const ok = await doFeishuLogin(code)
     if (!ok) autoLoginPending.value = false
   } catch {
-    ElMessage.warning('飞书免登不可用，请使用账号密码登录')
-    autoLoginPending.value = false
+    const started = await goFeishuAuthorize()
+    if (!started) autoLoginPending.value = false
   }
 }
 
@@ -235,8 +237,8 @@ async function quickLogin(username: string): Promise<void> {
           </el-form-item>
         </el-form>
 
-        <!-- 飞书入口：仅在浏览器环境且后端已配置飞书时显示 -->
-        <template v-if="feishuAuth && clientEnv === 'WEB'">
+        <!-- 飞书入口：后端已配置时显示，自动免登失败后可手动重试 -->
+        <template v-if="feishuAuth">
           <el-divider class="feishu-divider">或</el-divider>
           <el-button
             class="login-button"
