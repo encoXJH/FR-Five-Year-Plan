@@ -14,10 +14,8 @@ import {
   type ClientEnv,
   type FeishuAuthorizeInfo,
 } from '@/utils/feishu'
-import { loadFeishuSdk, requestFeishuAccessCode } from '@/utils/feishuSdk'
 import { createUuid } from '@/utils/uuid'
-import FeishuBindForm from './components/FeishuBindForm.vue'
-import type { FeishuBindingChallenge, LoginRequest } from '@/types/auth'
+import type { LoginRequest } from '@/types/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -44,36 +42,13 @@ const feishuAuth = ref<FeishuAuthorizeInfo | null>(null)
 /** 飞书客户端内自动免登进行中：不显示登录表单 */
 const autoLoginPending = ref(clientEnv !== 'WEB')
 const feishuLoginLoading = ref(false)
-const bindingChallenge = ref<FeishuBindingChallenge | null>(null)
-
 function redirectTarget(): string {
   if (userStore.isUnitOwnerOnly) return userStore.homePath
   if (userStore.roles.includes('ADMIN')) return '/plans'
   return typeof route.query.redirect === 'string' ? route.query.redirect : '/'
 }
 
-/** 飞书免登：已绑定直接跳转，首次登录切换到校内身份核验表单 */
-async function doFeishuLogin(code: string): Promise<boolean> {
-  try {
-    const challenge = await userStore.loginFeishu(code, clientEnv)
-    if (challenge) {
-      bindingChallenge.value = challenge
-      autoLoginPending.value = false
-      return true
-    }
-    router.push(redirectTarget())
-    return true
-  } catch (error) {
-    if (error instanceof ApiError && error.message) {
-      ElMessage.error(error.message)
-    } else {
-      ElMessage.error('飞书登录失败，请改用账号密码登录')
-    }
-    return false
-  }
-}
-
-/** 浏览器环境：生成并保存 OAuth state，再跳转飞书授权页 */
+/** 生成并保存 OAuth state，再跳转飞书授权页 */
 async function goFeishuAuthorize(): Promise<boolean> {
   if (!feishuAuth.value) return false
   feishuLoginLoading.value = true
@@ -92,39 +67,6 @@ async function goFeishuAuthorize(): Promise<boolean> {
   }
 }
 
-/**
- * 飞书客户端内：JSAPI 免登。
- * 参考官方文档：https://open.feishu.cn/document/uYjL24iN/uITMuITMuITM
- * JSAPI 加载或授权失败时降级到账号密码登录。
- */
-async function tryAutoFeishuLogin(): Promise<void> {
-  const info = feishuAuth.value
-  if (!info?.appId) {
-    // 拿不到 AppID 无法调 JSAPI，降级到密码登录
-    autoLoginPending.value = false
-    return
-  }
-  try {
-    await loadFeishuSdk()
-    const code = await requestFeishuAccessCode(info.appId)
-    const ok = await doFeishuLogin(code)
-    if (!ok) autoLoginPending.value = false
-  } catch {
-    const started = await goFeishuAuthorize()
-    if (!started) autoLoginPending.value = false
-  }
-}
-
-function handleBindSuccess(): void {
-  bindingChallenge.value = null
-  router.push(redirectTarget())
-}
-
-function handleBindCancel(): void {
-  bindingChallenge.value = null
-  autoLoginPending.value = false
-}
-
 onMounted(async () => {
   // 页面加载即探测飞书可用性（静默；20006 / 90001 视为未配置）
   let info: FeishuAuthorizeInfo | null = null
@@ -139,7 +81,8 @@ onMounted(async () => {
   if (clientEnv === 'WEB') {
     autoLoginPending.value = false
   } else if (info) {
-    await tryAutoFeishuLogin()
+    const started = await goFeishuAuthorize()
+    if (!started) autoLoginPending.value = false
   } else {
     autoLoginPending.value = false
   }
@@ -189,19 +132,9 @@ async function quickLogin(username: string): Promise<void> {
       <div class="brand-footer">© 2026 福州软件职业技术学院 发展规划处</div>
     </div>
     <div class="form-pane">
-      <el-card v-if="bindingChallenge" class="login-card" shadow="never">
-        <FeishuBindForm
-          :binding-ticket="bindingChallenge.bindingTicket"
-          :binding-ticket-expires-at="bindingChallenge.bindingTicketExpiresAt"
-          :client-type="clientEnv"
-          @success="handleBindSuccess"
-          @cancel="handleBindCancel"
-        />
-      </el-card>
-
-      <!-- 飞书客户端内自动免登中：不显示登录表单 -->
-      <el-card v-else-if="autoLoginPending" class="login-card" shadow="never">
-        <div v-loading="true" class="auto-login-pane" element-loading-text="正在使用飞书免登…" />
+      <!-- 飞书客户端内直接跳转 OAuth：不显示登录表单 -->
+      <el-card v-if="autoLoginPending" class="login-card" shadow="never">
+        <div v-loading="true" class="auto-login-pane" element-loading-text="正在跳转飞书授权…" />
       </el-card>
 
       <el-card v-else class="login-card" shadow="never">

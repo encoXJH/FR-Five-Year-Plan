@@ -13,10 +13,7 @@ import {
   type ClientEnv,
   type FeishuAuthorizeInfo,
 } from '@/utils/feishu'
-import { loadFeishuSdk, requestFeishuAccessCode } from '@/utils/feishuSdk'
 import { createUuid } from '@/utils/uuid'
-import FeishuBindForm from './components/FeishuBindForm.vue'
-import type { FeishuBindingChallenge } from '@/types/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -29,29 +26,10 @@ const clientEnv: ClientEnv = detectClientEnv(window.navigator.userAgent)
 const feishuAuth = ref<FeishuAuthorizeInfo | null>(null)
 const autoLoginPending = ref(clientEnv !== 'WEB')
 const feishuLoginLoading = ref(false)
-const bindingChallenge = ref<FeishuBindingChallenge | null>(null)
-
 function redirectTarget(): string {
   if (userStore.isUnitOwnerOnly) return userStore.homePath
   if (userStore.roles.includes('ADMIN')) return '/plans'
   return typeof route.query.redirect === 'string' ? route.query.redirect : '/'
-}
-
-async function doFeishuLogin(code: string): Promise<boolean> {
-  try {
-    const challenge = await userStore.loginFeishu(code, clientEnv)
-    if (challenge) {
-      bindingChallenge.value = challenge
-      autoLoginPending.value = false
-      return true
-    }
-    router.replace(redirectTarget())
-    return true
-  } catch (error) {
-    if (error instanceof ApiError && error.message) showToast(error.message)
-    else showToast('飞书登录失败，请改用账号密码登录')
-    return false
-  }
 }
 
 async function goFeishuAuthorize(): Promise<boolean> {
@@ -72,33 +50,6 @@ async function goFeishuAuthorize(): Promise<boolean> {
   }
 }
 
-async function tryAutoFeishuLogin(): Promise<void> {
-  const info = feishuAuth.value
-  if (!info?.appId) {
-    autoLoginPending.value = false
-    return
-  }
-  try {
-    await loadFeishuSdk()
-    const code = await requestFeishuAccessCode(info.appId)
-    const ok = await doFeishuLogin(code)
-    if (!ok) autoLoginPending.value = false
-  } catch {
-    const started = await goFeishuAuthorize()
-    if (!started) autoLoginPending.value = false
-  }
-}
-
-function handleBindSuccess(): void {
-  bindingChallenge.value = null
-  router.replace(redirectTarget())
-}
-
-function handleBindCancel(): void {
-  bindingChallenge.value = null
-  autoLoginPending.value = false
-}
-
 onMounted(async () => {
   let info: FeishuAuthorizeInfo | null = null
   try {
@@ -112,7 +63,8 @@ onMounted(async () => {
   if (clientEnv === 'WEB') {
     autoLoginPending.value = false
   } else if (info) {
-    await tryAutoFeishuLogin()
+    const started = await goFeishuAuthorize()
+    if (!started) autoLoginPending.value = false
   } else {
     autoLoginPending.value = false
   }
@@ -164,18 +116,8 @@ async function quickLogin(username: string): Promise<void> {
 
     <div class="login-body">
       <div class="login-card">
-        <template v-if="bindingChallenge">
-          <FeishuBindForm
-            :binding-ticket="bindingChallenge.bindingTicket"
-            :binding-ticket-expires-at="bindingChallenge.bindingTicketExpiresAt"
-            :client-type="clientEnv"
-            @success="handleBindSuccess"
-            @cancel="handleBindCancel"
-          />
-        </template>
-
-        <div v-else-if="autoLoginPending" class="auto-login">
-          <van-loading size="28" color="#2B5BC0" vertical>正在使用飞书免登…</van-loading>
+        <div v-if="autoLoginPending" class="auto-login">
+          <van-loading size="28" color="#2B5BC0" vertical>正在跳转飞书授权…</van-loading>
         </div>
 
         <template v-else>
