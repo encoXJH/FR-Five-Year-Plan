@@ -280,7 +280,7 @@ onMounted(async () => {
     <div class="page-head">
       <div>
         <h1>调整申请与审批</h1>
-        <p class="muted small">延期 / 转移 / 目标调整；审批链：初审 → 接收方确认 → 校领导审批</p>
+        <p class="muted small">延期 / 转移 / 目标调整；审批链：建设方向负责人初审 → 接收方确认 → 校级负责人审批</p>
       </div>
       <van-button v-if="userStore.can('adjustment:apply')" size="small" type="primary" @click="goApply">
         发起调整

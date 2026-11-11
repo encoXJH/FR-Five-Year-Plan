@@ -361,7 +361,7 @@ async function handleSubmit(): Promise<void> {
   try {
     await createAdjustment({ ...request, reason: form.reason.trim(), fileIds: form.fileIds }, submitKey.value)
     submitKey.value = newIdempotencyKey()
-    showToast('调整申请已提交，等待校级负责人初审')
+    showToast('调整申请已提交，等待建设方向负责人初审')
     dirty.value = false
     router.push('/adjustments')
   } catch (error) {

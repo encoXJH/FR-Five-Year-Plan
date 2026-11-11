@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Expand, Fold } from '@element-plus/icons-vue'
+import { Expand, Fold, WarningFilled } from '@element-plus/icons-vue'
 import StatusTag from '@/components/StatusTag.vue'
 import ProgressWithTimeLine from '@/components/ProgressWithTimeLine.vue'
 import TaskDetailDrawer from './components/TaskDetailDrawer.vue'
@@ -10,15 +10,19 @@ import { listAllTasks, listTasks } from '@/api/task'
 import { getStatsOverview } from '@/api/stats'
 import { listOrgUnits } from '@/api/orgUnit'
 import type { OrgUnit } from '@/api/orgUnit'
+import { listPlans } from '@/api/plan'
+import type { PlanCard } from '@/types/plan'
 import { useUserStore } from '@/stores/user'
 import { formatCount, formatPercent } from '@/utils/format'
 import { formatTargetValue } from '@/utils/indicator'
 import { useAutoRefresh } from '@/utils/autoRefresh'
+import { buildWarningRequests, mergeVisibleWarnings } from '@/utils/stats'
 import { averageTaskYearCompletion, canWriteTask, formatDeadline, primaryTaskIndicator, taskMaterialState } from '@/utils/task'
 import { canApplyForTask } from '@/utils/adjustment'
 import type { PageResult } from '@/types/api'
 import type { TaskListItem, TaskQuery } from '@/types/task'
 import type { TaskYearStatus } from '@/types/enums'
+import type { WarningItem } from '@/types/stats'
 
 interface StatusTab {
   key: string
@@ -31,6 +35,7 @@ const STATUS_TABS: StatusTab[] = [
   { key: 'all', label: '全部', query: {} },
   { key: 'todo', label: '待填报', query: { yearStatus: 'IN_PROGRESS' } },
   { key: 'review', label: '待审核', query: { yearStatus: 'PENDING_REVIEW' } },
+  { key: 'completed', label: '已完成', query: { yearStatus: 'ACHIEVED' } },
 ]
 
 const userStore = useUserStore()
@@ -39,13 +44,15 @@ const router = useRouter()
 
 const currentYear = new Date().getFullYear()
 
-/** 学院负责人处理本单元任务；管理员 / 校级负责人为管理视角 */
+/** 学院负责人处理本单元任务；管理员 / 建设方向负责人为管理视角 */
 const isUnitOwner = computed(() => userStore.roles.includes('UNIT_OWNER'))
 const isAdminView = computed(() => !isUnitOwner.value && userStore.roles.includes('ADMIN'))
 
 const unitOptions = ref<OrgUnit[]>([])
+const planOptions = ref<PlanCard[]>([])
 
 const filters = reactive({
+  planId: '',
   unitId: '',
   year: currentYear as number | null,
   tab: 'all',
@@ -69,6 +76,7 @@ const kpi = reactive({
   yearRate: null as number | null,
   todo: 0,
   review: 0,
+  completed: 0,
 })
 
 /** 状态侧栏收起状态 */
@@ -77,11 +85,21 @@ const statusSidebarCollapsed = ref(false)
 function statusCount(key: string): number {
   if (key === 'todo') return kpi.todo
   if (key === 'review') return kpi.review
+  if (key === 'completed') return kpi.completed
   return kpi.all
 }
 
-/** 滞后预警任务 id 集合（overview.warnings） */
-const warningTaskIds = ref<ReadonlySet<string>>(new Set())
+/** 当前筛选范围内的预警明细，卡片数量与任务行标记共用。 */
+const warningItems = ref<WarningItem[]>([])
+const warningLoading = ref(false)
+const warningFailed = ref(false)
+const warningDialogVisible = ref(false)
+const warningTaskIds = computed<ReadonlySet<string>>(() => new Set(warningItems.value.map((item) => item.taskId)))
+const warningCardAriaLabel = computed(() => {
+  if (warningLoading.value) return '正在统计当前筛选范围内的滞后预警'
+  if (warningFailed.value) return '滞后预警加载失败，点击重试'
+  return `滞后预警 ${warningItems.value.length} 项，点击查看明细`
+})
 
 const unitName = computed(() => {
   if (isUnitOwner.value) return userStore.userInfo?.unit?.name ?? '本单元'
@@ -92,6 +110,7 @@ const unitName = computed(() => {
 function currentQuery(extra: Partial<TaskQuery> = {}): TaskQuery {
   const tab = STATUS_TABS.find((item) => item.key === filters.tab) ?? STATUS_TABS[0]
   return {
+    planId: filters.planId || undefined,
     unitId: filters.unitId || undefined,
     year: filters.year ?? undefined,
     ...tab.query,
@@ -99,51 +118,96 @@ function currentQuery(extra: Partial<TaskQuery> = {}): TaskQuery {
   }
 }
 
+let taskLoadSequence = 0
+
 async function loadTasks(silent = false): Promise<void> {
+  const sequence = ++taskLoadSequence
   if (!silent) loading.value = true
   try {
-    page.value = await listTasks(currentQuery({ page: page.value.page, pageSize: page.value.pageSize }))
+    const result = await listTasks(currentQuery({ page: page.value.page, pageSize: page.value.pageSize }))
+    if (sequence === taskLoadSequence) page.value = result
   } finally {
-    if (!silent) loading.value = false
+    if (sequence === taskLoadSequence) loading.value = false
   }
 }
 
-/** 滞后预警：跨计划读取全部关联计划的 stats overview 后合并。 */
+/** 滞后预警：按任务实际年度读取统计总览，再收敛到当前可见任务。 */
 let warningLoadSequence = 0
 
-async function loadWarnings(items: TaskListItem[]): Promise<void> {
+async function loadWarnings(items: TaskListItem[], silent = false): Promise<void> {
   const sequence = ++warningLoadSequence
-  const planIds = [...new Set(items.map((item) => item.planId).filter(Boolean))]
-  if (planIds.length === 0) {
-    warningTaskIds.value = new Set()
+  const requests = buildWarningRequests(items, filters.year)
+  if (!silent) {
+    warningItems.value = []
+    warningFailed.value = false
+    warningLoading.value = true
+  }
+  if (requests.length === 0) {
+    if (sequence === warningLoadSequence) {
+      warningItems.value = []
+      warningFailed.value = false
+      warningLoading.value = false
+    }
     return
   }
-  const overviews = await Promise.all(
-    planIds.map((planId) => getStatsOverview(planId, filters.year ?? currentYear).catch(() => null)),
-  )
-  if (sequence !== warningLoadSequence) return
-  warningTaskIds.value = new Set(
-    overviews.flatMap((overview) => overview?.warnings.map((warning) => warning.taskId) ?? []),
-  )
+  try {
+    const overviews = await Promise.all(
+      requests.map((request) => getStatsOverview(request.planId, request.year)),
+    )
+    if (sequence !== warningLoadSequence) return
+    warningItems.value = mergeVisibleWarnings(items, overviews)
+    warningFailed.value = false
+  } catch {
+    if (sequence !== warningLoadSequence) return
+    warningItems.value = []
+    warningFailed.value = true
+  } finally {
+    if (sequence === warningLoadSequence) warningLoading.value = false
+  }
 }
 
-/** 仅统计保留的三项核心指标。 */
-async function loadKpi(): Promise<void> {
+/** 统计任务状态、年度完成率及滞后预警。 */
+let kpiLoadSequence = 0
+
+async function loadKpi(silent = false): Promise<void> {
+  const sequence = ++kpiLoadSequence
+  warningLoadSequence += 1
+  if (!silent) {
+    warningItems.value = []
+    warningFailed.value = false
+    warningLoading.value = true
+  }
   try {
-    const base = { unitId: filters.unitId || undefined, year: filters.year ?? undefined }
-    const [batch, todo, review] = await Promise.all([
+    const base = { planId: filters.planId || undefined, unitId: filters.unitId || undefined, year: filters.year ?? undefined }
+    const [batch, todo, review, completed] = await Promise.all([
       listAllTasks(base),
       listTasks({ ...base, yearStatus: 'IN_PROGRESS' as TaskYearStatus, page: 1, pageSize: 1 }),
       listTasks({ ...base, yearStatus: 'PENDING_REVIEW' as TaskYearStatus, page: 1, pageSize: 1 }),
+      listTasks({ ...base, yearStatus: 'ACHIEVED' as TaskYearStatus, page: 1, pageSize: 1 }),
     ])
+    if (sequence !== kpiLoadSequence) return
     kpi.todo = todo.total
     kpi.review = review.total
+    kpi.completed = completed.total
     kpi.all = batch.length
     kpi.yearRate = averageTaskYearCompletion(batch)
-    await loadWarnings(batch)
+    await loadWarnings(batch, silent)
   } catch {
-    // KPI 失败不阻塞列表
+    if (sequence !== kpiLoadSequence) return
+    warningLoadSequence += 1
+    warningItems.value = []
+    warningFailed.value = true
+    warningLoading.value = false
   }
+}
+
+function retryWarnings(): void {
+  void loadKpi()
+}
+
+function openWarningDialog(): void {
+  warningDialogVisible.value = true
+  if (warningFailed.value) retryWarnings()
 }
 
 function applyFilters(): void {
@@ -184,6 +248,15 @@ const drawerInitialTab = ref<'info' | 'submissions' | 'adjustments'>('info')
 function openDetail(row: TaskListItem): void {
   activeTaskId.value = row.id
   drawerInitialYear.value = null
+  drawerInitialSubmissionId.value = null
+  drawerInitialTab.value = 'info'
+  drawerVisible.value = true
+}
+
+function openWarningDetail(item: WarningItem): void {
+  warningDialogVisible.value = false
+  activeTaskId.value = item.taskId
+  drawerInitialYear.value = item.year
   drawerInitialSubmissionId.value = null
   drawerInitialTab.value = 'info'
   drawerVisible.value = true
@@ -258,6 +331,11 @@ onMounted(() => {
   }
   loadTasks()
   loadKpi()
+  listPlans()
+    .then((list) => {
+      planOptions.value = list
+    })
+    .catch(() => undefined)
   if (isAdminView.value) {
     listOrgUnits()
       .then((list) => {
@@ -269,9 +347,9 @@ onMounted(() => {
 
 useAutoRefresh(
   async () => {
-    await Promise.all([loadTasks(true), loadKpi()])
+    await Promise.all([loadTasks(true), loadKpi(true)])
   },
-  { skip: () => drawerVisible.value },
+  { skip: () => drawerVisible.value || warningDialogVisible.value },
 )
 </script>
 
@@ -284,6 +362,25 @@ useAutoRefresh(
         <p class="page-subtitle">
           {{ filters.year ? `${filters.year} 年` : '全部年度' }}<span aria-hidden="true">/</span>任务填报、佐证材料与完成进度统一处理
         </p>
+      </div>
+      <div class="page-plan-filter">
+        <span class="page-plan-filter__label">当前计划</span>
+        <el-select
+          v-model="filters.planId"
+          clearable
+          filterable
+          placeholder="全部计划"
+          class="page-plan-filter__select"
+          aria-label="按计划筛选"
+          @change="applyFilters"
+        >
+          <el-option
+            v-for="plan in planOptions"
+            :key="plan.id"
+            :label="plan.status === 'ARCHIVED' ? `${plan.name}（已归档）` : plan.name"
+            :value="plan.id"
+          />
+        </el-select>
       </div>
     </div>
 
@@ -365,9 +462,26 @@ useAutoRefresh(
         </div>
 
         <div class="workbench-summary">
-          <div><span>待填报</span><strong>{{ kpi.todo }}</strong></div>
-          <div><span>待审核</span><strong>{{ kpi.review }}</strong></div>
-          <div><span>本年完成率</span><strong>{{ formatPercent(kpi.yearRate) }}</strong></div>
+          <div class="summary-card"><span>待填报</span><strong>{{ kpi.todo }}</strong></div>
+          <div class="summary-card"><span>待审核</span><strong>{{ kpi.review }}</strong></div>
+          <div class="summary-card"><span>本年完成率</span><strong>{{ formatPercent(kpi.yearRate) }}</strong></div>
+          <button
+            type="button"
+            class="summary-card summary-warning"
+            :class="{ 'is-active': warningItems.length > 0, 'is-failed': warningFailed }"
+            :aria-label="warningCardAriaLabel"
+            :aria-busy="warningLoading"
+            @click="openWarningDialog"
+          >
+            <span class="summary-warning__title">
+              <el-icon v-if="warningItems.length > 0"><WarningFilled /></el-icon>
+              <span>滞后预警</span>
+            </span>
+            <strong>{{ warningLoading ? '…' : warningFailed ? '!' : warningItems.length }}</strong>
+            <span class="summary-warning__hint">
+              {{ warningLoading ? '正在统计…' : warningFailed ? '加载失败，点击重试' : warningItems.length > 0 ? '点击查看滞后任务' : '当前范围暂无预警' }}
+            </span>
+          </button>
         </div>
 
         <!-- 移动端（≤768px）：任务卡片单列堆叠（UI 规范 5.2），桌面端隐藏 -->
@@ -561,6 +675,47 @@ useAutoRefresh(
       </div>
     </section>
 
+    <el-dialog
+      v-model="warningDialogVisible"
+      title="滞后预警明细"
+      width="min(860px, calc(100vw - 32px))"
+      class="workbench-warning-dialog"
+    >
+      <div class="warning-dialog__intro">
+        <strong>当前筛选范围</strong>
+        <span>时间进度 − 年度完成率超过 50% 时触发预警</span>
+      </div>
+      <div v-loading="warningLoading" class="warning-dialog__body">
+        <div v-if="warningFailed" class="warning-load-error">
+          <el-alert type="error" title="预警加载失败，请稍后重试" :closable="false" show-icon />
+          <el-button type="primary" plain @click="retryWarnings">重新加载</el-button>
+        </div>
+        <el-empty
+          v-else-if="!warningLoading && warningItems.length === 0"
+          :image-size="72"
+          description="当前筛选范围暂无滞后预警"
+        />
+        <div v-else class="warning-list">
+          <article v-for="item in warningItems" :key="item.taskId" class="warning-item">
+            <div class="warning-item__content">
+              <div class="warning-item__heading">
+                <span class="mono warning-item__code">{{ item.taskCode }}</span>
+                <el-tag type="danger" size="small" effect="light">落后 {{ formatPercent(item.lagGap) }}</el-tag>
+              </div>
+              <div class="warning-item__name">{{ item.indicatorName }}</div>
+              <div class="warning-item__meta">{{ item.unit?.name ?? '未分配单元' }} · {{ item.year }} 年</div>
+            </div>
+            <div class="warning-item__metrics">
+              <span>完成率<strong>{{ formatPercent(item.completionRate) }}</strong></span>
+              <span>时间进度<strong>{{ formatPercent(item.timeProgress) }}</strong></span>
+              <span>落后差值<strong class="warning-danger-text">{{ formatPercent(item.lagGap) }}</strong></span>
+            </div>
+            <el-button class="warning-item__action" type="primary" plain @click="openWarningDetail(item)">详情</el-button>
+          </article>
+        </div>
+      </div>
+    </el-dialog>
+
     <TaskDetailDrawer
       v-model="drawerVisible"
       :task-id="activeTaskId"
@@ -595,7 +750,7 @@ useAutoRefresh(
 .page-header {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: var(--space-4);
   margin-bottom: 18px;
   padding: 2px 0 18px;
@@ -816,6 +971,34 @@ useAutoRefresh(
   flex: 0 0 auto;
 }
 
+.page-plan-filter {
+  flex: 0 1 480px;
+  min-width: 320px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: 8px;
+  background: var(--el-color-primary-light-9);
+}
+
+.page-plan-filter__label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--el-color-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.page-plan-filter__select {
+  width: 100%;
+}
+
+.page-plan-filter__select :deep(.el-select__wrapper) {
+  min-height: 38px;
+  background: var(--workbench-paper);
+}
+
 .simple-filter__year {
   width: 130px;
   flex: 0 0 auto;
@@ -827,37 +1010,212 @@ useAutoRefresh(
 
 .workbench-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
   overflow: hidden;
   margin-bottom: 14px;
   border: 1px solid var(--workbench-line);
   border-radius: 7px;
-  background: var(--workbench-paper);
+  background: var(--workbench-line);
 }
 
-.workbench-summary > div {
+.summary-card {
   display: flex;
   flex-direction: column;
   gap: 5px;
   min-width: 0;
+  min-height: 86px;
+  box-sizing: border-box;
   padding: 12px 14px;
-  border-right: 1px solid var(--workbench-line);
+  border: 0;
+  border-radius: 0;
+  background: var(--workbench-paper);
+  color: var(--workbench-ink);
+  font: inherit;
+  text-align: left;
 }
 
-.workbench-summary > div:last-child {
-  border-right: 0;
+button.summary-card {
+  cursor: pointer;
 }
 
-.workbench-summary span {
+.summary-card > span {
   color: var(--workbench-muted);
   font-size: 11px;
 }
 
-.workbench-summary strong {
+.summary-card strong {
   color: var(--workbench-ink);
   font-size: 16px;
   line-height: 22px;
   font-variant-numeric: tabular-nums;
+}
+
+.summary-warning {
+  transition: background-color 0.16s ease;
+}
+
+.summary-warning:hover {
+  background: var(--workbench-soft);
+}
+
+.summary-warning.is-active,
+.summary-warning.is-active:hover {
+  background: var(--el-color-danger-light-9);
+}
+
+.summary-warning.is-active strong,
+.summary-warning.is-active .el-icon,
+.summary-warning.is-failed strong {
+  color: var(--el-color-danger);
+}
+
+.summary-warning__title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.summary-warning__title .el-icon {
+  color: var(--el-color-danger);
+  font-size: 15px;
+}
+
+.summary-card .summary-warning__hint {
+  color: var(--workbench-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.summary-warning.is-active .summary-warning__hint,
+.summary-warning.is-failed .summary-warning__hint {
+  color: var(--el-color-danger);
+}
+
+.summary-warning:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: -3px;
+}
+
+.warning-dialog__intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--workbench-soft);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.warning-dialog__intro strong {
+  color: var(--workbench-ink);
+}
+
+.warning-dialog__intro span {
+  color: var(--workbench-muted);
+}
+
+.warning-dialog__body {
+  min-height: 180px;
+}
+
+.warning-load-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding-top: 24px;
+}
+
+.warning-load-error .el-alert {
+  width: 100%;
+}
+
+.warning-list {
+  display: grid;
+  gap: 10px;
+  max-height: min(56vh, 520px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.warning-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--el-color-danger-light-7);
+  border-radius: 7px;
+  background: var(--el-color-danger-light-9);
+}
+
+.warning-item__content {
+  min-width: 0;
+}
+
+.warning-item__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.warning-item__code {
+  color: var(--workbench-muted);
+  font-size: 12px;
+}
+
+.warning-item__name {
+  margin-top: 5px;
+  color: var(--workbench-ink);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 21px;
+  overflow-wrap: anywhere;
+}
+
+.warning-item__meta {
+  margin-top: 3px;
+  color: var(--workbench-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.warning-item__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(64px, auto));
+  gap: 12px;
+}
+
+.warning-item__metrics > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--workbench-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.warning-item__metrics strong {
+  color: var(--workbench-ink);
+  font-size: 14px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.warning-item__metrics .warning-danger-text {
+  color: var(--el-color-danger);
+}
+
+.warning-item__action {
+  min-width: 64px;
+  margin: 0;
 }
 
 .task-table {
@@ -1083,13 +1441,47 @@ useAutoRefresh(
     width: 100%;
   }
 
+  .page-plan-filter {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
+
   .simple-filter__year {
     flex: 1 1 130px;
     width: auto;
   }
 
+  .workbench-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .summary-card {
+    min-height: 84px;
+    padding: 12px;
+  }
+
   .workbench-summary strong {
     font-size: 15px;
+  }
+
+  .warning-list {
+    max-height: 60vh;
+  }
+
+  .warning-item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .warning-item__metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .warning-item__action {
+    width: 100%;
+    min-height: 44px;
   }
 
   .task-table {
@@ -1236,7 +1628,7 @@ useAutoRefresh(
     padding: 8px;
   }
 
-  .workbench-summary > div {
+  .summary-card {
     padding: 10px;
   }
 }

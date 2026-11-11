@@ -62,7 +62,7 @@ class IndicatorExcelServiceTest {
 
     @BeforeEach
     void setUp() {
-        LoginUser user = new LoginUser(USER_ID, "owner1", "校级负责人", null,
+        LoginUser user = new LoginUser(USER_ID, "owner1", "建设方向负责人", null,
                 List.of("ADMIN"), List.of());
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(user, null, List.of()));

@@ -45,7 +45,7 @@ public class Adjustment {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long toUnitId;
 
-    /** 调整状态：PENDING_OWNER_REVIEW 待初审 / PENDING_RECEIVER_CONFIRM 待接收方确认 / PENDING_LEADER_APPROVAL 待校领导审批 / APPROVED 已生效 / REJECTED 已驳回 / WITHDRAWN 已撤回 */
+    /** 调整状态：PENDING_OWNER_REVIEW 待初审 / PENDING_RECEIVER_CONFIRM 待接收方确认 / PENDING_LEADER_APPROVAL 待校级负责人审批 / APPROVED 已生效 / REJECTED 已驳回 / WITHDRAWN 已撤回 */
     private String status;
 
     /** 当前审批环节：OWNER_REVIEW / RECEIVER_CONFIRM / LEADER_APPROVAL；结束后为空 */

@@ -57,7 +57,7 @@ public class YearUploadService {
             List<Long> visible = user.getRoles().contains("SCHOOL_OWNER")
                     ? reviewService.ownedIndicatorIdsWithChildren(user.getUserId()) : List.of();
             boolean ownerScope = !visible.isEmpty();
-            boolean unitScope = user.getRoles().contains("UNIT_OWNER") && user.getUnitId() != null;
+            boolean unitScope = user.getRoles().contains("UNIT_OWNER") && !user.getUnitIds().isEmpty();
             if (!ownerScope && !unitScope) {
                 return List.of();
             }
@@ -69,7 +69,7 @@ public class YearUploadService {
                     if (ownerScope) {
                         scope.or();
                     }
-                    scope.eq(Submission::getUnitId, user.getUnitId());
+                    scope.in(Submission::getUnitId, user.getUnitIds());
                 }
             });
         }

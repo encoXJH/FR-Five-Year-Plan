@@ -61,17 +61,25 @@ public class StatsService {
      * 数据范围过滤：all=全校；unitId=本单元；indicatorIds=本人负责指标（A 显式负责 + A+ 显式负责；
      * A+ 未设负责人时经 task.topIndicatorId 命中所属 A）。
      */
-    public record ScopeFilter(boolean all, Long unitId, Set<Long> indicatorIds) {
+    public record ScopeFilter(boolean all, Set<Long> unitIds, Set<Long> indicatorIds) {
+
+        public ScopeFilter(boolean all, Long unitId, Set<Long> indicatorIds) {
+            this(all, unitId == null ? Set.of() : Set.of(unitId), indicatorIds);
+        }
 
         public static ScopeFilter allData() {
-            return new ScopeFilter(true, null, Set.of());
+            return new ScopeFilter(true, Set.of(), Set.of());
+        }
+
+        public Long unitId() {
+            return unitIds.stream().findFirst().orElse(null);
         }
 
         public boolean test(Task task) {
             if (all) {
                 return true;
             }
-            if (unitId != null && unitId.equals(task.getUnitId())) {
+            if (unitIds.contains(task.getUnitId())) {
                 return true;
             }
             return indicatorIds.contains(task.getIndicatorId())
@@ -121,13 +129,13 @@ public class StatsService {
         if (dataScopeService.isAllData(user)) {
             return ScopeFilter.allData();
         }
-        Long unitId = dataScopeService.isUnitScope(user) ? user.getUnitId() : null;
+        Set<Long> unitIds = dataScopeService.isUnitScope(user) ? Set.copyOf(user.getUnitIds()) : Set.of();
         Set<Long> indicatorIds = dataScopeService.isOwnerScope(user)
                 ? ownedIndicatorIds(user.getUserId()) : Set.of();
-        return new ScopeFilter(false, unitId, indicatorIds);
+        return new ScopeFilter(false, unitIds, indicatorIds);
     }
 
-    /** 当前用户作为校级负责人显式负责的指标 id 集合 */
+    /** 当前用户作为建设方向负责人显式负责的指标 id 集合 */
     private Set<Long> ownedIndicatorIds(Long userId) {
         return indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
                         .eq(Indicator::getOwnerId, userId)
@@ -143,7 +151,7 @@ public class StatsService {
 
     /** 指定负责人的数据范围（异步导出线程无 SecurityContext，创建任务时固化负责人 id） */
     public ScopeFilter scopeForOwner(Long ownerId) {
-        return new ScopeFilter(false, null, ownedIndicatorIds(ownerId));
+        return new ScopeFilter(false, Set.of(), ownedIndicatorIds(ownerId));
     }
 
     // ---------------- 年度解析 ----------------
@@ -494,7 +502,7 @@ public class StatsService {
         LoginUser user = SecurityUtils.getLoginUser();
         Plan plan = planService.requirePlan(indicator.getPlanId());
         if (isPureUnitOwner(user)) {
-            return unitTrend(indicator, plan, user.getUnitId());
+            return unitTrend(indicator, plan, user.getUnitIds());
         }
         // 数据范围：全校 / 指标有效负责人；其他角色越权返回 20005。
         if (!dataScopeService.isAllData(user)) {
@@ -544,8 +552,8 @@ public class StatsService {
     }
 
     /** 学院趋势按本单元 B 重新归集，不能读取包含全校完成值的 indicator_year_target 缓存。 */
-    private StatsDtos.TrendView unitTrend(Indicator indicator, Plan plan, Long unitId) {
-        ScopeFilter scope = new ScopeFilter(false, unitId, Set.of());
+    private StatsDtos.TrendView unitTrend(Indicator indicator, Plan plan, List<Long> unitIds) {
+        ScopeFilter scope = new ScopeFilter(false, Set.copyOf(unitIds), Set.of());
         PlanContext ctx = loadContext(plan, plan.getStartYear(), scope);
         boolean visible = ctx.tasks().values().stream().anyMatch(task ->
                 indicator.getId().equals(task.getIndicatorId())
@@ -674,7 +682,7 @@ public class StatsService {
         return target != null && target.compareTo(BigDecimal.ZERO) != 0;
     }
 
-    /** 未下发的 AUTO_SUM 指标不进入统计；MANUAL 指标可直接由校级负责人认定。 */
+    /** 未下发的 AUTO_SUM 指标不进入统计；MANUAL 指标可直接由建设方向负责人认定。 */
     private boolean hasCumulativeBasis(Indicator indicator, PlanContext ctx) {
         if ("MANUAL".equals(indicator.getRollupMode())) {
             return true;

@@ -2,6 +2,8 @@ package edu.fzrj.metrics.module.task.service.support;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Set;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -12,7 +14,7 @@ class TaskScopeRulesTest {
     private static final Long UNIT_C02 = 302L;
 
     @Test
-    void 全校范围_管理员与校领导可访问任意任务() {
+    void 全校范围_管理员与校级负责人可访问任意任务() {
         assertTrue(TaskScopeRules.canAccess(true, false, false, USER_ID, null, UNIT_C02, null, null));
     }
 
@@ -30,7 +32,7 @@ class TaskScopeRulesTest {
     }
 
     @Test
-    void 校级负责人_本人负责的指标可访问() {
+    void 建设方向负责人_本人负责的指标可访问() {
         // A+ 直接指定了负责人
         assertTrue(TaskScopeRules.canAccess(false, false, true, USER_ID, null, UNIT_C02, USER_ID, 999L));
         // A+ 未设负责人，沿用所属 A 的负责人（topOwner）
@@ -38,7 +40,7 @@ class TaskScopeRulesTest {
     }
 
     @Test
-    void 校级负责人_非本人负责且非本单元拒绝() {
+    void 建设方向负责人_非本人负责且非本单元拒绝() {
         assertFalse(TaskScopeRules.canAccess(false, false, true, USER_ID, null, UNIT_C02, 999L, 998L));
     }
 
@@ -50,6 +52,20 @@ class TaskScopeRulesTest {
         assertTrue(TaskScopeRules.canAccess(false, true, true, USER_ID, UNIT_C01, UNIT_C01, 999L, null));
         // 都不匹配
         assertFalse(TaskScopeRules.canAccess(false, true, true, USER_ID, UNIT_C01, UNIT_C02, 999L, 998L));
+    }
+
+    @Test
+    void 多学院负责人_两个关联学院均可访问且第三学院拒绝() {
+        Set<Long> unitIds = Set.of(UNIT_C01, UNIT_C02);
+
+        assertTrue(TaskScopeRules.canAccessUnits(false, true, false,
+                USER_ID, unitIds, UNIT_C01, null, null));
+        assertTrue(TaskScopeRules.canAccessUnits(false, true, false,
+                USER_ID, unitIds, UNIT_C02, null, null));
+        assertFalse(TaskScopeRules.canAccessUnits(false, true, false,
+                USER_ID, unitIds, 303L, null, null));
+        assertFalse(TaskScopeRules.noVisibleUnitScope(false, true, false, unitIds));
+        assertTrue(TaskScopeRules.noVisibleUnitScope(false, true, false, Set.of()));
     }
 
     @Test

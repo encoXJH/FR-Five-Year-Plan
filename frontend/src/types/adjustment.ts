@@ -122,7 +122,7 @@ export interface ApprovalStepRecord {
   id?: string
   seq?: number
   node: ApprovalNode
-  /** 期望处理人（校级负责人 / 校领导） */
+  /** 期望处理人（建设方向负责人 / 校级负责人） */
   expectedApprover?: UserRef | null
   /** 期望处理单元（接收学院确认环节） */
   expectedUnit?: UnitRef | null

@@ -25,6 +25,7 @@ import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
+import edu.fzrj.metrics.module.system.service.UserUnitService;
 import edu.fzrj.metrics.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -75,6 +76,7 @@ public class FileService {
     private final IndicatorMapper indicatorMapper;
     private final TaskMapper taskMapper;
     private final ObjectProvider<DirectStorageService> directStorageProvider;
+    private final UserUnitService userUnitService;
 
     @Value("${app.file.storage-type:LOCAL}")
     private String storageType;
@@ -85,7 +87,8 @@ public class FileService {
                        FileRefMapper fileRefMapper, SubmissionService submissionService,
                        AdjustmentService adjustmentService, MilestoneService milestoneService,
                        IndicatorMapper indicatorMapper, TaskMapper taskMapper,
-                       ObjectProvider<DirectStorageService> directStorageProvider) {
+                       ObjectProvider<DirectStorageService> directStorageProvider,
+                       UserUnitService userUnitService) {
         this.fileInfoMapper = fileInfoMapper;
         this.sessionMapper = sessionMapper;
         this.sysUserMapper = sysUserMapper;
@@ -99,6 +102,7 @@ public class FileService {
         this.indicatorMapper = indicatorMapper;
         this.taskMapper = taskMapper;
         this.directStorageProvider = directStorageProvider;
+        this.userUnitService = userUnitService;
     }
 
     // ---------------- 直接上传 ----------------
@@ -435,14 +439,17 @@ public class FileService {
                 return;
             }
         }
-        if (user.getRoles().contains("UNIT_OWNER") && user.getUnitId() != null) {
-            SysUser uploader = sysUserMapper.selectById(fileInfo.getUploadedBy());
-            long taskCount = taskMapper.selectCount(new LambdaQueryWrapper<Task>()
-                    .eq(Task::getTopIndicatorId, indicatorId)
-                    .eq(Task::getUnitId, user.getUnitId())
-                    .eq(Task::getDeleted, 0L));
-            if (uploader != null && Objects.equals(user.getUnitId(), uploader.getUnitId()) && taskCount > 0) {
-                return;
+        if (user.getRoles().contains("UNIT_OWNER") && !user.getUnitIds().isEmpty()) {
+            List<Long> sharedUnitIds = userUnitService.unitIdsOf(fileInfo.getUploadedBy()).stream()
+                    .filter(user.getUnitIds()::contains).toList();
+            if (!sharedUnitIds.isEmpty()) {
+                long taskCount = taskMapper.selectCount(new LambdaQueryWrapper<Task>()
+                        .eq(Task::getTopIndicatorId, indicatorId)
+                        .in(Task::getUnitId, sharedUnitIds)
+                        .eq(Task::getDeleted, 0L));
+                if (taskCount > 0) {
+                    return;
+                }
             }
         }
         throw new BizException(ErrorCode.DATA_SCOPE_DENIED);

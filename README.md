@@ -45,8 +45,8 @@ docker compose -f docker-compose.prod.yml up -d --build
 | 账号 | 角色 |
 | --- | --- |
 | admin | 平台管理员 |
-| leader | 校领导 |
-| owner1 / owner2 | 校级项目负责人 |
+| leader | 校级负责人 |
+| owner1 / owner2 | 建设方向负责人 |
 | c01 – c10 / s01 | 各执行单元负责人 |
 
 ## 测试与构建

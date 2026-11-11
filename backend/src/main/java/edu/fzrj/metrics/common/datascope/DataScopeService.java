@@ -39,10 +39,10 @@ public class DataScopeService {
         if (isAllData(user)) {
             return;
         }
-        if (isUnitScope(user) && unitId != null && unitId.equals(user.getUnitId())) {
+        if (isUnitScope(user) && unitId != null && user.getUnitIds().contains(unitId)) {
             return;
         }
-        // 校级项目负责人按指标归属控制，不按单元限制
+        // 建设方向负责人按指标归属控制，不按单元限制
         if (isOwnerScope(user) && !isUnitScope(user)) {
             return;
         }

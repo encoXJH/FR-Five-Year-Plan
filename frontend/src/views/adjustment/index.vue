@@ -164,7 +164,7 @@ function waitText(days: number): string {
   return days < 1 ? '等待处理 · 不足 1 天' : `等待处理 · 已 ${days} 天`
 }
 
-/** 完整审批链节点：发起申请 → 初审 →（转移类）接收方确认 → 校领导审批 */
+/** 完整审批链节点：发起申请 → 建设方向负责人初审 →（转移类）接收方确认 → 校级负责人审批 */
 const timelineNodes = computed<TimelineNode[]>(() => {
   const current = detail.value
   if (!current) return []
@@ -372,7 +372,7 @@ useAutoRefresh(() => loadList(true), { skip: () => drawerVisible.value })
     <div class="page-header">
       <div>
         <h1 class="page-title">调整申请与审批</h1>
-        <p class="page-subtitle">延期 / 转移 / 目标调整；审批链：初审 → 接收方确认 → 校领导审批</p>
+        <p class="page-subtitle">延期 / 转移 / 目标调整；审批链：建设方向负责人初审 → 接收方确认 → 校级负责人审批</p>
       </div>
     </div>
     <div class="app-action-row">

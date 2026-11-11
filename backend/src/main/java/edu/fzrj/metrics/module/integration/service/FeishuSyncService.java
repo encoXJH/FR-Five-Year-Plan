@@ -10,12 +10,14 @@ import edu.fzrj.metrics.module.system.entity.OrgUnit;
 import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
+import edu.fzrj.metrics.module.system.service.UserUnitService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -35,17 +37,20 @@ public class FeishuSyncService {
     private final OrgUnitMapper orgUnitMapper;
     private final edu.fzrj.metrics.module.audit.mapper.AuditLogMapper auditLogMapper;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final UserUnitService userUnitService;
 
     public FeishuSyncService(FeishuConfig config, FeishuClient feishuClient,
                              SysUserMapper sysUserMapper, OrgUnitMapper orgUnitMapper,
                              edu.fzrj.metrics.module.audit.mapper.AuditLogMapper auditLogMapper,
-                             com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+                             com.fasterxml.jackson.databind.ObjectMapper objectMapper,
+                             UserUnitService userUnitService) {
         this.config = config;
         this.feishuClient = feishuClient;
         this.sysUserMapper = sysUserMapper;
         this.orgUnitMapper = orgUnitMapper;
         this.auditLogMapper = auditLogMapper;
         this.objectMapper = objectMapper;
+        this.userUnitService = userUnitService;
     }
 
     /** 飞书集成状态：配置概览 + 最近一次同步结果（取审计日志最新一条 SYNC_ORG 的 after 快照） */
@@ -107,6 +112,7 @@ public class FeishuSyncService {
         int nameUpdated = 0;
         int unitUpdated = 0;
         int unmatched = 0;
+        Map<Long, LinkedHashSet<Long>> syncedUnitIds = new HashMap<>();
         for (FeishuClient.ContactDepartment department : departments) {
             List<FeishuClient.ContactUser> members;
             try {
@@ -135,16 +141,39 @@ public class FeishuSyncService {
                     changed = true;
                 }
                 OrgUnit unit = unitByName.get(department.name());
-                if (unit != null && !unit.getId().equals(user.getUnitId())) {
-                    user.setUnitId(unit.getId());
-                    unitUpdated++;
-                    changed = true;
+                if (unit != null) {
+                    syncedUnitIds.computeIfAbsent(user.getId(), ignored -> new LinkedHashSet<>()).add(unit.getId());
                 }
                 if (changed) {
                     user.setUpdatedAt(LocalDateTime.now());
                     sysUserMapper.updateById(user);
                 }
             }
+        }
+        Map<Long, List<Long>> existingUnits = userUnitService.unitIdsOf(syncedUnitIds.keySet());
+        for (Map.Entry<Long, LinkedHashSet<Long>> entry : syncedUnitIds.entrySet()) {
+            // 已有关联时以平台手工配置为准，飞书逐部门同步不得覆盖多学院关系。
+            if (!existingUnits.getOrDefault(entry.getKey(), List.of()).isEmpty()) {
+                continue;
+            }
+            SysUser user = userByPhone.values().stream().filter(item -> entry.getKey().equals(item.getId()))
+                    .findFirst().orElse(null);
+            if (user == null) {
+                continue;
+            }
+            LinkedHashSet<Long> initialized = new LinkedHashSet<>(entry.getValue());
+            if (user.getUnitId() != null) {
+                initialized.add(user.getUnitId());
+            }
+            Long primaryUnitId = user.getUnitId() != null && initialized.contains(user.getUnitId())
+                    ? user.getUnitId() : initialized.stream().findFirst().orElse(null);
+            if (!primaryUnitId.equals(user.getUnitId())) {
+                user.setUnitId(primaryUnitId);
+                user.setUpdatedAt(LocalDateTime.now());
+                sysUserMapper.updateById(user);
+            }
+            userUnitService.replaceUnits(user.getId(), primaryUnitId, initialized, null);
+            unitUpdated++;
         }
         FeishuDtos.SyncOrgView view = new FeishuDtos.SyncOrgView(departments.size(), feishuUserCount,
                 matched, 0, nameUpdated, unitUpdated, unmatched, LocalDateTime.now());

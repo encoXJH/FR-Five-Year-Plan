@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -78,7 +79,7 @@ class AdjustmentRulesTest {
     }
 
     @Test
-    void 审批链_目标调整仅校领导审批() {
+    void 审批链_目标调整仅校级负责人审批() {
         assertEquals(List.of("LEADER_APPROVAL"), AdjustmentRules.nodesOf("TARGET_CHANGE", true));
     }
 
@@ -336,7 +337,17 @@ class AdjustmentRulesTest {
     }
 
     @Test
-    void 处理人_终审须校领导() {
+    void 处理人_第二关联学院可确认接收且第三学院拒绝() {
+        Set<Long> unitIds = Set.of(103L, 104L);
+
+        assertTrue(AdjustmentRules.canDecideUnits("RECEIVER_CONFIRM", null, 104L, 201L,
+                unitIds, List.of("UNIT_OWNER")));
+        assertFalse(AdjustmentRules.canDecideUnits("RECEIVER_CONFIRM", null, 105L, 201L,
+                unitIds, List.of("UNIT_OWNER")));
+    }
+
+    @Test
+    void 处理人_终审须校级负责人() {
         assertTrue(AdjustmentRules.canDecide("LEADER_APPROVAL", null, null, 202L, null,
                 List.of("LEADER")));
         assertFalse(AdjustmentRules.canDecide("LEADER_APPROVAL", null, null, 203L, null,

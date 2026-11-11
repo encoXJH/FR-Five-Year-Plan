@@ -120,6 +120,28 @@ class TodoServiceTest {
         return task;
     }
 
+    @Test
+    void 多学院负责人同时获得两个学院的填报待办() {
+        LoginUser user = new LoginUser(99L, "multi", "吴昉", 41L,
+                List.of("UNIT_OWNER"), List.of(), List.of(41L, 42L));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(user, null, List.of()));
+        Task first = task(101L, 11L, "A01-C01");
+        Task second = task(102L, 11L, "A01-C02");
+        second.setUnitId(42L);
+        int currentYear = java.time.Year.now().getValue();
+        when(taskMapper.selectList(any())).thenReturn(List.of(first, second));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(
+                taskYear(1001L, 101L, 11L, currentYear, "IN_PROGRESS"),
+                taskYear(1002L, 102L, 11L, currentYear, "IN_PROGRESS")));
+        when(adjustmentService.todoAdjustments(any())).thenReturn(List.of());
+
+        NotifyDtos.TodoView result = todoService.todos();
+
+        assertEquals(2, result.items().size());
+        assertEquals(Map.of("FILL", 2L), result.summary());
+    }
+
     private TaskYear taskYear(Long id, Long taskId, Long planId, Integer year, String status) {
         TaskYear taskYear = new TaskYear();
         taskYear.setId(id);

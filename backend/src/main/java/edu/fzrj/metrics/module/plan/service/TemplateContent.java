@@ -57,7 +57,7 @@ public class TemplateContent {
         private Integer minFileCount;
         private BigDecimal baselineValue;
         private BigDecimal totalTarget;
-        /** 校级项目负责人登录名（实例化时按登录名解析，找不到则置空由后续补录） */
+        /** 建设方向负责人登录名（实例化时按登录名解析，找不到则置空由后续补录） */
         private String ownerUsername;
         private Integer sort;
         /** 年度目标：年 → 目标值（BOOLEAN 口径完成年为 1，其余年不出现） */

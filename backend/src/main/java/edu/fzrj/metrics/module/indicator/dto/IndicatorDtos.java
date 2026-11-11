@@ -82,7 +82,7 @@ public final class IndicatorDtos {
 
         private BigDecimal totalTarget;
 
-        /** 校级项目负责人（A+ 为 null 时沿用上级 A） */
+        /** 建设方向负责人（A+ 为 null 时沿用上级 A） */
         @JsonSerialize(using = ToStringSerializer.class)
         private Long ownerId;
 

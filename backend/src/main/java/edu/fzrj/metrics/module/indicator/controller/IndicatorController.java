@@ -124,7 +124,7 @@ public class IndicatorController {
         return indicatorService.putYearTargets(indicatorId, request);
     }
 
-    @Operation(summary = "MANUAL 汇总 A 指标的人工认定（PRD 4.5：校级项目负责人手工认定完成值）",
+    @Operation(summary = "MANUAL 汇总 A 指标的人工认定（PRD 4.5：建设方向负责人手工认定完成值）",
             description = "权限：indicator:edit + 指标负责人数据范围（越权 20005）；认定值即该年 A 完成值并重算达成状态；"
                     + "年度未激活 50004、已锁定 60003、计划归档 30001；带 version（冲突 10005）；必须带 Idempotency-Key")
     @PutMapping("/api/v1/indicators/{indicatorId}/year-targets/{year}/manual-value")

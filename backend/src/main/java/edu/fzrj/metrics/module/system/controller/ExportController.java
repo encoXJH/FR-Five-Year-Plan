@@ -29,7 +29,7 @@ public class ExportController {
     }
 
     @Operation(summary = "创建异步导出任务 { type, params }，返回 exportId",
-            description = "已登录；INDICATORS（params.planId）；STATS_REPORT（params.planId + 可选 year，管理员/校领导/校级负责人）；"
+            description = "已登录；INDICATORS（params.planId）；STATS_REPORT（params.planId + 可选 year，管理员/校级负责人/建设方向负责人）；"
                     + "AUDIT_LOGS（params 同 GET /audit-logs 过滤条件，无需 planId，权限 audit-log:export）；"
                     + "MATERIAL_ZIP（params.fileIds，权限 material:view 并逐文件校验数据范围）；必须带 Idempotency-Key")
     @PostMapping

@@ -20,7 +20,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 
 /**
- * MANUAL 汇总方式 A 指标的人工认定（PRD 4.5：A 为 MANUAL 时由校级项目负责人手工认定完成值；
+ * MANUAL 汇总方式 A 指标的人工认定（PRD 4.5：A 为 MANUAL 时由建设方向负责人手工认定完成值；
  * 认定值即该年 A 的完成值，认定后按目标重算完成率与达成状态）。
  */
 @Service
@@ -50,7 +50,7 @@ public class ManualValueService {
         if (indicator.getParentId() != null || !"MANUAL".equals(indicator.getRollupMode())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "只有汇总方式为手工认定（MANUAL）的 A 指标支持人工认定");
         }
-        // 数据范围：管理员全校；校级负责人仅本人负责的指标（越权 20005）
+        // 数据范围：管理员全校；建设方向负责人仅本人负责的指标（越权 20005）
         dataScopeService.canAccessIndicatorOwner(indicator.getOwnerId());
 
         Plan plan = planMapper.selectById(indicator.getPlanId());

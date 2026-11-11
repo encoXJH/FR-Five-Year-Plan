@@ -91,7 +91,7 @@ class ReviewServiceTest {
                 notificationMapper, submissionService, actualRecalcService, indicatorService, taskService,
                 taskMapper, dataScopeService, planService, transactionManager(), annualTargetGuard);
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
-                new LoginUser(20L, "owner", "校级负责人", null,
+                new LoginUser(20L, "owner", "建设方向负责人", null,
                         List.of("SCHOOL_OWNER"), List.of()), null, List.of()));
 
         Indicator indicator = new Indicator();

@@ -109,6 +109,74 @@ class SubmissionServiceTest {
     }
 
     @Test
+    void 第二关联学院负责人可正常填报() {
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new LoginUser(20L, "multi", "吴昉", 10L,
+                        List.of("UNIT_OWNER"), List.of(), List.of(10L, 11L)), null, List.of()));
+        when(dataScopeService.isUnitScope(any())).thenReturn(true);
+
+        boolean proxy = submissionService.requireSubmitter(11L, null);
+
+        assertEquals(false, proxy);
+    }
+
+    @Test
+    void 第二关联学院负责人可创建填报草稿() {
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new LoginUser(20L, "multi", "吴昉", 10L,
+                        List.of("UNIT_OWNER"), List.of(), List.of(10L, 11L)), null, List.of()));
+        when(dataScopeService.isUnitScope(any())).thenReturn(true);
+        Task task = new Task();
+        task.setId(2L);
+        task.setUnitId(11L);
+        task.setIndicatorId(5L);
+        task.setPlanId(4L);
+        task.setStatus("IN_PROGRESS");
+        when(taskService.requireTask(2L)).thenReturn(task);
+        when(taskService.findByIds(any())).thenReturn(List.of(task));
+        Indicator indicator = new Indicator();
+        indicator.setId(5L);
+        indicator.setStatCaliber("INCREMENT");
+        when(indicatorService.requireIndicator(5L)).thenReturn(indicator);
+        when(indicatorService.findByIds(any())).thenReturn(List.of(indicator));
+        Plan plan = new Plan();
+        plan.setStartYear(2026);
+        plan.setEndYear(2030);
+        when(planService.requirePlan(4L)).thenReturn(plan);
+        PlanYear planYear = new PlanYear();
+        planYear.setStatus("ACTIVE");
+        when(planYearMapper.selectOne(any())).thenReturn(planYear);
+        TaskYear taskYear = new TaskYear();
+        taskYear.setId(3L);
+        when(taskYearMapper.selectOne(any())).thenReturn(taskYear);
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of());
+        when(fileRefMapper.selectList(any())).thenReturn(List.of());
+        when(reviewMapper.selectList(any())).thenReturn(List.of());
+        when(historyMapper.selectList(any())).thenReturn(List.of());
+        when(userRefResolver.mapOf(any())).thenReturn(Map.of());
+        AtomicReference<Submission> stored = new AtomicReference<>();
+        when(submissionMapper.selectOne(any())).thenAnswer(invocation -> stored.get());
+        doAnswer(invocation -> {
+            Submission submission = invocation.getArgument(0);
+            submission.setId(1L);
+            submission.setVersion(1);
+            stored.set(submission);
+            return 1;
+        }).when(submissionMapper).insert(any(Submission.class));
+        SubmissionDtos.CreateRequest request = new SubmissionDtos.CreateRequest();
+        request.setYear(java.time.Year.now().getValue());
+        SubmissionDtos.MetricValue value = new SubmissionDtos.MetricValue();
+        value.setAmount(BigDecimal.ONE);
+        request.setValue(value);
+
+        submissionService.create(2L, request);
+
+        assertEquals(11L, stored.get().getUnitId());
+        assertEquals(false, stored.get().getIsProxy());
+        verify(submissionMapper).insert(any(Submission.class));
+    }
+
+    @Test
     void 提交前年度上限守卫失败时不写填报和历史() {
         Submission submission = new Submission();
         submission.setId(1L);

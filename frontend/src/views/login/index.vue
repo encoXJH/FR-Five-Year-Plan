@@ -109,14 +109,14 @@ const showDemoAccounts = true
 
 const DEMO_ACCOUNTS = [
   { username: 'admin', name: '平台管理员', desc: '全部菜单' },
-  { username: 'leader', name: '校领导', desc: '审批 / 报表 / 大屏' },
-  { username: 'owner1', name: '校级项目负责人', desc: '指标 / 审核 / 初审' },
+  { username: 'leader', name: '校级负责人', desc: '审批 / 报表 / 大屏' },
+  { username: 'owner1', name: '建设方向负责人', desc: '指标 / 审核 / 初审' },
   { username: 'c01', name: '学院负责人（智能产业学院）', desc: '工作台 / 填报' },
 ] as const
 
 async function quickLogin(username: string): Promise<void> {
   form.username = username
-  form.password = 'Test@123456'
+  form.password = 'fzrj@12345678'
   await handleSubmit()
 }
 </script>
@@ -126,7 +126,7 @@ async function quickLogin(username: string): Promise<void> {
     <div class="brand-pane">
       <div class="brand-content">
         <div class="brand-school">福州软件职业技术学院</div>
-        <div class="brand-platform">五年计划指标管理平台</div>
+        <div class="brand-platform">双高管理平台</div>
         <div class="brand-slogan">目标量化 · 任务下发 · 过程留痕 · 实时可视</div>
       </div>
       <div class="brand-footer">© 2026 福州软件职业技术学院 发展规划处</div>

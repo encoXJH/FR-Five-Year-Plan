@@ -89,7 +89,7 @@ public class ExportService {
             jobParams.put("planId", String.valueOf(planId));
             jobParams.put("scopeOwner", scopeOwner);
             if ("STATS_REPORT".equals(request.getType())) {
-                // 统计报表：管理员 / 校领导 / 校级负责人可导出（PRD P11）；学院负责人无此入口
+                // 统计报表：管理员 / 校级负责人 / 建设方向负责人可导出（PRD P11）；学院负责人无此入口
                 if (scopeOwner != null && scopeOwner < 0) {
                     throw new BizException(ErrorCode.FORBIDDEN, "没有操作权限");
                 }

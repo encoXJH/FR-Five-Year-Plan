@@ -27,7 +27,7 @@ public class AllocationController {
     }
 
     @Operation(summary = "获取分解矩阵（A+ 或不可下分 A：执行单元 × 年度 + 合计校验）",
-            description = "权限：allocation:edit；按数据范围（校级负责人仅本人负责的指标）")
+            description = "权限：allocation:edit；按数据范围（建设方向负责人仅本人负责的指标）")
     @GetMapping("/api/v1/indicators/{indicatorId}/allocation")
     @PreAuthorize("hasAuthority('allocation:edit')")
     public TaskDtos.AllocationView get(@PathVariable Long indicatorId) {

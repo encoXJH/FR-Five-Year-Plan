@@ -63,7 +63,7 @@ async function handleCommand(command: string): Promise<void> {
         @keydown.space.prevent="emit('toggle-menu')"
       ><Menu /></el-icon>
       <el-icon :size="24" class="brand-logo"><School /></el-icon>
-      <span class="brand-name">福州软件职业技术学院 · 五年计划指标管理平台</span>
+      <span class="brand-name">福州软件职业技术学院 · 双高管理平台</span>
     </div>
     <div class="header-right">
       <el-badge

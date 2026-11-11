@@ -28,25 +28,32 @@ const units = ref<OrgUnit[]>([])
 const filters = reactive({
   keyword: '',
   unitId: '' as string,
+  role: '' as string,
   page: 1,
   pageSize: 20,
 })
 
 const roleOptions = computed(() => enumOptions('Role', userStore.enums))
 
+let loadSequence = 0
+
 async function load(silent = false): Promise<void> {
+  const sequence = ++loadSequence
   if (!silent) loading.value = true
   try {
     const result = await listUsers({
       keyword: filters.keyword.trim() || undefined,
       unitId: filters.unitId || undefined,
+      role: filters.role || undefined,
       page: filters.page,
       pageSize: filters.pageSize,
     })
-    rows.value = result.items
-    total.value = result.total
+    if (sequence === loadSequence) {
+      rows.value = result.items
+      total.value = result.total
+    }
   } finally {
-    if (!silent) loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -247,6 +254,16 @@ useAutoRefresh(() => load(true))
       />
       <el-select v-model="filters.unitId" clearable placeholder="所属单元" style="width: 180px">
         <el-option v-for="u in units" :key="u.id" :label="`${u.code} ${u.name}`" :value="u.id" />
+      </el-select>
+      <el-select
+        v-model="filters.role"
+        clearable
+        placeholder="全部角色"
+        aria-label="按角色筛选"
+        style="width: 190px"
+        @change="search"
+      >
+        <el-option v-for="o in roleOptions" :key="o.value" :label="o.label" :value="o.value" />
       </el-select>
       <el-button type="primary" @click="search">查询</el-button>
     </div>

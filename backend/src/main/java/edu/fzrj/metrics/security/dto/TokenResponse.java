@@ -26,7 +26,13 @@ public class TokenResponse {
             @JsonSerialize(using = ToStringSerializer.class) Long id,
             String name,
             UnitRef unit,
-            List<String> roles) {
+            List<String> roles,
+            List<UnitRef> units,
+            @JsonSerialize(contentUsing = ToStringSerializer.class) List<Long> unitIds) {
+        public TokenUser(Long id, String name, UnitRef unit, List<String> roles) {
+            this(id, name, unit, roles, unit == null ? List.of() : List.of(unit),
+                    unit == null ? List.of() : List.of(unit.id()));
+        }
     }
 
     public record UnitRef(

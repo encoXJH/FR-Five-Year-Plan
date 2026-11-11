@@ -72,7 +72,7 @@ class MilestoneServiceTest {
     }
 
     @Test
-    void 校级负责人不能创建他人指标的里程碑() {
+    void 建设方向负责人不能创建他人指标的里程碑() {
         login("SCHOOL_OWNER", "indicator:edit");
         Indicator indicator = indicator(88L);
         when(indicatorService.requireIndicator(5L)).thenReturn(indicator);
@@ -89,7 +89,7 @@ class MilestoneServiceTest {
     }
 
     @Test
-    void 校级负责人不能修改他人指标的里程碑() {
+    void 建设方向负责人不能修改他人指标的里程碑() {
         login("SCHOOL_OWNER", "indicator:edit");
         Milestone milestone = indicatorMilestone();
         Indicator indicator = indicator(88L);

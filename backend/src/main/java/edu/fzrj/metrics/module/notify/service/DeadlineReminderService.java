@@ -14,6 +14,7 @@ import edu.fzrj.metrics.module.system.entity.UserRole;
 import edu.fzrj.metrics.module.system.mapper.SysSettingMapper;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.mapper.UserRoleMapper;
+import edu.fzrj.metrics.module.system.service.UserUnitService;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
@@ -53,6 +54,7 @@ public class DeadlineReminderService {
     private final UserRoleMapper userRoleMapper;
     private final NotificationMapper notificationMapper;
     private final SysSettingMapper sysSettingMapper;
+    private final UserUnitService userUnitService;
 
     @Value("${app.reminder.enabled:true}")
     private boolean enabled;
@@ -60,7 +62,8 @@ public class DeadlineReminderService {
     public DeadlineReminderService(PlanMapper planMapper, PlanYearMapper planYearMapper,
                                    TaskYearMapper taskYearMapper, TaskMapper taskMapper,
                                    SysUserMapper sysUserMapper, UserRoleMapper userRoleMapper,
-                                   NotificationMapper notificationMapper, SysSettingMapper sysSettingMapper) {
+                                   NotificationMapper notificationMapper, SysSettingMapper sysSettingMapper,
+                                   UserUnitService userUnitService) {
         this.planMapper = planMapper;
         this.planYearMapper = planYearMapper;
         this.taskYearMapper = taskYearMapper;
@@ -69,6 +72,7 @@ public class DeadlineReminderService {
         this.userRoleMapper = userRoleMapper;
         this.notificationMapper = notificationMapper;
         this.sysSettingMapper = sysSettingMapper;
+        this.userUnitService = userUnitService;
     }
 
     /** 定时入口：cron 可配（app.reminder.cron），开关 app.reminder.enabled（便携 / 测试环境可关） */
@@ -174,8 +178,12 @@ public class DeadlineReminderService {
         if (task.getOwnerId() != null) {
             return List.of(task.getOwnerId());
         }
+        List<Long> userIds = userUnitService.userIdsOfUnit(task.getUnitId());
+        if (userIds.isEmpty()) {
+            return List.of();
+        }
         List<SysUser> unitUsers = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getUnitId, task.getUnitId())
+                .in(SysUser::getId, userIds)
                 .eq(SysUser::getIsEnabled, true)
                 .eq(SysUser::getDeleted, 0L)
                 .select(SysUser::getId));

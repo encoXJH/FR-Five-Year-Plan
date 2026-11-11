@@ -247,7 +247,7 @@ watch(planId, (id, previous) => {
         </div>
         <div class="field">
           <label>方向负责人</label>
-          <van-field readonly is-link :model-value="leaderLabel" placeholder="选择校领导" @click="leaderPickerVisible = true" />
+          <van-field readonly is-link :model-value="leaderLabel" placeholder="选择校级负责人" @click="leaderPickerVisible = true" />
         </div>
         <van-button block type="primary" :loading="saving" @click="submit">保存</van-button>
       </div>

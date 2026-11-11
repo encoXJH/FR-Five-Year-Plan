@@ -66,8 +66,8 @@ public final class AdjustmentRules {
     }
 
     /**
-     * 审批链（PRD 5.6.2）：校级负责人初审 →（转移类且计划开启接收确认时）接收方确认 → 校领导审批。
-     * 目标调整仅管理员发起，只需校领导审批（PRD 5.6.1【P1】）。
+     * 审批链（PRD 5.6.2）：建设方向负责人初审 →（转移类且计划开启接收确认时）接收方确认 → 校级负责人审批。
+     * 目标调整仅管理员发起，只需校级负责人审批（PRD 5.6.1【P1】）。
      */
     public static List<String> nodesOf(String type, boolean receiverConfirmRequired) {
         if (TARGET_CHANGE.equals(type)) {
@@ -113,16 +113,22 @@ public final class AdjustmentRules {
 
     /**
      * 70005 当前环节处理人判定：
-     * 初审 = 指标有效负责人（期望处理人为空时仅管理员）；接收确认 = 接收单元的学院负责人；终审 = 校领导。
+     * 初审 = 指标有效负责人（期望处理人为空时仅管理员）；接收确认 = 接收单元的学院负责人；终审 = 校级负责人。
      */
     public static boolean canDecide(String node, Long expectedApproverId, Long expectedUnitId,
                                     Long userId, Long userUnitId, List<String> roles) {
+        return canDecideUnits(node, expectedApproverId, expectedUnitId, userId,
+                userUnitId == null ? Set.of() : Set.of(userUnitId), roles);
+    }
+
+    public static boolean canDecideUnits(String node, Long expectedApproverId, Long expectedUnitId,
+                                         Long userId, Set<Long> userUnitIds, List<String> roles) {
         return switch (node) {
             case OWNER_REVIEW -> expectedApproverId != null
                     ? expectedApproverId.equals(userId)
                     : roles.contains("ADMIN");
             case RECEIVER_CONFIRM -> roles.contains("UNIT_OWNER")
-                    && expectedUnitId != null && expectedUnitId.equals(userUnitId);
+                    && expectedUnitId != null && userUnitIds.contains(expectedUnitId);
             case LEADER_APPROVAL -> roles.contains("LEADER");
             default -> false;
         };

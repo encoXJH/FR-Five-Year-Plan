@@ -32,7 +32,7 @@ import java.util.stream.Collectors;
 
 /**
  * 我的待办（API 约定 15.9、PRD FR-M11-01、数据库设计 7.9）：
- * 待填报 FILL（学院）/ 待审核 REVIEW（校级负责人、管理员）/ 待确认接收 ACCEPT（学院）/ 待审批 APPROVAL（调整各环节）。
+ * 待填报 FILL（学院）/ 待审核 REVIEW（建设方向负责人、管理员）/ 待确认接收 ACCEPT（学院）/ 待审批 APPROVAL（调整各环节）。
  * 不建表，按当前用户角色与数据范围实时聚合。
  */
 @Service
@@ -99,11 +99,11 @@ public class TodoService {
      * 年度已激活但 task_year 尚未惰性激活（NOT_ACTIVATED）的也可填报，一并列出。
      */
     private List<NotifyDtos.TodoItem> fillTodos(LoginUser user) {
-        if (!user.getRoles().contains("UNIT_OWNER") || user.getUnitId() == null) {
+        if (!user.getRoles().contains("UNIT_OWNER") || user.getUnitIds().isEmpty()) {
             return List.of();
         }
         List<Task> tasks = taskMapper.selectList(new LambdaQueryWrapper<Task>()
-                .eq(Task::getUnitId, user.getUnitId())
+                .in(Task::getUnitId, user.getUnitIds())
                 .eq(Task::getIsHistorical, false)
                 .eq(Task::getDeleted, 0L)
                 .in(Task::getStatus, List.of("DISTRIBUTED", "IN_PROGRESS")));
@@ -135,7 +135,7 @@ public class TodoService {
                 .toList();
     }
 
-    /** 待审核：与 /reviews/pending 同口径（全校角色全部；校级负责人 = 本人负责指标含下级 A+） */
+    /** 待审核：与 /reviews/pending 同口径（全校角色全部；建设方向负责人 = 本人负责指标含下级 A+） */
     private List<NotifyDtos.TodoItem> reviewTodos(LoginUser user) {
         if (!user.getPermissions().contains("submission:review")) {
             return List.of();
@@ -176,7 +176,7 @@ public class TodoService {
                 .toList();
     }
 
-    /** 待审批：调整申请当前环节的期望处理人（初审 / 接收确认 / 校领导审批） */
+    /** 待审批：调整申请当前环节的期望处理人（初审 / 接收确认 / 校级负责人审批） */
     private List<NotifyDtos.TodoItem> approvalTodos(LoginUser user) {
         List<Adjustment> adjustments = adjustmentService.todoAdjustments(user);
         if (adjustments.isEmpty()) {

@@ -5,6 +5,7 @@ import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.system.entity.UserRole;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.mapper.UserRoleMapper;
+import edu.fzrj.metrics.module.system.service.UserUnitService;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
@@ -36,11 +37,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtService jwtService;
     private final SysUserMapper sysUserMapper;
     private final UserRoleMapper userRoleMapper;
+    private final UserUnitService userUnitService;
 
-    public JwtAuthenticationFilter(JwtService jwtService, SysUserMapper sysUserMapper, UserRoleMapper userRoleMapper) {
+    public JwtAuthenticationFilter(JwtService jwtService, SysUserMapper sysUserMapper,
+                                   UserRoleMapper userRoleMapper, UserUnitService userUnitService) {
         this.jwtService = jwtService;
         this.sysUserMapper = sysUserMapper;
         this.userRoleMapper = userRoleMapper;
+        this.userUnitService = userUnitService;
     }
 
     @Override
@@ -63,7 +67,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                             .stream().map(UserRole::getRole).toList();
                     List<String> permissions = RolePermissions.permissionsOf(roles);
                     LoginUser loginUser = new LoginUser(user.getId(), user.getUsername(), user.getName(),
-                            user.getUnitId(), roles, permissions);
+                            user.getUnitId(), roles, permissions, userUnitService.unitIdsOf(userId));
                     UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                             loginUser, null,
                             permissions.stream().map(SimpleGrantedAuthority::new).toList());

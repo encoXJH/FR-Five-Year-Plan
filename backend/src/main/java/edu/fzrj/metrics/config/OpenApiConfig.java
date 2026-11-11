@@ -19,7 +19,7 @@ public class OpenApiConfig {
         String schemeName = "bearer";
         return new OpenAPI()
                 .info(new Info()
-                        .title("五年计划指标管理平台 API")
+                        .title("双高管理平台 API")
                         .version("v1")
                         .description("统一前缀 /api/v1；认证使用 Authorization: Bearer {accessToken}"))
                 .components(new Components().addSecuritySchemes(schemeName,

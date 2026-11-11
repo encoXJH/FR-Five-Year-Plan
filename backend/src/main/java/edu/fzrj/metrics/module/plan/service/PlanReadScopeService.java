@@ -60,16 +60,16 @@ public class PlanReadScopeService {
                 .eq(Task::getPlanId, planId)
                 .eq(Task::getDeleted, 0L);
         if (!dataScopeService.isAllData(user)) {
-            Long unitId = dataScopeService.isUnitScope(user) ? user.getUnitId() : null;
+            List<Long> unitIds = dataScopeService.isUnitScope(user) ? user.getUnitIds() : List.of();
             List<Long> ownedIndicatorIds = dataScopeService.isOwnerScope(user)
                     ? ownedIndicatorIds(user.getUserId()) : List.of();
-            if (unitId == null && ownedIndicatorIds.isEmpty()) {
+            if (unitIds.isEmpty() && ownedIndicatorIds.isEmpty()) {
                 return List.of();
             }
             query.and(wrapper -> {
-                boolean hasUnit = unitId != null;
+                boolean hasUnit = !unitIds.isEmpty();
                 if (hasUnit) {
-                    wrapper.eq(Task::getUnitId, unitId);
+                    wrapper.in(Task::getUnitId, unitIds);
                 }
                 if (!ownedIndicatorIds.isEmpty()) {
                     if (hasUnit) {
@@ -133,9 +133,9 @@ public class PlanReadScopeService {
                             .select(Indicator::getPlanId))
                     .forEach(indicator -> planIds.add(indicator.getPlanId()));
         }
-        if (dataScopeService.isUnitScope(user) && user.getUnitId() != null) {
+        if (dataScopeService.isUnitScope(user) && !user.getUnitIds().isEmpty()) {
             taskMapper.selectList(new LambdaQueryWrapper<Task>()
-                            .eq(Task::getUnitId, user.getUnitId())
+                            .in(Task::getUnitId, user.getUnitIds())
                             .eq(Task::getDeleted, 0L)
                             .select(Task::getPlanId))
                     .forEach(task -> planIds.add(task.getPlanId()));

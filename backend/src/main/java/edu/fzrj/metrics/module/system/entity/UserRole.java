@@ -25,7 +25,7 @@ public class UserRole {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long userId;
 
-    /** 角色：ADMIN 平台管理员 / LEADER 校领导 / SCHOOL_OWNER 校级项目负责人 / UNIT_OWNER 学院项目负责人 */
+    /** 角色：ADMIN 平台管理员 / LEADER 校级负责人 / SCHOOL_OWNER 建设方向负责人 / UNIT_OWNER 学院项目负责人 */
     private String role;
 
     /** 创建时间 */

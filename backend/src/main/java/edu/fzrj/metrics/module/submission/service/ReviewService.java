@@ -88,7 +88,7 @@ public class ReviewService {
 
     // ---------------- 待审核列表 ----------------
 
-    /** 待审核列表（submission:review；SCHOOL_OWNER 只待审本人负责指标的，管理员 / 校领导全部） */
+    /** 待审核列表（submission:review；SCHOOL_OWNER 只待审本人负责指标的，管理员 / 校级负责人全部） */
     public PageResult<SubmissionDtos.ListItem> pending(SubmissionDtos.PendingQuery query) {
         LoginUser user = SecurityUtils.getLoginUser();
         LambdaQueryWrapper<Submission> wrapper = new LambdaQueryWrapper<Submission>()
@@ -344,7 +344,7 @@ public class ReviewService {
         notificationMapper.insert(notification);
     }
 
-    /** 本人作为校级负责人负责的指标 id 集合（含 A 的下级 A+）；/todos 待审核聚合复用 */
+    /** 本人作为建设方向负责人负责的指标 id 集合（含 A 的下级 A+）；/todos 待审核聚合复用 */
     public List<Long> ownedIndicatorIdsWithChildren(Long userId) {
         List<Indicator> owned = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
                 .eq(Indicator::getOwnerId, userId)

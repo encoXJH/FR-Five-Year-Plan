@@ -48,15 +48,17 @@ public class UserAdminService {
     private final OrgUnitMapper orgUnitMapper;
     private final RefreshTokenMapper refreshTokenMapper;
     private final PasswordEncoder passwordEncoder;
+    private final UserUnitService userUnitService;
 
     public UserAdminService(SysUserMapper sysUserMapper, UserRoleMapper userRoleMapper,
                             OrgUnitMapper orgUnitMapper, RefreshTokenMapper refreshTokenMapper,
-                            PasswordEncoder passwordEncoder) {
+                            PasswordEncoder passwordEncoder, UserUnitService userUnitService) {
         this.sysUserMapper = sysUserMapper;
         this.userRoleMapper = userRoleMapper;
         this.orgUnitMapper = orgUnitMapper;
         this.refreshTokenMapper = refreshTokenMapper;
         this.passwordEncoder = passwordEncoder;
+        this.userUnitService = userUnitService;
     }
 
     // ---------------- 查询 ----------------
@@ -67,11 +69,17 @@ public class UserAdminService {
         }
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<SysUser>()
                 .eq(SysUser::getDeleted, 0L)
-                .eq(query.getUnitId() != null, SysUser::getUnitId, query.getUnitId())
                 .eq(query.getIsEnabled() != null, SysUser::getIsEnabled, query.getIsEnabled())
                 .and(StringUtils.hasText(query.getKeyword()), w -> w
                         .like(SysUser::getUsername, query.getKeyword())
                         .or().like(SysUser::getName, query.getKeyword()));
+        if (query.getUnitId() != null) {
+            List<Long> unitUserIds = userUnitService.userIdsOfUnit(query.getUnitId());
+            if (unitUserIds.isEmpty()) {
+                return new PageResult<>(List.of(), 0L, query.getPage(), query.getPageSize());
+            }
+            wrapper.in(SysUser::getId, unitUserIds);
+        }
         if (StringUtils.hasText(query.getRole())) {
             List<Long> userIds = userRoleMapper.selectList(new LambdaQueryWrapper<UserRole>()
                             .eq(UserRole::getRole, query.getRole())
@@ -105,7 +113,11 @@ public class UserAdminService {
         if (duplicate > 0) {
             throw new BizException(ErrorCode.PARAM_INVALID, "登录名已存在：" + username);
         }
+        List<Long> requestedUnitIds = request.getUnitIds() == null ? List.of() : request.getUnitIds();
+        requestedUnitIds.forEach(this::requireUnitIfPresent);
         requireUnitIfPresent(request.getUnitId());
+        Long primaryUnitId = request.getUnitId() != null ? request.getUnitId()
+                : requestedUnitIds.stream().filter(Objects::nonNull).findFirst().orElse(null);
         List<String> roles = validateRoles(request.getRoles());
 
         SysUser user = new SysUser();
@@ -114,13 +126,14 @@ public class UserAdminService {
         user.setName(request.getName().trim());
         user.setPhone(StringUtils.hasText(request.getPhone()) ? request.getPhone().trim() : null);
         user.setEmail(StringUtils.hasText(request.getEmail()) ? request.getEmail().trim() : null);
-        user.setUnitId(request.getUnitId());
+        user.setUnitId(primaryUnitId);
         user.setIsEnabled(true);
         user.setLoginFailCount(0);
         user.setCreatedBy(SecurityUtils.getUserId());
         user.setUpdatedBy(user.getCreatedBy());
         sysUserMapper.insert(user);
         replaceRoles(user.getId(), roles);
+        userUnitService.replaceUnits(user.getId(), primaryUnitId, requestedUnitIds, user.getCreatedBy());
         return toItems(List.of(sysUserMapper.selectById(user.getId()))).get(0);
     }
 
@@ -155,10 +168,26 @@ public class UserAdminService {
         if (patch.has("email")) {
             user.setEmail(patch.isNull("email") ? null : patch.text("email").trim());
         }
-        if (patch.has("unitId")) {
-            Long unitId = patch.isNull("unitId") ? null : patch.longId("unitId");
-            requireUnitIfPresent(unitId);
-            user.setUnitId(unitId);
+        boolean unitsChanged = patch.has("unitId") || patch.has("unitIds");
+        List<Long> requestedUnitIds = null;
+        if (unitsChanged) {
+            Long previousPrimary = user.getUnitId();
+            if (patch.has("unitId")) {
+                Long unitId = patch.isNull("unitId") ? null : patch.longId("unitId");
+                requireUnitIfPresent(unitId);
+                user.setUnitId(unitId);
+            }
+            if (patch.has("unitIds")) {
+                requestedUnitIds = parseUnitIds(patch.raw("unitIds"));
+                requestedUnitIds.forEach(this::requireUnitIfPresent);
+            } else {
+                Long retainedPrimary = previousPrimary;
+                requestedUnitIds = userUnitService.unitIdsOf(userId).stream()
+                        .filter(id -> !id.equals(retainedPrimary)).toList();
+            }
+            if (user.getUnitId() == null) {
+                user.setUnitId(requestedUnitIds.stream().findFirst().orElse(null));
+            }
         }
         if (patch.has("isEnabled")) {
             user.setIsEnabled(patch.bool("isEnabled"));
@@ -169,6 +198,9 @@ public class UserAdminService {
         user.setUpdatedBy(SecurityUtils.getUserId());
         if (sysUserMapper.updateById(user) == 0) {
             throw new BizException(ErrorCode.VERSION_CONFLICT, "用户已被他人修改，请刷新后重试");
+        }
+        if (unitsChanged) {
+            userUnitService.replaceUnits(userId, user.getUnitId(), requestedUnitIds, SecurityUtils.getUserId());
         }
         return toItems(List.of(sysUserMapper.selectById(userId))).get(0);
     }
@@ -270,11 +302,35 @@ public class UserAdminService {
         }
     }
 
+    private List<Long> parseUnitIds(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return List.of();
+        }
+        if (!node.isArray()) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "字段 unitIds 应为 ID 数组");
+        }
+        Set<Long> ids = new LinkedHashSet<>();
+        for (JsonNode value : node) {
+            try {
+                if (value.isTextual() || value.isIntegralNumber()) {
+                    ids.add(Long.valueOf(value.asText()));
+                } else {
+                    throw new NumberFormatException();
+                }
+            } catch (NumberFormatException e) {
+                throw new BizException(ErrorCode.PARAM_INVALID, "字段 unitIds 应为 ID 数组");
+            }
+        }
+        return List.copyOf(ids);
+    }
+
     private List<SystemDtos.UserItem> toItems(List<SysUser> users) {
         if (users.isEmpty()) {
             return List.of();
         }
-        Map<Long, OrgUnit> unitMap = unitMapOf(users);
+        Map<Long, List<Long>> unitIdsByUser = userUnitService.unitIdsOf(
+                users.stream().map(SysUser::getId).toList());
+        Map<Long, OrgUnit> unitMap = unitMapOf(users, unitIdsByUser);
         Map<Long, List<String>> roleMap = userRoleMapper.selectList(new LambdaQueryWrapper<UserRole>()
                         .in(UserRole::getUserId, users.stream().map(SysUser::getId).toList())
                         .orderByAsc(UserRole::getRole))
@@ -287,12 +343,15 @@ public class UserAdminService {
                         u.getUnitId() == null || unitMap.get(u.getUnitId()) == null
                                 ? null : unitMap.get(u.getUnitId()).getName(),
                         roleMap.getOrDefault(u.getId(), List.of()),
-                        u.getIsEnabled(), u.getLastLoginAt(), u.getVersion()))
+                        u.getIsEnabled(), u.getLastLoginAt(), u.getVersion(),
+                        unitIdsByUser.getOrDefault(u.getId(), List.of())))
                 .toList();
     }
 
-    private Map<Long, OrgUnit> unitMapOf(List<SysUser> users) {
-        List<Long> unitIds = users.stream().map(SysUser::getUnitId)
+    private Map<Long, OrgUnit> unitMapOf(List<SysUser> users, Map<Long, List<Long>> unitIdsByUser) {
+        List<Long> unitIds = java.util.stream.Stream.concat(
+                        users.stream().map(SysUser::getUnitId),
+                        unitIdsByUser.values().stream().flatMap(List::stream))
                 .filter(Objects::nonNull).distinct().toList();
         if (unitIds.isEmpty()) {
             return Map.of();

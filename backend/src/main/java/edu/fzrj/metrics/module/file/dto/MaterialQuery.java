@@ -12,8 +12,11 @@ public record MaterialQuery(
         String category,
         String keyword,
         Long ownerScope,
-        Long unitScope,
+        List<Long> unitScopeIds,
         List<Long> fileIds,
         int limit,
         long offset) {
+    public Long unitScope() {
+        return unitScopeIds == null || unitScopeIds.isEmpty() ? null : unitScopeIds.get(0);
+    }
 }

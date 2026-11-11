@@ -1,5 +1,7 @@
 package edu.fzrj.metrics.module.task.service.support;
 
+import java.util.Set;
+
 /**
  * B 任务数据范围纯逻辑判定（PRD 6.2 / API 约定 4.3）：
  * ADMIN / LEADER 全部；UNIT_OWNER 本单元；SCHOOL_OWNER 本人负责的指标（A+ 未设负责人时沿用 A）。
@@ -15,7 +17,7 @@ public final class TaskScopeRules {
      *
      * @param isAllData        是否全校数据范围（ADMIN / LEADER）
      * @param isUnitScope      是否有学院负责人角色
-     * @param isOwnerScope     是否有校级负责人角色
+     * @param isOwnerScope     是否有建设方向负责人角色
      * @param userId           当前用户 id
      * @param userUnitId       当前用户所属单元 id
      * @param taskUnitId       任务承接单元 id
@@ -25,10 +27,17 @@ public final class TaskScopeRules {
     public static boolean canAccess(boolean isAllData, boolean isUnitScope, boolean isOwnerScope,
                                     Long userId, Long userUnitId, Long taskUnitId,
                                     Long indicatorOwnerId, Long topOwnerId) {
+        return canAccessUnits(isAllData, isUnitScope, isOwnerScope, userId,
+                userUnitId == null ? Set.of() : Set.of(userUnitId), taskUnitId, indicatorOwnerId, topOwnerId);
+    }
+
+    public static boolean canAccessUnits(boolean isAllData, boolean isUnitScope, boolean isOwnerScope,
+                                         Long userId, Set<Long> userUnitIds, Long taskUnitId,
+                                         Long indicatorOwnerId, Long topOwnerId) {
         if (isAllData) {
             return true;
         }
-        if (isUnitScope && userUnitId != null && userUnitId.equals(taskUnitId)) {
+        if (isUnitScope && userUnitIds != null && userUnitIds.contains(taskUnitId)) {
             return true;
         }
         return isOwnerScope && userId != null
@@ -41,10 +50,16 @@ public final class TaskScopeRules {
      */
     public static boolean noVisibleScope(boolean isAllData, boolean isUnitScope, boolean isOwnerScope,
                                          Long userUnitId) {
+        return noVisibleUnitScope(isAllData, isUnitScope, isOwnerScope,
+                userUnitId == null ? Set.of() : Set.of(userUnitId));
+    }
+
+    public static boolean noVisibleUnitScope(boolean isAllData, boolean isUnitScope, boolean isOwnerScope,
+                                             Set<Long> userUnitIds) {
         if (isAllData) {
             return false;
         }
-        boolean unitVisible = isUnitScope && userUnitId != null;
+        boolean unitVisible = isUnitScope && userUnitIds != null && !userUnitIds.isEmpty();
         return !unitVisible && !isOwnerScope;
     }
 }

@@ -124,7 +124,7 @@ const DEFAULT_LABELS: Record<string, Record<string, string>> = {
   AdjustmentStatus: {
     PENDING_OWNER_REVIEW: '待初审',
     PENDING_RECEIVER_CONFIRM: '待接收方确认',
-    PENDING_LEADER_APPROVAL: '待校领导审批',
+    PENDING_LEADER_APPROVAL: '待校级负责人审批',
     APPROVED: '已生效',
     REJECTED: '已驳回',
     WITHDRAWN: '已撤回',

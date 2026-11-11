@@ -399,6 +399,13 @@ async function submit(): Promise<void> {
         class="drawer-alert"
         title="该计划已归档，指标只读"
       />
+      <el-alert
+        v-else-if="isEdit && !formReadOnly"
+        type="info"
+        :closable="false"
+        class="drawer-alert"
+        title="可直接修改指标信息、基线值、五年目标和各年度目标；完成值及完成率由审核通过的填报自动汇总，不能在此手工修改"
+      />
 
       <el-form
         ref="formRef"
@@ -408,6 +415,9 @@ async function submit(): Promise<void> {
         label-width="110px"
         class="indicator-form"
       >
+        <el-divider content-position="left" class="form-section-divider">
+          <span class="form-section-title">基础信息</span>
+        </el-divider>
         <el-form-item label="指标名称" prop="name">
           <el-input v-model="form.name" maxlength="200" show-word-limit placeholder="关键产出指标名称" />
         </el-form-item>
@@ -446,6 +456,9 @@ async function submit(): Promise<void> {
           <div class="field-tip">不可量化 A 仅维护基础信息，不生成 B，也不进入填报、审核、核算和完成率统计</div>
         </el-form-item>
 
+        <el-divider content-position="left" class="form-section-divider">
+          <span class="form-section-title">目标与数值</span>
+        </el-divider>
         <template v-if="quantitative">
           <el-form-item label="计量类型" prop="measureType">
             <el-select v-model="form.measureType" style="width: 100%" @change="onMeasureTypeChange">
@@ -493,7 +506,7 @@ async function submit(): Promise<void> {
             <div class="field-tip">基线年的实际值，用于存量 / 增长率计算</div>
           </el-form-item>
 
-          <el-form-item v-if="showTotalTarget" label="五年总量">
+          <el-form-item v-if="showTotalTarget" label="五年目标">
             <div class="total-target-row">
               <el-input-number v-model="form.totalTarget" :min="0" controls-position="right" :precision="2" />
               <el-button
@@ -526,22 +539,28 @@ async function submit(): Promise<void> {
                 />
               </label>
             </div>
+            <div v-if="isPercentCaliber(form.statCaliber)" class="field-tip">
+              按百分数填写，例如 15 表示 15%，保存时系统会自动换算。
+            </div>
             <div
               v-if="form.statCaliber === 'INCREMENT'"
               class="field-tip"
               :class="sumDiff === 0 ? 'sum-ok' : 'sum-error'"
             >
-              各年度之和 {{ formatNumber(yearSum) }}，五年总量 {{ formatNumber(form.totalTarget) }}
+              各年度之和 {{ formatNumber(yearSum) }}，五年目标 {{ formatNumber(form.totalTarget) }}
               <template v-if="sumDiff !== null">（{{ sumDiff === 0 ? '0 ✓' : `差值 ${sumDiff > 0 ? '+' : ''}${sumDiff}` }}）</template>
               ；增量累计型要求两者相等（40002）
             </div>
           </el-form-item>
         </template>
 
+        <el-divider content-position="left" class="form-section-divider">
+          <span class="form-section-title">负责人和填报要求</span>
+        </el-divider>
         <el-form-item label="项目负责人">
           <el-select
             v-model="form.ownerId"
-            placeholder="请选择校级项目负责人"
+            placeholder="请选择建设方向负责人"
             filterable
             clearable
             style="width: 100%"
@@ -605,6 +624,20 @@ async function submit(): Promise<void> {
 
 .drawer-alert {
   margin-bottom: var(--space-4);
+}
+
+.form-section-divider {
+  margin: 8px 0 22px;
+}
+
+.form-section-divider:not(:first-child) {
+  margin-top: 28px;
+}
+
+.form-section-title {
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .field-tip {

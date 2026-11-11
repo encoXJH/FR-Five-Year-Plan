@@ -105,8 +105,8 @@ class MaterialServiceTest {
     }
 
     @Test
-    void 校级负责人不能绑定非本人负责的指标() {
-        login(new LoginUser(2L, "owner2", "校级负责人", null, List.of("SCHOOL_OWNER"), List.of("material:upload")));
+    void 建设方向负责人不能绑定非本人负责的指标() {
+        login(new LoginUser(2L, "owner2", "建设方向负责人", null, List.of("SCHOOL_OWNER"), List.of("material:upload")));
         Indicator indicator = new Indicator();
         indicator.setId(10L);
         indicator.setPlanId(4L);

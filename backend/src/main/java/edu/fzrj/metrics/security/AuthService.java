@@ -16,6 +16,7 @@ import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.mapper.RefreshTokenMapper;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.mapper.UserRoleMapper;
+import edu.fzrj.metrics.module.system.service.UserUnitService;
 import edu.fzrj.metrics.security.dto.MeResponse;
 import edu.fzrj.metrics.security.dto.TokenResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -27,7 +28,10 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 认证：账号密码登录（失败 5 次锁 15 分钟）、旋转刷新、退出、当前用户
@@ -44,6 +48,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final AuditLogMapper auditLogMapper;
     private final ObjectMapper objectMapper;
+    private final UserUnitService userUnitService;
 
     @Value("${app.login.max-fail-count}")
     private int maxFailCount;
@@ -55,7 +60,8 @@ public class AuthService {
     public AuthService(SysUserMapper sysUserMapper, UserRoleMapper userRoleMapper,
                        OrgUnitMapper orgUnitMapper, RefreshTokenMapper refreshTokenMapper,
                        JwtService jwtService, PasswordEncoder passwordEncoder,
-                       AuditLogMapper auditLogMapper, ObjectMapper objectMapper) {
+                       AuditLogMapper auditLogMapper, ObjectMapper objectMapper,
+                       UserUnitService userUnitService) {
         this.sysUserMapper = sysUserMapper;
         this.userRoleMapper = userRoleMapper;
         this.orgUnitMapper = orgUnitMapper;
@@ -64,6 +70,7 @@ public class AuthService {
         this.passwordEncoder = passwordEncoder;
         this.auditLogMapper = auditLogMapper;
         this.objectMapper = objectMapper;
+        this.userUnitService = userUnitService;
     }
 
     /** 账号密码登录 */
@@ -197,14 +204,14 @@ public class AuthService {
     public MeResponse me() {
         LoginUser loginUser = SecurityUtils.getLoginUser();
         SysUser user = sysUserMapper.selectById(loginUser.getUserId());
-        String unitName = null;
-        if (user.getUnitId() != null) {
-            OrgUnit unit = orgUnitMapper.selectById(user.getUnitId());
-            unitName = unit == null ? null : unit.getName();
-        }
+        List<Long> unitIds = loginUser.getUnitIds();
+        List<TokenResponse.UnitRef> units = unitRefs(unitIds);
+        String unitName = user.getUnitId() == null ? null : units.stream()
+                .filter(unit -> user.getUnitId().equals(unit.id())).map(TokenResponse.UnitRef::name)
+                .findFirst().orElse(null);
         MeResponse.UserInfo userInfo = new MeResponse.UserInfo(
-                user.getId(), user.getUsername(), user.getName(),
-                maskPhone(user.getPhone()), user.getEmail(), user.getUnitId(), unitName);
+                user.getId(), user.getUsername(), user.getName(), maskPhone(user.getPhone()), user.getEmail(),
+                user.getUnitId(), unitName, units, unitIds);
         return new MeResponse(userInfo, loginUser.getRoles(), loginUser.getPermissions(),
                 dataScopeOf(loginUser));
     }
@@ -213,12 +220,12 @@ public class AuthService {
     private MeResponse.DataScope dataScopeOf(LoginUser loginUser) {
         List<String> roles = loginUser.getRoles();
         if (roles.contains("ADMIN") || roles.contains("LEADER")) {
-            return new MeResponse.DataScope("ALL", null);
+            return new MeResponse.DataScope("ALL", null, List.of());
         }
         if (roles.contains("SCHOOL_OWNER")) {
-            return new MeResponse.DataScope("OWNER", loginUser.getUnitId());
+            return new MeResponse.DataScope("OWNER", loginUser.getUnitId(), loginUser.getUnitIds());
         }
-        return new MeResponse.DataScope("UNIT", loginUser.getUnitId());
+        return new MeResponse.DataScope("UNIT", loginUser.getUnitId(), loginUser.getUnitIds());
     }
 
     /** 签发 accessToken + refreshToken（入库 SHA-256） */
@@ -238,17 +245,25 @@ public class AuthService {
         record.setIp(ip);
         refreshTokenMapper.insert(record);
 
-        TokenResponse.UnitRef unitRef = null;
-        if (user.getUnitId() != null) {
-            var unit = orgUnitMapper.selectById(user.getUnitId());
-            if (unit != null) {
-                unitRef = new TokenResponse.UnitRef(unit.getId(), unit.getCode(), unit.getName());
-            }
-        }
-        TokenResponse.TokenUser tokenUser = new TokenResponse.TokenUser(user.getId(), user.getName(), unitRef, roles);
+        List<Long> unitIds = userUnitService.unitIdsOf(user.getId());
+        List<TokenResponse.UnitRef> units = unitRefs(unitIds);
+        TokenResponse.UnitRef unitRef = user.getUnitId() == null ? null : units.stream()
+                .filter(unit -> user.getUnitId().equals(unit.id())).findFirst().orElse(null);
+        TokenResponse.TokenUser tokenUser = new TokenResponse.TokenUser(
+                user.getId(), user.getName(), unitRef, roles, units, unitIds);
         return new TokenResponse(accessToken,
                 LocalDateTime.now().plusSeconds(jwtService.getAccessExpireSeconds()),
                 refreshToken, refreshExpiresAt, tokenUser);
+    }
+
+    private List<TokenResponse.UnitRef> unitRefs(List<Long> unitIds) {
+        if (unitIds == null || unitIds.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, OrgUnit> units = orgUnitMapper.selectBatchIds(unitIds).stream()
+                .collect(Collectors.toMap(OrgUnit::getId, Function.identity()));
+        return unitIds.stream().map(units::get).filter(java.util.Objects::nonNull)
+                .map(unit -> new TokenResponse.UnitRef(unit.getId(), unit.getCode(), unit.getName())).toList();
     }
 
     /** 手机号脱敏：保留前 3 后 4 */

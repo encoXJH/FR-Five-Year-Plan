@@ -360,7 +360,7 @@ public class SubmissionService {
      */
     public boolean requireSubmitter(Long unitId, String proxyReason) {
         LoginUser user = SecurityUtils.getLoginUser();
-        if (dataScopeService.isUnitScope(user) && unitId != null && unitId.equals(user.getUnitId())) {
+        if (dataScopeService.isUnitScope(user) && unitId != null && user.getUnitIds().contains(unitId)) {
             return false;
         }
         if (user.getRoles().contains("ADMIN")) {

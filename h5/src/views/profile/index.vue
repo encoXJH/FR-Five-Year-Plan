@@ -105,7 +105,7 @@ const lastRequestId = getLastRequestId()
       @click="logout"
     >退出登录</van-button>
 
-    <p class="version">五年计划指标管理平台 · H5 版</p>
+    <p class="version">双高管理平台 · H5 版</p>
   </div>
 </template>
 

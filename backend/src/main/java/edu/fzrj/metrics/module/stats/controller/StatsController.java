@@ -52,7 +52,7 @@ public class StatsController {
     }
 
     @Operation(summary = "A → A+ → B 逐级下钻（每层带目标/完成值/完成率/达标状态）",
-            description = "已登录；按数据范围过滤（校级负责人只看本人负责指标，学院只看本单元 B）")
+            description = "已登录；按数据范围过滤（建设方向负责人只看本人负责指标，学院只看本单元 B）")
     @GetMapping("/plans/{planId}/stats/tree")
     public List<StatsDtos.TreeNode> tree(@PathVariable Long planId,
                                          @RequestParam(required = false) Integer year) {

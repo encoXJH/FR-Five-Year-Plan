@@ -528,10 +528,10 @@ public class AdjustmentDecisionService {
 
     // ---------------- 处理人 / 前置校验 ----------------
 
-    /** 当前环节处理人判定（70005）：初审=指标有效负责人（空则管理员）；接收确认=接收单元负责人；终审=校领导 */
+    /** 当前环节处理人判定（70005）：初审=指标有效负责人（空则管理员）；接收确认=接收单元负责人；终审=校级负责人 */
     private void requireHandler(ApprovalStep step, LoginUser user) {
-        if (!AdjustmentRules.canDecide(step.getNode(), step.getExpectedApproverId(),
-                step.getExpectedUnitId(), user.getUserId(), user.getUnitId(), user.getRoles())) {
+        if (!AdjustmentRules.canDecideUnits(step.getNode(), step.getExpectedApproverId(),
+                step.getExpectedUnitId(), user.getUserId(), Set.copyOf(user.getUnitIds()), user.getRoles())) {
             throw new BizException(ErrorCode.NOT_CURRENT_APPROVER);
         }
     }
@@ -625,9 +625,9 @@ public class AdjustmentDecisionService {
 
     private static String nodeLabel(String node) {
         return switch (node) {
-            case AdjustmentRules.OWNER_REVIEW -> "校级负责人初审";
+            case AdjustmentRules.OWNER_REVIEW -> "建设方向负责人初审";
             case AdjustmentRules.RECEIVER_CONFIRM -> "接收方确认";
-            case AdjustmentRules.LEADER_APPROVAL -> "校领导审批";
+            case AdjustmentRules.LEADER_APPROVAL -> "校级负责人审批";
             default -> node;
         };
     }

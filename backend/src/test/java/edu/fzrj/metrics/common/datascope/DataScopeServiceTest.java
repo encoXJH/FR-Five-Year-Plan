@@ -43,15 +43,34 @@ class DataScopeServiceTest {
     }
 
     @Test
-    void canAccessUnit_管理员与校领导任意单元通过() {
+    void canAccessUnit_第二关联学院通过且第三学院拒绝() {
+        login(new LoginUser(201L, "multi", "吴昉", UNIT_C01,
+                List.of("UNIT_OWNER"), List.of(), List.of(UNIT_C01, UNIT_C02)));
+
+        assertDoesNotThrow(() -> dataScopeService.canAccessUnit(UNIT_C02));
+        BizException e = assertThrows(BizException.class, () -> dataScopeService.canAccessUnit(303L));
+        assertEquals(20005, e.getErrorCode().getCode());
+    }
+
+    @Test
+    void canAccessUnit_显式关联集合为空时不回退主学院() {
+        login(new LoginUser(201L, "empty", "无关联", UNIT_C01,
+                List.of("UNIT_OWNER"), List.of(), List.of()));
+
+        BizException e = assertThrows(BizException.class, () -> dataScopeService.canAccessUnit(UNIT_C01));
+        assertEquals(20005, e.getErrorCode().getCode());
+    }
+
+    @Test
+    void canAccessUnit_管理员与校级负责人任意单元通过() {
         login(new LoginUser(100L, "admin", "管理员", null, List.of("ADMIN"), List.of()));
         assertDoesNotThrow(() -> dataScopeService.canAccessUnit(UNIT_C02));
-        login(new LoginUser(101L, "leader", "校领导", null, List.of("LEADER"), List.of()));
+        login(new LoginUser(101L, "leader", "校级负责人", null, List.of("LEADER"), List.of()));
         assertDoesNotThrow(() -> dataScopeService.canAccessUnit(UNIT_C02));
     }
 
     @Test
-    void canAccessIndicatorOwner_校级负责人仅本人负责通过() {
+    void canAccessIndicatorOwner_建设方向负责人仅本人负责通过() {
         login(new LoginUser(201L, "owner", "李四", null, List.of("SCHOOL_OWNER"), List.of()));
         assertDoesNotThrow(() -> dataScopeService.canAccessIndicatorOwner(201L));
         BizException e = assertThrows(BizException.class, () -> dataScopeService.canAccessIndicatorOwner(999L));

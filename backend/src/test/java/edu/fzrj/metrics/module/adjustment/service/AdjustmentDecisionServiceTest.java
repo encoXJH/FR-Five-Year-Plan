@@ -86,8 +86,35 @@ class AdjustmentDecisionServiceTest {
     }
 
     @Test
+    void 第二关联学院负责人可完成接收确认() {
+        login(new LoginUser(201L, "multi", "吴昉", 103L,
+                List.of("UNIT_OWNER"), List.of(), List.of(103L, 104L)));
+        Adjustment adjustment = adjustment("PENDING_RECEIVER_CONFIRM", "RECEIVER_CONFIRM");
+        adjustment.setType("TRANSFER");
+        ApprovalStep step = step("RECEIVER_CONFIRM");
+        step.setExpectedUnitId(104L);
+        when(adjustmentMapper.selectOne(any())).thenReturn(adjustment);
+        when(adjustmentService.stepsOf(1L)).thenReturn(List.of(step));
+        when(adjustmentService.itemsOf(1L)).thenReturn(List.of());
+        Plan plan = new Plan();
+        plan.setId(2L);
+        plan.setIsReceiverConfirmRequired(true);
+        when(planService.requirePlan(2L)).thenReturn(plan);
+        when(adjustmentService.bizCode(adjustment)).thenReturn("A01-C04");
+        when(adjustmentMapper.updateById(adjustment)).thenReturn(1);
+        when(adjustmentService.requireAdjustment(1L)).thenReturn(adjustment);
+
+        decisionService.decide(1L, request("APPROVE"));
+
+        assertEquals("PENDING_LEADER_APPROVAL", adjustment.getStatus());
+        assertEquals("LEADER_APPROVAL", adjustment.getCurrentNode());
+        assertEquals("APPROVE", step.getDecision());
+        verify(stepMapper).updateById(step);
+    }
+
+    @Test
     void 历史关联任务在审批写入前被统一守卫拒绝() {
-        login(new LoginUser(201L, "owner", "校级负责人", null,
+        login(new LoginUser(201L, "owner", "建设方向负责人", null,
                 List.of("SCHOOL_OWNER"), List.of()));
         Adjustment adjustment = adjustment("PENDING_OWNER_REVIEW", "OWNER_REVIEW");
         ApprovalStep step = step("OWNER_REVIEW");
@@ -109,7 +136,7 @@ class AdjustmentDecisionServiceTest {
 
     @Test
     void 已归档计划在审批写入前被拒绝() {
-        login(new LoginUser(202L, "leader", "校领导", null,
+        login(new LoginUser(202L, "leader", "校级负责人", null,
                 List.of("LEADER"), List.of()));
         Adjustment adjustment = adjustment("PENDING_LEADER_APPROVAL", "LEADER_APPROVAL");
         when(adjustmentMapper.selectOne(any())).thenReturn(adjustment);
@@ -131,7 +158,7 @@ class AdjustmentDecisionServiceTest {
 
     @Test
     void 最终生效前再次校验转移接收单元资格() {
-        login(new LoginUser(202L, "leader", "校领导", null,
+        login(new LoginUser(202L, "leader", "校级负责人", null,
                 List.of("LEADER"), List.of()));
         Adjustment adjustment = adjustment("PENDING_LEADER_APPROVAL", "LEADER_APPROVAL");
         adjustment.setType("TRANSFER");
@@ -165,7 +192,7 @@ class AdjustmentDecisionServiceTest {
 
     @Test
     void 转回目标时恢复已全部转出的接收任务() {
-        login(new LoginUser(202L, "leader", "校领导", null,
+        login(new LoginUser(202L, "leader", "校级负责人", null,
                 List.of("LEADER"), List.of()));
         Adjustment adjustment = adjustment("PENDING_LEADER_APPROVAL", "LEADER_APPROVAL");
         adjustment.setType("TRANSFER");

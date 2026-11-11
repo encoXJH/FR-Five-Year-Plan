@@ -76,7 +76,7 @@
 | 指标层级 | level | 执行单元 | orgUnit / unit |
 | 分解矩阵 | allocation | 专业群 | majorGroup |
 | 下发 | distribute | 年度核算 | settle |
-| 校级项目负责人 / 学院项目负责人 | owner | 审计日志 | auditLog |
+| 建设方向负责人 / 学院项目负责人 | owner | 审计日志 | auditLog |
 
 ### 2.4 HTTP 方法语义
 
@@ -247,8 +247,8 @@ sequenceDiagram
 
 - **功能权限**：用户可能同时有多个角色（`ADMIN`、`LEADER`、`SCHOOL_OWNER`、`UNIT_OWNER`），服务端按所有角色的**并集**计算权限，前端不需要传当前角色。
 - **数据权限**：
-  - 平台管理员、校领导：全校数据；
-  - 校级项目负责人：自己负责的 A / A+ 及其下属的 B+；
+  - 平台管理员、校级负责人：全校数据；
+  - 建设方向负责人：自己负责的 A / A+ 及其下属的 B+；
   - 学院项目负责人：本单元的 B+ 任务。
 - 前端通过 `GET /auth/me` 获取 `roles`、`permissions`（权限码）和 `dataScope`，用来控制菜单和按钮的显示；**服务端必须对每个请求重新校验**。
 - 访问超出数据范围的资源时，返回 `403` + `20005`。
@@ -583,14 +583,14 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | `TargetDirection` 达成方向 | `HIGHER_BETTER` / `LOWER_BETTER` | 越大越好 / 越小越好 |
 | `RollupMode` 汇总方式 | `AUTO_SUM` / `MANUAL` | 自动汇总 / 手工认定 |
 | `OrgUnitType` 执行单元类型 | `COLLEGE` / `INTERNATIONAL_COLLEGE` / `MARXISM_COLLEGE` / `SCHOOL_OFFICE` | 二级学院 / 国际学院 / 马克思主义学院 / 校办公室 |
-| `Role` 角色 | `ADMIN` / `LEADER` / `SCHOOL_OWNER` / `UNIT_OWNER` | 平台管理员 / 校领导 / 校级项目负责人 / 学院项目负责人 |
+| `Role` 角色 | `ADMIN` / `LEADER` / `SCHOOL_OWNER` / `UNIT_OWNER` | 平台管理员 / 校级负责人 / 建设方向负责人 / 学院项目负责人 |
 | `TaskStatus` B+ 任务状态 | `PENDING_DISTRIBUTION` / `DISTRIBUTED` / `IN_PROGRESS` / `TRANSFERRED_OUT` / `CLOSED` | 待下发 / 已下发 / 执行中 / 已全部转出 / 已结束 |
 | `TaskYearStatus` B+ 年度状态 | `NOT_ACTIVATED` / `IN_PROGRESS` / `PENDING_REVIEW` / `ADJUSTING` / `ACHIEVED` / `NOT_ACHIEVED` / `MAKEUP_PENDING` / `MADE_UP` | 未激活 / 进行中 / 待审核 / 调整审批中 / 已达标 / 未达标 / 待补做 / 已补做 |
 | `SubmissionStatus` 填报状态 | `DRAFT` / `PENDING_REVIEW` / `APPROVED` / `REJECTED` / `WITHDRAWN` | 草稿 / 待审核 / 已通过 / 已驳回 / 已撤回 |
 | `ReviewResult` 审核结果 | `APPROVED` / `REJECTED` | 通过 / 驳回 |
 | `AdjustmentType` 调整类型 | `POSTPONE` / `TRANSFER` / `POSTPONE_TRANSFER` / `TARGET_CHANGE` | 延期 / 转移 / 延期 + 转移 / 目标调整 |
-| `AdjustmentStatus` 调整状态 | `PENDING_OWNER_REVIEW` / `PENDING_RECEIVER_CONFIRM` / `PENDING_LEADER_APPROVAL` / `APPROVED` / `REJECTED` / `WITHDRAWN` | 待初审 / 待接收方确认 / 待校领导审批 / 已生效 / 已驳回 / 已撤回 |
-| `ApprovalNode` 审批环节 | `OWNER_REVIEW` / `RECEIVER_CONFIRM` / `LEADER_APPROVAL` | 校级负责人初审 / 接收方确认 / 校领导审批 |
+| `AdjustmentStatus` 调整状态 | `PENDING_OWNER_REVIEW` / `PENDING_RECEIVER_CONFIRM` / `PENDING_LEADER_APPROVAL` / `APPROVED` / `REJECTED` / `WITHDRAWN` | 待初审 / 待接收方确认 / 待校级负责人审批 / 已生效 / 已驳回 / 已撤回 |
+| `ApprovalNode` 审批环节 | `OWNER_REVIEW` / `RECEIVER_CONFIRM` / `LEADER_APPROVAL` | 建设方向负责人初审 / 接收方确认 / 校级负责人审批 |
 | `Decision` 审批决定 | `APPROVE` / `REJECT` | 同意 / 驳回（拒绝） |
 | `MilestoneStatus` 里程碑状态 | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` / `OVERDUE` / `POSTPONED` | 未开始 / 进行中 / 已完成 / 逾期 / 已延期 |
 | `FileBizType` 文件用途 | `SUBMISSION_ATTACHMENT` / `ADJUSTMENT_ATTACHMENT` / `MILESTONE_ATTACHMENT` / `IMPORT_FILE` | 填报材料 / 调整附件 / 里程碑附件 / 导入文件 |

@@ -29,7 +29,16 @@
             AND ti.id = #{query.indicatorId}
         </if>
         <if test="query.unitId != null">
-            AND COALESCE(s.unit_id, su.unit_id) = #{query.unitId}
+            AND (
+                (fr.biz_type = 'SUBMISSION' AND s.unit_id = #{query.unitId})
+                OR (fr.biz_type != 'SUBMISSION' AND EXISTS (
+                    SELECT 1 FROM user_unit filter_uu
+                    JOIN task filter_task ON filter_task.unit_id = filter_uu.unit_id
+                        AND filter_task.top_indicator_id = ti.id AND filter_task.deleted = 0
+                    WHERE filter_uu.user_id = f.uploaded_by
+                        AND filter_uu.unit_id = #{query.unitId}
+                ))
+            )
         </if>
         <if test="query.taskId != null or query.year != null">
             AND fr.biz_type = 'SUBMISSION'
@@ -54,22 +63,39 @@
                 #{fileId}
             </foreach>
         </if>
-        <if test="query.ownerScope != null or query.unitScope != null">
+        <if test="query.ownerScope != null or (query.unitScopeIds != null and !query.unitScopeIds.isEmpty())">
             AND (
             <if test="query.ownerScope != null">
                 ti.owner_id = #{query.ownerScope}
             </if>
-            <if test="query.ownerScope != null and query.unitScope != null">
+            <if test="query.ownerScope != null and query.unitScopeIds != null and !query.unitScopeIds.isEmpty()">
                 OR
             </if>
-            <if test="query.unitScope != null">
-                (COALESCE(s.unit_id, su.unit_id) = #{query.unitScope}
+            <if test="query.unitScopeIds != null and !query.unitScopeIds.isEmpty()">
+                (
+                (fr.biz_type = 'SUBMISSION'
+                AND s.unit_id IN
+                <foreach collection="query.unitScopeIds" item="scopeUnitId" open="(" separator="," close=")">
+                    #{scopeUnitId}
+                </foreach>
                 AND EXISTS (
                     SELECT 1 FROM task scoped_task
                     WHERE scoped_task.top_indicator_id = ti.id
-                        AND scoped_task.unit_id = #{query.unitScope}
+                        AND scoped_task.unit_id = s.unit_id
                         AND scoped_task.deleted = 0
                 ))
+                OR
+                (fr.biz_type != 'SUBMISSION' AND EXISTS (
+                    SELECT 1 FROM user_unit scoped_uu
+                    JOIN task scoped_task ON scoped_task.unit_id = scoped_uu.unit_id
+                        AND scoped_task.top_indicator_id = ti.id AND scoped_task.deleted = 0
+                    WHERE scoped_uu.user_id = f.uploaded_by
+                        AND scoped_uu.unit_id IN
+                        <foreach collection="query.unitScopeIds" item="scopeUnitId" open="(" separator="," close=")">
+                            #{scopeUnitId}
+                        </foreach>
+                ))
+                )
             </if>
             )
         </if>

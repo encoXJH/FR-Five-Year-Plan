@@ -32,7 +32,7 @@ public class ReviewController {
     }
 
     @Operation(summary = "待审核列表（过滤计划 / 学院 / 指标 / 年度 / 关键字 / 提交时间）",
-            description = "权限：submission:review；校级负责人只待审本人负责指标的")
+            description = "权限：submission:review；建设方向负责人只待审本人负责指标的")
     @GetMapping("/reviews/pending")
     @PreAuthorize("hasAuthority('submission:review')")
     public PageResult<SubmissionDtos.ListItem> pending(@ModelAttribute SubmissionDtos.PendingQuery query) {

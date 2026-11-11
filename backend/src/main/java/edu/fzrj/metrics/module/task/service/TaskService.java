@@ -117,7 +117,7 @@ public class TaskService {
         boolean isAll = dataScopeService.isAllData(user);
         boolean isUnit = dataScopeService.isUnitScope(user);
         boolean isOwner = dataScopeService.isOwnerScope(user);
-        if (TaskScopeRules.noVisibleScope(isAll, isUnit, isOwner, user.getUnitId())) {
+        if (TaskScopeRules.noVisibleUnitScope(isAll, isUnit, isOwner, Set.copyOf(user.getUnitIds()))) {
             return new PageResult<>(List.of(), 0L, query.getPage(), query.getPageSize());
         }
         if (StringUtils.hasText(query.getStatus()) && !TASK_STATUSES.contains(query.getStatus())) {
@@ -136,16 +136,16 @@ public class TaskService {
             return new PageResult<>(List.of(), 0L, query.getPage(), query.getPageSize());
         }
         wrapper.in(Task::getPlanId, existingPlanIds);
-        Long unitId = isUnit ? user.getUnitId() : null;
+        List<Long> unitIds = isUnit ? user.getUnitIds() : List.of();
         List<Long> ownedIndicatorIds = isOwner ? ownedIndicatorIds(user.getUserId()) : List.of();
         if (!isAll) {
-            if (unitId == null && ownedIndicatorIds.isEmpty()) {
+            if (unitIds.isEmpty() && ownedIndicatorIds.isEmpty()) {
                 return new PageResult<>(List.of(), 0L, query.getPage(), query.getPageSize());
             }
             wrapper.and(w -> {
                 boolean hasCondition = false;
-                if (unitId != null) {
-                    w.eq(Task::getUnitId, unitId);
+                if (!unitIds.isEmpty()) {
+                    w.in(Task::getUnitId, unitIds);
                     hasCondition = true;
                 }
                 if (!ownedIndicatorIds.isEmpty()) {
@@ -260,9 +260,9 @@ public class TaskService {
                 topOwner = indicator.getOwnerId();
             }
         }
-        boolean ok = TaskScopeRules.canAccess(
+        boolean ok = TaskScopeRules.canAccessUnits(
                 dataScopeService.isAllData(user), dataScopeService.isUnitScope(user),
-                dataScopeService.isOwnerScope(user), user.getUserId(), user.getUnitId(),
+                dataScopeService.isOwnerScope(user), user.getUserId(), Set.copyOf(user.getUnitIds()),
                 task.getUnitId(), indicatorOwner, topOwner);
         if (!ok) {
             throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
@@ -279,7 +279,7 @@ public class TaskService {
         }
     }
 
-    /** 当前用户作为校级负责人负责的指标 id 集合（A 与 A+；A+ 未设负责人时通过 top_indicator 匹配 A） */
+    /** 当前用户作为建设方向负责人负责的指标 id 集合（A 与 A+；A+ 未设负责人时通过 top_indicator 匹配 A） */
     private List<Long> ownedIndicatorIds(Long userId) {
         return indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
                         .eq(Indicator::getOwnerId, userId)

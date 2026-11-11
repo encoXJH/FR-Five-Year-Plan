@@ -41,9 +41,9 @@ export const FALLBACK_ENUM_LABELS: Record<string, Record<string, string>> = {
     TARGET_CHANGE: '目标调整',
   },
   ApprovalNode: {
-    OWNER_REVIEW: '校级负责人初审',
+    OWNER_REVIEW: '建设方向负责人初审',
     RECEIVER_CONFIRM: '接收方确认',
-    LEADER_APPROVAL: '校领导审批',
+    LEADER_APPROVAL: '校级负责人审批',
   },
   Decision: { APPROVE: '同意', REJECT: '驳回' },
   MilestoneStatus: {
@@ -55,8 +55,8 @@ export const FALLBACK_ENUM_LABELS: Record<string, Record<string, string>> = {
   },
   Role: {
     ADMIN: '平台管理员',
-    LEADER: '校领导',
-    SCHOOL_OWNER: '校级项目负责人',
+    LEADER: '校级负责人',
+    SCHOOL_OWNER: '建设方向负责人',
     UNIT_OWNER: '学院项目负责人',
   },
   OrgUnitType: {

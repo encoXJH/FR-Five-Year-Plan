@@ -92,7 +92,7 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '模板管理', permissions: ['plan:manage'] },
       },
       {
-        // P07 学院工作台（UNIT_OWNER 本单元；管理员 / 校级负责人只读视角）
+        // P07 学院工作台（UNIT_OWNER 本单元；管理员 / 建设方向负责人只读视角）
         path: 'workbench',
         name: 'Workbench',
         component: () => import('@/views/workbench/index.vue'),
@@ -231,7 +231,7 @@ router.beforeEach(async (to) => {
 
 router.afterEach((to) => {
   const title = typeof to.meta.title === 'string' ? to.meta.title : ''
-  document.title = title ? `${title} · 五年计划指标管理平台` : '五年计划指标管理平台'
+  document.title = title ? `${title} · 双高管理平台` : '双高管理平台'
 })
 
 export default router

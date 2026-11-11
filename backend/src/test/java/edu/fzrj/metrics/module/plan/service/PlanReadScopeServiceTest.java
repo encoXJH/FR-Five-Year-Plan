@@ -83,7 +83,7 @@ class PlanReadScopeServiceTest {
     }
 
     @Test
-    void 校级负责人和学院角色按计划取并集() {
+    void 建设方向负责人和学院角色按计划取并集() {
         login("UNIT_OWNER", 31L, "SCHOOL_OWNER");
         when(dataScopeService.isUnitScope(any())).thenReturn(true);
         when(dataScopeService.isOwnerScope(any())).thenReturn(true);

@@ -88,13 +88,14 @@ public class MaterialService {
         LoginUser user = SecurityUtils.getLoginUser();
         int safePage = Math.max(1, page);
         int safePageSize = Math.min(100, Math.max(1, pageSize));
-        Long[] scope = resolveScope(user);
+        MaterialScope scope = resolveScope(user);
         if (scope == null) {
             return new PageResult<>(List.of(), 0L, safePage, safePageSize);
         }
         String normalizedKeyword = StringUtils.hasText(keyword) ? keyword.trim().toLowerCase() : null;
         MaterialQuery query = new MaterialQuery(
-                planId, indicatorId, unitId, taskId, year, category, normalizedKeyword, scope[0], scope[1],
+                planId, indicatorId, unitId, taskId, year, category, normalizedKeyword,
+                scope.ownerScope(), scope.unitScopeIds(),
                 null, safePageSize, (long) (safePage - 1) * safePageSize);
         long total = materialQueryMapper.countMaterials(query);
         List<MaterialDtos.MaterialItem> items = total == 0 ? List.of() : materialQueryMapper.selectMaterials(query)
@@ -104,12 +105,13 @@ public class MaterialService {
 
     /** 按关键产出指标统计材料数量（指标列表内联展示用，避免逐指标请求） */
     public List<MaterialDtos.IndicatorMaterialCount> counts(Long planId) {
-        Long[] scope = resolveScope(SecurityUtils.getLoginUser());
+        MaterialScope scope = resolveScope(SecurityUtils.getLoginUser());
         if (scope == null) {
             return List.of();
         }
         return materialQueryMapper.countByIndicator(
-                new MaterialQuery(planId, null, null, null, null, null, null, scope[0], scope[1], null, 0, 0));
+                new MaterialQuery(planId, null, null, null, null, null, null,
+                        scope.ownerScope(), scope.unitScopeIds(), null, 0, 0));
     }
 
     /** ZIP 创建前在登录上下文逐文件校验材料库可见性，异步线程只接收已授权的文件 ID。 */
@@ -121,7 +123,7 @@ public class MaterialService {
         if (fileIds == null || fileIds.isEmpty()) {
             throw new BizException(ErrorCode.PARAM_INVALID, "请至少选择一份材料");
         }
-        Long[] scope = resolveScope(user);
+        MaterialScope scope = resolveScope(user);
         if (scope == null) {
             throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
         }
@@ -134,7 +136,8 @@ public class MaterialService {
             }
         }
         List<MaterialRow> rows = materialQueryMapper.selectMaterials(new MaterialQuery(
-                null, null, null, null, null, null, null, scope[0], scope[1], fileIds, 0, 0));
+                null, null, null, null, null, null, null,
+                scope.ownerScope(), scope.unitScopeIds(), fileIds, 0, 0));
         Set<Long> visibleIds = rows.stream().map(MaterialRow::getFileId).collect(Collectors.toSet());
         for (Long fileId : fileIds) {
             if (!visibleIds.contains(fileId)) {
@@ -144,17 +147,20 @@ public class MaterialService {
         }
     }
 
-    /** 返回 [负责人范围, 单元范围]；无任何可见范围时返回 null */
-    private Long[] resolveScope(LoginUser user) {
+    private record MaterialScope(Long ownerScope, List<Long> unitScopeIds) {
+    }
+
+    /** 无任何可见范围时返回 null；全校范围以两个空范围表示。 */
+    private MaterialScope resolveScope(LoginUser user) {
         if (user.getRoles().contains("ADMIN") || user.getRoles().contains("LEADER")) {
-            return new Long[]{null, null};
+            return new MaterialScope(null, List.of());
         }
         Long ownerScope = user.getRoles().contains("SCHOOL_OWNER") ? user.getUserId() : null;
-        Long unitScope = user.getRoles().contains("UNIT_OWNER") ? user.getUnitId() : null;
-        if (ownerScope == null && unitScope == null) {
+        List<Long> unitScopeIds = user.getRoles().contains("UNIT_OWNER") ? user.getUnitIds() : List.of();
+        if (ownerScope == null && unitScopeIds.isEmpty()) {
             return null;
         }
-        return new Long[]{ownerScope, unitScope};
+        return new MaterialScope(ownerScope, unitScopeIds);
     }
 
     @Transactional
@@ -233,9 +239,9 @@ public class MaterialService {
                             .eq(Indicator::getDeleted, 0L))
                     .stream().map(Indicator::getId).forEach(visibleIds::add);
         }
-        if (user.getRoles().contains("UNIT_OWNER") && user.getUnitId() != null) {
+        if (user.getRoles().contains("UNIT_OWNER") && !user.getUnitIds().isEmpty()) {
             taskMapper.selectList(new LambdaQueryWrapper<Task>()
-                            .eq(Task::getUnitId, user.getUnitId())
+                            .in(Task::getUnitId, user.getUnitIds())
                             .eq(planId != null, Task::getPlanId, planId)
                             .eq(Task::getDeleted, 0L))
                     .stream().map(Task::getTopIndicatorId).filter(Objects::nonNull).forEach(visibleIds::add);

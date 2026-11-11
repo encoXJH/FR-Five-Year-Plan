@@ -196,7 +196,7 @@ class AdjustmentServiceTest {
 
     @Test
     void 试算按申请人数据范围拒绝他人任务() {
-        LoginUser user = new LoginUser(900L, "owner", "校级负责人", null,
+        LoginUser user = new LoginUser(900L, "owner", "建设方向负责人", null,
                 List.of("SCHOOL_OWNER"), List.of());
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(user, null, List.of()));
@@ -259,7 +259,7 @@ class AdjustmentServiceTest {
 
     @Test
     void 当前待办排除关联历史任务() {
-        LoginUser user = new LoginUser(900L, "leader", "校领导", null,
+        LoginUser user = new LoginUser(900L, "leader", "校级负责人", null,
                 List.of("LEADER"), List.of());
         Adjustment current = adjustment(11L, 101L);
         Adjustment historical = adjustment(12L, 102L);

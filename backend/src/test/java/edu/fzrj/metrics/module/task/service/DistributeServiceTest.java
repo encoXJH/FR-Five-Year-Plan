@@ -317,12 +317,12 @@ class DistributeServiceTest {
     }
 
     @Test
-    void 校级负责人显式下发他人指标时返回20005() {
+    void 建设方向负责人显式下发他人指标时返回20005() {
         candidate.setStatus("DRAFT");
         candidate.setOwnerId(88L);
         TaskDtos.DistributeRequest request = request();
         request.setIndicatorIds(List.of(2L));
-        LoginUser user = new LoginUser(99L, "owner", "校级负责人", null,
+        LoginUser user = new LoginUser(99L, "owner", "建设方向负责人", null,
                 List.of("SCHOOL_OWNER"), List.of("task:distribute"));
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(user, null, List.of()));
@@ -339,12 +339,12 @@ class DistributeServiceTest {
     }
 
     @Test
-    void 校级负责人不能通过所属A下发他人指标() {
+    void 建设方向负责人不能通过所属A下发他人指标() {
         parent.setOwnerId(88L);
         candidate.setOwnerId(99L);
         TaskDtos.DistributeRequest request = request();
         request.setIndicatorIds(List.of(1L));
-        LoginUser user = new LoginUser(99L, "owner", "校级负责人", null,
+        LoginUser user = new LoginUser(99L, "owner", "建设方向负责人", null,
                 List.of("SCHOOL_OWNER"), List.of("task:distribute"));
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(user, null, List.of()));
@@ -373,7 +373,7 @@ class DistributeServiceTest {
     }
 
     @Test
-    void 校级负责人批量下发时仅处理本人负责指标() {
+    void 建设方向负责人批量下发时仅处理本人负责指标() {
         candidate.setStatus("DRAFT");
         candidate.setOwnerId(99L);
         Indicator other = new Indicator();
@@ -388,7 +388,7 @@ class DistributeServiceTest {
         year.setTaskId(21L);
         year.setYear(2026);
         year.setTarget(BigDecimal.TEN);
-        LoginUser user = new LoginUser(99L, "owner", "校级负责人", null,
+        LoginUser user = new LoginUser(99L, "owner", "建设方向负责人", null,
                 List.of("SCHOOL_OWNER"), List.of("task:distribute"));
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(user, null, List.of()));

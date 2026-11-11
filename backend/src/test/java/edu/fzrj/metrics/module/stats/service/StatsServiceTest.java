@@ -300,6 +300,42 @@ class StatsServiceTest {
     }
 
     @Test
+    void 多学院统计汇总两个关联学院的占比且排除第三学院() {
+        login(new LoginUser(201L, "multi", "吴昉", 31L,
+                List.of("UNIT_OWNER"), List.of(), List.of(31L, 32L)));
+        when(dataScopeService.isUnitScope(any())).thenReturn(true);
+        Plan plan = new Plan();
+        plan.setId(11L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2026);
+        Indicator a = indicator(1L, null, "A01", "RATIO");
+        a.setRollupMode("AUTO_SUM");
+        a.setTotalTarget(new BigDecimal("0.8"));
+        Task first = task(101L, 1L, 31L, "A01-C01");
+        Task second = task(102L, 1L, 32L, "A01-C02");
+        Task third = task(103L, 1L, 33L, "A01-C03");
+        TaskYear firstYear = taskYear(1001L, 101L, 1L, 31L, "RATIO", "0", "1", "10");
+        TaskYear secondYear = taskYear(1002L, 102L, 1L, 32L, "RATIO", "0", "9", "20");
+        TaskYear thirdYear = taskYear(1003L, 103L, 1L, 33L, "RATIO", "0", "100", "100");
+        List<TaskYear> visibleYears = List.of(firstYear, secondYear);
+
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(a));
+        when(directionMapper.selectList(any())).thenReturn(List.of());
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of(
+                unit(31L, "C01"), unit(32L, "C02"), unit(33L, "C03")));
+        when(taskMapper.selectList(any())).thenReturn(List.of(first, second, third));
+        when(taskYearMapper.selectList(any())).thenReturn(visibleYears, visibleYears);
+        when(yearTargetMapper.selectList(any())).thenReturn(List.of());
+        when(planYearMapper.selectList(any())).thenReturn(List.of());
+
+        StatsDtos.TreeNode result = statsService.tree(11L, 2026).get(0);
+
+        assertEquals(2, result.children().size());
+        assertEquals(0, new BigDecimal("0.333333").compareTo(result.actualValue()));
+    }
+
+    @Test
     void 纯学院未下发也能访问统计报表() {
         login(new LoginUser(201L, "unit", "学院负责人", 31L, List.of("UNIT_OWNER"), List.of()));
         when(dataScopeService.isUnitScope(any())).thenReturn(true);

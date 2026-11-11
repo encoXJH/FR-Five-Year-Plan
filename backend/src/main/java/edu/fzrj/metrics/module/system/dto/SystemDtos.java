@@ -104,6 +104,8 @@ public final class SystemDtos {
         private String email;
         @JsonSerialize(using = ToStringSerializer.class)
         private Long unitId;
+        @JsonSerialize(contentUsing = ToStringSerializer.class)
+        private List<Long> unitIds;
         @NotEmpty(message = "至少指定一个角色")
         private List<String> roles;
     }
@@ -132,7 +134,14 @@ public final class SystemDtos {
             @JsonSerialize(using = ToStringSerializer.class) Long unitId,
             String unitName,
             List<String> roles,
-            Boolean isEnabled, LocalDateTime lastLoginAt, Integer version) {
+            Boolean isEnabled, LocalDateTime lastLoginAt, Integer version,
+            @JsonSerialize(contentUsing = ToStringSerializer.class) List<Long> unitIds) {
+        public UserItem(Long id, String username, String name, String phone, String email,
+                        Long unitId, String unitName, List<String> roles,
+                        Boolean isEnabled, LocalDateTime lastLoginAt, Integer version) {
+            this(id, username, name, phone, email, unitId, unitName, roles, isEnabled, lastLoginAt, version,
+                    unitId == null ? List.of() : List.of(unitId));
+        }
     }
 
     /** 角色变更响应：含审计用前后快照（不回传给前端） */

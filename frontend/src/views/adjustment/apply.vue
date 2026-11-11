@@ -447,7 +447,7 @@ async function handleSubmit(): Promise<void> {
       submitKey.value,
     )
     submitKey.value = newIdempotencyKey()
-    ElMessage.success('调整申请已提交，等待校级负责人初审')
+    ElMessage.success('调整申请已提交，等待建设方向负责人初审')
     dirty.value = false
     router.push('/adjustments')
   } catch (error) {
@@ -922,7 +922,7 @@ onMounted(async () => {
             </el-button>
           </div>
           <div class="field-tip">
-            审批链：校级负责人初审 → {{ isTransferType(form.type as AdjustmentType) ? '接收方确认 → ' : '' }}校领导审批；审批期间调整额度将被冻结（70004）
+            审批链：建设方向负责人初审 → {{ isTransferType(form.type as AdjustmentType) ? '接收方确认 → ' : '' }}校级负责人审批；审批期间调整额度将被冻结（70004）
           </div>
         </template>
 

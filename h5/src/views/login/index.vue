@@ -92,8 +92,8 @@ async function handleSubmit(): Promise<void> {
 
 const DEMO_ACCOUNTS = [
   { username: 'admin', name: '平台管理员', desc: '全部菜单' },
-  { username: 'leader', name: '校领导', desc: '审批 / 报表' },
-  { username: 'owner1', name: '校级负责人', desc: '指标 / 审核' },
+  { username: 'leader', name: '校级负责人', desc: '审批 / 报表' },
+  { username: 'owner1', name: '建设方向负责人', desc: '指标 / 审核' },
   { username: 'c01', name: '学院负责人', desc: '工作台 / 填报' },
 ] as const
 
@@ -108,7 +108,7 @@ async function quickLogin(username: string): Promise<void> {
   <div class="login-page">
     <div class="login-hero">
       <div class="hero-badge">福州软件职业技术学院</div>
-      <h1>五年计划<br />指标管理平台</h1>
+      <h1>双高管理平台</h1>
       <p>目标量化 · 任务下发 · 过程留痕 · 实时可视</p>
       <div class="hero-circle hero-circle--1" />
       <div class="hero-circle hero-circle--2" />

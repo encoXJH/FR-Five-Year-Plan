@@ -80,7 +80,7 @@ public class Indicator {
     /** 五年目标总量（GROWTH / STOCK 口径为末年应达总量；BOOLEAN 为 1） */
     private BigDecimal totalTarget;
 
-    /** 校级项目负责人，引用 sys_user.id；A+ 为空时沿用上级 A */
+    /** 建设方向负责人，引用 sys_user.id；A+ 为空时沿用上级 A */
     @JsonSerialize(using = ToStringSerializer.class)
     private Long ownerId;
 

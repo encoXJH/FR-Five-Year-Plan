@@ -210,7 +210,7 @@ public class DirectionService {
                 .eq(UserRole::getUserId, leaderId)
                 .eq(UserRole::getRole, "LEADER"));
         if (leaderRoles == null || leaderRoles == 0) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "S 级总负责人必须具有校领导角色");
+            throw new BizException(ErrorCode.PARAM_INVALID, "S 级总负责人必须具有校级负责人角色");
         }
         return leaderId;
     }

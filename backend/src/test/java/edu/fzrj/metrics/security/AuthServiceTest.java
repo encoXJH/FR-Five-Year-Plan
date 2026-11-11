@@ -16,7 +16,11 @@ import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.mapper.RefreshTokenMapper;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.mapper.UserRoleMapper;
+import edu.fzrj.metrics.module.system.service.UserUnitService;
+import edu.fzrj.metrics.security.dto.MeResponse;
+import edu.fzrj.metrics.security.dto.TokenResponse;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +28,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
@@ -68,6 +74,8 @@ class AuthServiceTest {
     private AuditLogMapper auditLogMapper;
     @Mock
     private ObjectMapper objectMapper;
+    @Mock
+    private UserUnitService userUnitService;
 
     @InjectMocks
     private AuthService authService;
@@ -88,6 +96,11 @@ class AuthServiceTest {
         ReflectionTestUtils.setField(authService, "refreshExpireDays", 7);
     }
 
+    @AfterEach
+    void clearSecurityContext() {
+        SecurityContextHolder.clearContext();
+    }
+
     @Test
     void 登录业务异常不会回滚失败次数() throws Exception {
         Transactional transactional = AuthService.class.getMethod(
@@ -95,6 +108,49 @@ class AuthServiceTest {
                 .getAnnotation(Transactional.class);
 
         assertTrue(Arrays.asList(transactional.noRollbackFor()).contains(BizException.class));
+    }
+
+    @Test
+    void 登录响应返回主学院和全部关联学院() {
+        SysUser user = user();
+        user.setUnitId(103L);
+        when(sysUserMapper.selectOne(any())).thenReturn(user);
+        when(passwordEncoder.matches("password", "hash")).thenReturn(true);
+        when(userRoleMapper.selectList(any())).thenReturn(List.of(role("UNIT_OWNER")));
+        when(userUnitService.unitIdsOf(7L)).thenReturn(List.of(103L, 104L));
+        when(orgUnitMapper.selectBatchIds(any())).thenReturn(List.of(
+                unit(103L, "C03", "数字影视传媒产业学院"),
+                unit(104L, "C04", "数据产业学院")));
+        when(jwtService.createAccessToken(any(), any(), anyList())).thenReturn("access-token");
+        when(jwtService.getAccessExpireSeconds()).thenReturn(3600L);
+
+        TokenResponse response = authService.login("user", "password", "WEB", "127.0.0.1");
+
+        assertEquals(103L, response.getUser().unit().id());
+        assertEquals(List.of(103L, 104L), response.getUser().unitIds());
+        assertEquals(List.of("数字影视传媒产业学院", "数据产业学院"),
+                response.getUser().units().stream().map(TokenResponse.UnitRef::name).toList());
+    }
+
+    @Test
+    void 当前用户响应保留混合角色的多学院数据范围() {
+        SysUser user = user();
+        user.setUnitId(103L);
+        when(sysUserMapper.selectById(7L)).thenReturn(user);
+        when(orgUnitMapper.selectBatchIds(any())).thenReturn(List.of(
+                unit(103L, "C03", "数字影视传媒产业学院"),
+                unit(104L, "C04", "数据产业学院")));
+        LoginUser loginUser = new LoginUser(7L, "user", "用户", 103L,
+                List.of("UNIT_OWNER", "SCHOOL_OWNER"), List.of(), List.of(103L, 104L));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(loginUser, null, List.of()));
+
+        MeResponse response = authService.me();
+
+        assertEquals(List.of(103L, 104L), response.getUser().getUnitIds());
+        assertEquals(2, response.getUser().getUnits().size());
+        assertEquals("OWNER", response.getDataScope().getType());
+        assertEquals(List.of(103L, 104L), response.getDataScope().getUnitIds());
     }
 
     @Test
@@ -174,6 +230,21 @@ class AuthServiceTest {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    private static UserRole role(String role) {
+        UserRole userRole = new UserRole();
+        userRole.setUserId(7L);
+        userRole.setRole(role);
+        return userRole;
+    }
+
+    private static OrgUnit unit(Long id, String code, String name) {
+        OrgUnit unit = new OrgUnit();
+        unit.setId(id);
+        unit.setCode(code);
+        unit.setName(name);
+        return unit;
     }
 
     private static SysUser user() {

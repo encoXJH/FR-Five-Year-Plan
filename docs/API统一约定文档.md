@@ -78,7 +78,7 @@
 | 指标层级 | level | 执行单元 | orgUnit / unit |
 | 分解矩阵 | allocation | 专业群 | majorGroup |
 | 下发 | distribute | 年度核算 | settle |
-| 校级项目负责人 / 学院项目负责人 | owner | 审计日志 | auditLog |
+| 建设方向负责人 / 学院项目负责人 | owner | 审计日志 | auditLog |
 
 ### 2.4 HTTP 方法语义
 
@@ -264,8 +264,8 @@ sequenceDiagram
 
 - **功能权限**：用户可能同时有多个角色（`ADMIN`、`LEADER`、`SCHOOL_OWNER`、`UNIT_OWNER`），服务端按所有角色的**并集**计算权限，前端不需要传当前角色。
 - **数据权限**：
-  - 平台管理员、校领导：全校数据；
-  - 校级项目负责人：自己负责的 A / A+ 及其下属的 B，以及这些指标所属的计划；
+  - 平台管理员、校级负责人：全校数据；
+  - 建设方向负责人：自己负责的 A / A+ 及其下属的 B，以及这些指标所属的计划；
   - 学院项目负责人：本单元的 B 任务、这些任务关联的 A / A+ 及父 A，以及所属计划；无关兄弟指标和其他学院任务不可见。
 - 多角色的数据范围同样取并集。计划详情和指标树必须在服务端校验可见范围，不能只依赖前端过滤。
 - S 总负责人只是 `direction.leaderId` 的责任关联，不新增角色或数据范围，不改变 LEADER 全校可见规则及既有调整审批链；S 配置仅限 ADMIN 的 `system:manage`。
@@ -584,11 +584,11 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 
 | 接口 | 说明 |
 | --- | --- |
-| `GET /files/materials/indicators?planId=` | 当前用户可关联的关键产出指标（管理员、校领导全部；校级负责人为本人的 A；学院负责人为本单元承接任务所属 A）。返回 `{ id, code, name, directionName }`，`directionName` 为所属主要建设方向名称（无方向时为 `null`），用于下拉分组展示 |
+| `GET /files/materials/indicators?planId=` | 当前用户可关联的关键产出指标（管理员、校级负责人全部；建设方向负责人为本人的 A；学院负责人为本单元承接任务所属 A）。返回 `{ id, code, name, directionName }`，`directionName` 为所属主要建设方向名称（无方向时为 `null`），用于下拉分组展示 |
 | `GET /files/materials?planId=&indicatorId=&unitId=&taskId=&year=&category=&keyword=&page=&pageSize=` | 跨学院材料分页检索，返回材料名、所属 A 指标、所属学院、类型、大小、上传人、上传时间。`taskId` / `year` 为可选精确定位参数：传入时只返回对应 B 任务、对应年度的材料。SUBMISSION 材料仅在填报审核通过（`APPROVED`）后进入材料库 |
 | `POST /files/materials/bind` | 请求体 `{ indicatorId, fileIds[] }`，把已上传的 `TEMP` 材料绑定到指标并置为 `BOUND`；仅 ADMIN / SCHOOL_OWNER 可操作，学院负责人须通过任务填报上传佐证材料 |
 
-- 数据范围：管理员、校领导可查看全校材料；校级负责人仅本人负责 A 的材料；学院负责人仅本单元材料；越权返回 `20005`。
+- 数据范围：管理员、校级负责人可查看全校材料；建设方向负责人仅本人负责 A 的材料；学院负责人仅本单元材料；越权返回 `20005`。
 - 非本人上传的材料不允许绑定（管理员除外），指标必须存在且在当前用户可关联范围内。
 - 检索结果中的 `indicator` 一律归集到 A 类层级，历史 A+ 材料也会归并展示。
 - 检索由数据库联表完成筛选、数据范围判断、排序和分页，只读取当前页；不得在应用内存加载全量 `file_ref` 后分页。
@@ -624,14 +624,14 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | `TargetDirection` 达成方向 | `HIGHER_BETTER` / `LOWER_BETTER` | 越大越好 / 越小越好 |
 | `RollupMode` 汇总方式 | `AUTO_SUM` / `MANUAL` | 自动汇总 / 手工认定 |
 | `OrgUnitType` 执行单元类型 | `COLLEGE` / `INTERNATIONAL_COLLEGE` / `MARXISM_COLLEGE` / `SCHOOL_OFFICE` | 二级学院 / 国际学院 / 马克思主义学院 / 校办公室 |
-| `Role` 角色 | `ADMIN` / `LEADER` / `SCHOOL_OWNER` / `UNIT_OWNER` | 平台管理员 / 校领导 / 校级项目负责人 / 学院项目负责人 |
+| `Role` 角色 | `ADMIN` / `LEADER` / `SCHOOL_OWNER` / `UNIT_OWNER` | 平台管理员 / 校级负责人 / 建设方向负责人 / 学院项目负责人 |
 | `TaskStatus` B 任务状态 | `PENDING_DISTRIBUTION` / `DISTRIBUTED` / `IN_PROGRESS` / `TRANSFERRED_OUT` / `CLOSED` | 待下发 / 已下发 / 执行中 / 已全部转出 / 已结束 |
 | `TaskYearStatus` B 年度状态 | `NOT_ACTIVATED` / `IN_PROGRESS` / `PENDING_REVIEW` / `ADJUSTING` / `ACHIEVED` / `NOT_ACHIEVED` / `MAKEUP_PENDING` / `MADE_UP` | 未激活 / 进行中 / 待审核 / 调整审批中 / 已达标 / 未达标 / 待补做 / 已补做 |
 | `SubmissionStatus` 填报状态 | `DRAFT` / `PENDING_REVIEW` / `APPROVED` / `REJECTED` / `WITHDRAWN` | 草稿 / 待审核 / 已通过 / 已驳回 / 已撤回 |
 | `ReviewResult` 审核结果 | `APPROVED` / `REJECTED` | 通过 / 驳回 |
 | `AdjustmentType` 调整类型 | `POSTPONE` / `TRANSFER` / `POSTPONE_TRANSFER` / `TARGET_CHANGE` | 延期 / 转移 / 延期 + 转移 / 目标调整 |
-| `AdjustmentStatus` 调整状态 | `PENDING_OWNER_REVIEW` / `PENDING_RECEIVER_CONFIRM` / `PENDING_LEADER_APPROVAL` / `APPROVED` / `REJECTED` / `WITHDRAWN` | 待初审 / 待接收方确认 / 待校领导审批 / 已生效 / 已驳回 / 已撤回 |
-| `ApprovalNode` 审批环节 | `OWNER_REVIEW` / `RECEIVER_CONFIRM` / `LEADER_APPROVAL` | 校级负责人初审 / 接收方确认 / 校领导审批 |
+| `AdjustmentStatus` 调整状态 | `PENDING_OWNER_REVIEW` / `PENDING_RECEIVER_CONFIRM` / `PENDING_LEADER_APPROVAL` / `APPROVED` / `REJECTED` / `WITHDRAWN` | 待初审 / 待接收方确认 / 待校级负责人审批 / 已生效 / 已驳回 / 已撤回 |
+| `ApprovalNode` 审批环节 | `OWNER_REVIEW` / `RECEIVER_CONFIRM` / `LEADER_APPROVAL` | 建设方向负责人初审 / 接收方确认 / 校级负责人审批 |
 | `Decision` 审批决定 | `APPROVE` / `REJECT` | 同意 / 驳回（拒绝） |
 | `MilestoneStatus` 里程碑状态 | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` / `OVERDUE` / `POSTPONED` | 未开始 / 进行中 / 已完成 / 逾期 / 已延期 |
 | `FileBizType` 文件用途 | `SUBMISSION_ATTACHMENT` / `ADJUSTMENT_ATTACHMENT` / `MILESTONE_ATTACHMENT` / `IMPORT_FILE` | 填报材料 / 调整附件 / 里程碑附件 / 导入文件 |
@@ -896,7 +896,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 
 材料 ZIP 导出约定（任务 3 补录）：`POST /exports` 使用 `{ type: "MATERIAL_ZIP", params: { fileIds: string[] } }`，必须携带 `Idempotency-Key`，权限为 `material:view` 且逐文件套用材料库数据范围。`fileIds` 至少 1 项，服务端自动去重；仅允许导出材料库可见的审核通过填报材料及有权访问的指标材料，文件不存在返回 80004，越权或材料不符合材料库可见条件返回 20005。任务创建时固定文件 ID，异步生成 ZIP；执行期间文件或物理内容已删除时任务置为 `FAILED`，`errorMessage` 明确指出缺失文件。ZIP 以 `建设方向/指标编号/材料名` 组织文件，同目录重名自动追加稳定序号，并附 `manifest.csv`（材料名、ZIP 路径、指标、任务、学院、审核通过时间）；路径分隔符和非法文件名字符会被清理。创建和下载分别沿用 `EXPORT`、`FILE_DOWNLOAD` 审计，导出任务及签名地址仅创建人可查询。
 
-统计报表查看约定（2026-11-04 调整）：`stats:view` 授予 ADMIN / LEADER / SCHOOL_OWNER / UNIT_OWNER，统计报表对所有拥有 `stats:view` 的角色开放，不设下发步骤，也不存在报表下发配置接口与 `stats:distribute` 权限。纯学院角色（UNIT_OWNER 且没有全校或校级负责人数据范围）直接访问 overview、tree、by-unit、by-indicator、trend，年度、五年累计和趋势只归集本单元 B，趋势不得读取全校完成值缓存；多角色按数据范围并集访问。大屏和异步 Excel 的内部统计行为不受影响。
+统计报表查看约定（2026-11-04 调整）：`stats:view` 授予 ADMIN / LEADER / SCHOOL_OWNER / UNIT_OWNER，统计报表对所有拥有 `stats:view` 的角色开放，不设下发步骤，也不存在报表下发配置接口与 `stats:distribute` 权限。纯学院角色（UNIT_OWNER 且没有全校或建设方向负责人数据范围）直接访问 overview、tree、by-unit、by-indicator、trend，年度、五年累计和趋势只归集本单元 B，趋势不得读取全校完成值缓存；多角色按数据范围并集访问。大屏和异步 Excel 的内部统计行为不受影响。
 
 甘特图 `data` 固定包含 `plan/years/nodes/milestones/dependencies/criticalPath/graph`。节点以 `kind=indicator/task` 和 `parentId` 组成 A→B，`years[]` 包含目标、审核完成值、完成率、状态和版本；里程碑保留真实 `dueDate/relatedYear`。`criticalPath.status` 为 `EMPTY/OK/NO_DEPENDENCIES/UNSCHEDULED/CYCLE_DETECTED/YEAR_CONFLICT`，关键任务和边以字符串 ID 数组返回。依赖请求体为 `{ predecessorTaskId, successorTaskId, type: "FS" }`；创建必须携带 `Idempotency-Key`。依赖只表达计划关系，不自动修改目标或阻塞填报。
 

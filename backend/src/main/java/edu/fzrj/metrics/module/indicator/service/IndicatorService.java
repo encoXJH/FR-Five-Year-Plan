@@ -189,7 +189,7 @@ public class IndicatorService {
                 direction = requireDirectionInPlan(request.getDirectionId(), planId);
                 indicator.setDirectionId(direction.getId());
             }
-            // 校级负责人创建 A 时未指定负责人，默认本人（草稿也受数据范围约束）
+            // 建设方向负责人创建 A 时未指定负责人，默认本人（草稿也受数据范围约束）
             Long ownerId = request.getOwnerId();
             if (ownerId == null) {
                 LoginUser loginUser = SecurityUtils.getLoginUser();
@@ -545,7 +545,7 @@ public class IndicatorService {
         for (Indicator indicator : all) {
             String prefix = indicator.getCode();
             if (effectiveOwners.get(indicator.getId()) == null) {
-                errors.add(new FieldError(prefix + ".ownerId", prefix + " 未指定校级项目负责人"));
+                errors.add(new FieldError(prefix + ".ownerId", prefix + " 未指定建设方向负责人"));
             }
             if (!IndicatorRules.isQuantifiable(indicator.getLevel(), indicator.getIsQuantifiable())) {
                 continue;
@@ -803,9 +803,9 @@ public class IndicatorService {
                 && user.getUserId().equals(effectiveOwnerOf(indicator)))) {
             return;
         }
-        if (dataScopeService.isUnitScope(user) && user.getUnitId() != null) {
+        if (dataScopeService.isUnitScope(user) && !user.getUnitIds().isEmpty()) {
             Long count = taskMapper.selectCount(taskRelationQuery(indicator)
-                    .eq(Task::getUnitId, user.getUnitId()));
+                    .in(Task::getUnitId, user.getUnitIds()));
             if (count != null && count > 0) {
                 return;
             }
@@ -820,10 +820,10 @@ public class IndicatorService {
                 || (dataScopeService.isOwnerScope(user)
                 && user.getUserId().equals(effectiveOwnerOf(indicator)));
         if (!ownerAccess) {
-            if (!dataScopeService.isUnitScope(user) || user.getUnitId() == null) {
+            if (!dataScopeService.isUnitScope(user) || user.getUnitIds().isEmpty()) {
                 return List.of();
             }
-            query.eq(Task::getUnitId, user.getUnitId());
+            query.in(Task::getUnitId, user.getUnitIds());
         }
         return taskMapper.selectList(query.orderByAsc(Task::getCode));
     }

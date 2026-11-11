@@ -83,14 +83,14 @@ public class DictController {
             m.put("RollupMode", items("AUTO_SUM:自动汇总", "MANUAL:手工认定"));
             m.put("OrgUnitType", items("COLLEGE:二级学院", "INTERNATIONAL_COLLEGE:国际学院", "MARXISM_COLLEGE:马克思主义学院", "SCHOOL_OFFICE:校办公室"));
             m.put("OrgDepartmentCategory", items("SCHOOL:学校", "LEADERSHIP:学校领导", "FUNCTIONAL:职能部门", "TEACHING:教学单位", "ENTERPRISE:校企合作", "SUPERMARKET:学校超市", "PROPERTY:物业", "CLINIC:医务室", "BUSINESS:商务"));
-            m.put("Role", items("ADMIN:平台管理员", "LEADER:校领导", "SCHOOL_OWNER:校级项目负责人", "UNIT_OWNER:学院项目负责人"));
+            m.put("Role", items("ADMIN:平台管理员", "LEADER:校级负责人", "SCHOOL_OWNER:建设方向负责人", "UNIT_OWNER:学院项目负责人"));
             m.put("TaskStatus", items("PENDING_DISTRIBUTION:待下发", "DISTRIBUTED:已下发", "IN_PROGRESS:执行中", "TRANSFERRED_OUT:已全部转出", "CLOSED:已结束"));
             m.put("TaskYearStatus", items("NOT_ACTIVATED:未激活", "IN_PROGRESS:进行中", "PENDING_REVIEW:待审核", "ADJUSTING:调整审批中", "ACHIEVED:已达标", "NOT_ACHIEVED:未达标", "MAKEUP_PENDING:待补做", "MADE_UP:已补做"));
             m.put("SubmissionStatus", items("DRAFT:草稿", "PENDING_REVIEW:待审核", "APPROVED:已通过", "REJECTED:已驳回", "WITHDRAWN:已撤回"));
             m.put("ReviewResult", items("APPROVED:通过", "REJECTED:驳回"));
             m.put("AdjustmentType", items("POSTPONE:延期", "TRANSFER:转移", "POSTPONE_TRANSFER:延期+转移", "TARGET_CHANGE:目标调整"));
-            m.put("AdjustmentStatus", items("PENDING_OWNER_REVIEW:待初审", "PENDING_RECEIVER_CONFIRM:待接收方确认", "PENDING_LEADER_APPROVAL:待校领导审批", "APPROVED:已生效", "REJECTED:已驳回", "WITHDRAWN:已撤回"));
-            m.put("ApprovalNode", items("OWNER_REVIEW:校级负责人初审", "RECEIVER_CONFIRM:接收方确认", "LEADER_APPROVAL:校领导审批"));
+            m.put("AdjustmentStatus", items("PENDING_OWNER_REVIEW:待初审", "PENDING_RECEIVER_CONFIRM:待接收方确认", "PENDING_LEADER_APPROVAL:待校级负责人审批", "APPROVED:已生效", "REJECTED:已驳回", "WITHDRAWN:已撤回"));
+            m.put("ApprovalNode", items("OWNER_REVIEW:建设方向负责人初审", "RECEIVER_CONFIRM:接收方确认", "LEADER_APPROVAL:校级负责人审批"));
             m.put("Decision", items("APPROVE:同意", "REJECT:驳回（拒绝）"));
             m.put("MilestoneStatus", items("NOT_STARTED:未开始", "IN_PROGRESS:进行中", "COMPLETED:已完成", "OVERDUE:逾期", "POSTPONED:已延期"));
             m.put("FileBizType", items("SUBMISSION_ATTACHMENT:填报材料", "ADJUSTMENT_ATTACHMENT:调整附件", "MILESTONE_ATTACHMENT:里程碑附件", "IMPORT_FILE:导入文件"));

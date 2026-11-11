@@ -620,7 +620,7 @@ function applyPicker(value: string): void {
               is-link
               :disabled="formReadOnly"
               :model-value="ownerLabel"
-              placeholder="请选择校级项目负责人"
+              placeholder="请选择建设方向负责人"
               @click="picker = 'owner'"
             />
             <p class="field-tip">留空默认由本人负责</p>

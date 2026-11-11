@@ -28,7 +28,7 @@ public class ApprovalStep {
     /** 环节顺序号（从 1 开始） */
     private Integer seq;
 
-    /** 审批环节：OWNER_REVIEW 校级负责人初审 / RECEIVER_CONFIRM 接收方确认 / LEADER_APPROVAL 校领导审批 */
+    /** 审批环节：OWNER_REVIEW 建设方向负责人初审 / RECEIVER_CONFIRM 接收方确认 / LEADER_APPROVAL 校级负责人审批 */
     private String node;
 
     /** 期望处理人，引用 sys_user.id；RECEIVER_CONFIRM 环节可为空（按接收单元负责人判断） */

@@ -10,7 +10,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * MANUAL 汇总方式 A 指标的人工认定（PRD 4.5：A 为 MANUAL 时由校级项目负责人手工认定）
+ * MANUAL 汇总方式 A 指标的人工认定（PRD 4.5：A 为 MANUAL 时由建设方向负责人手工认定）
  */
 public final class ManualValueDtos {
 

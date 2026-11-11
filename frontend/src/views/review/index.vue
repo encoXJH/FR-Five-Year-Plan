@@ -37,7 +37,7 @@ import type {
 const route = useRoute()
 const userStore = useUserStore()
 
-/** 管理员代审（非校级负责人）：代审原因选填，填写后写入审计日志 */
+/** 管理员代审（非建设方向负责人）：代审原因选填，填写后写入审计日志 */
 const isDelegateReview = computed(
   () => userStore.roles.includes('ADMIN') && !userStore.roles.includes('SCHOOL_OWNER'),
 )

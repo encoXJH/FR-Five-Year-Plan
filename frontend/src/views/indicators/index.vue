@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { ArrowDown, Delete, Expand, Fold } from '@element-plus/icons-vue'
+import { ArrowDown, Delete, Edit, Expand, Fold } from '@element-plus/icons-vue'
 import StatusTag from '@/components/StatusTag.vue'
 import ResponsiveRecordView from '@/components/ResponsiveRecordView.vue'
 import FilePreviewDrawer from '@/components/FilePreviewDrawer.vue'
@@ -104,6 +104,7 @@ const filters = reactive({
 })
 
 const canEdit = computed(() => userStore.can('indicator:edit'))
+const canAdjust = computed(() => userStore.can('adjustment:apply'))
 const canAllocate = computed(() => userStore.can('allocation:edit'))
 const isAdmin = computed(() => userStore.roles.includes('ADMIN'))
 const isArchived = computed(() => plan.value?.status === 'ARCHIVED')
@@ -768,7 +769,25 @@ function hasDistributedScope(row: IndicatorTreeNode): boolean {
 function canEditRow(row: IndicatorTreeNode): boolean {
   return canEdit.value && !readOnly.value && !hasDistributedScope(row)
 }
-function openEdit(row: Indicator): void {
+function canOpenEdit(row: IndicatorTreeNode): boolean {
+  return canEditRow(row) || (canAdjust.value && !readOnly.value && hasDistributedScope(row))
+}
+function editActionHint(row: IndicatorTreeNode): string {
+  if (readOnly.value) return '计划已归档，指标及目标只读'
+  if (hasDistributedScope(row)) {
+    return canAdjust.value
+      ? '已下发指标通过调整申请修改目标，审批通过后生效'
+      : '已下发指标需通过调整申请修改目标'
+  }
+  return ''
+}
+function openEdit(row: IndicatorTreeNode): void {
+  if (hasDistributedScope(row)) {
+    if (!canAdjust.value || readOnly.value) return
+    void router.push({ path: '/adjustments/apply', query: { indicatorId: row.id } })
+    return
+  }
+  if (!canEditRow(row)) return
   editingIndicator.value = row
   drawerVisible.value = true
 }
@@ -1153,6 +1172,18 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
                     <div class="row-actions a-expansion-actions">
                       <el-button link type="primary" @click="goDetail(row.indicator)">详情</el-button>
                       <el-button link type="primary" :disabled="!canAllocateRow(row.indicator)" @click="goAllocation(row.indicator)">{{ allocationButtonText }}</el-button>
+                      <el-tooltip
+                        v-if="canEdit"
+                        :disabled="canEditRow(row.indicator)"
+                        :content="editActionHint(row.indicator)"
+                        placement="top"
+                      >
+                        <span class="edit-action-wrapper">
+                          <el-button link type="primary" :disabled="!canOpenEdit(row.indicator)" @click="openEdit(row.indicator)">
+                            <el-icon><Edit /></el-icon>{{ hasDistributedScope(row.indicator) ? '调整' : '编辑' }}
+                          </el-button>
+                        </span>
+                      </el-tooltip>
                       <el-dropdown
                         v-if="activeRowActionsId === row.id"
                         ref="rowActionsDropdownRef"
@@ -1162,7 +1193,6 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
                         <el-button link type="primary">更多<el-icon :size="12"><ArrowDown /></el-icon></el-button>
                         <template #dropdown>
                           <el-dropdown-menu>
-                            <el-dropdown-item :disabled="!canEditRow(row.indicator)" @click="openEdit(row.indicator)">编辑</el-dropdown-item>
                             <el-dropdown-item :disabled="!canEditRow(row.indicator)" class="danger-item" @click="handleDelete(row.indicator)"><span class="danger-text">删除</span></el-dropdown-item>
                           </el-dropdown-menu>
                         </template>
@@ -1171,7 +1201,21 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
                     </div>
                     <div class="a-quant-summary">
                       <div><span>统计口径</span><StatusTag v-if="row.indicator.statCaliber" kind="StatCaliber" :value="row.indicator.statCaliber" /><template v-else>—</template></div>
-                      <div><span>五年目标</span><strong>{{ totalTargetDisplay(row.indicator) }}</strong><RollupBadge v-if="row.indicator.rollupMode" :mode="row.indicator.rollupMode" /></div>
+                      <div>
+                        <span>五年目标</span>
+                        <button
+                          v-if="row.indicator.isQuantifiable && canOpenEdit(row.indicator)"
+                          type="button"
+                          class="editable-value"
+                          :aria-label="`编辑 ${row.indicator.code} 的五年目标和各年度目标`"
+                          title="点击维护目标；已下发指标将进入调整申请"
+                          @click="openEdit(row.indicator)"
+                        >
+                          <strong>{{ totalTargetDisplay(row.indicator) }}</strong>
+                        </button>
+                        <strong v-else>{{ totalTargetDisplay(row.indicator) }}</strong>
+                        <RollupBadge v-if="row.indicator.rollupMode" :mode="row.indicator.rollupMode" />
+                      </div>
                       <div><span>当前完成</span><strong :class="completionLevelClass(aCurrentLevel(row.id))">{{ aStats(row.id)?.actualValue ?? '—' }}</strong></div>
                       <div><span>当年完成率</span><strong :class="completionLevelClass(aCurrentLevel(row.id))">{{ formatPercent(aStats(row.id)?.completionRate) }}</strong></div>
                       <div><span>五年累计</span><strong :class="completionLevelClass(aCumulativeLevel(row.indicator))">{{ formatPercent(aStats(row.id)?.cumulativeRate) }}</strong></div>
@@ -1181,7 +1225,20 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
                       <div v-for="year in years" :key="year" class="year-target-cell">
                         <div class="year-target-head">
                           <span :class="{ 'current-year': year === currentYear }">{{ year }}</span>
-                          <span class="year-target-label">目标 <strong>{{ formatTargetValue(targetOf(row.indicator, year), row.indicator.statCaliber) }}</strong></span>
+                          <span class="year-target-label">
+                            目标
+                            <button
+                              v-if="row.indicator.isQuantifiable && canOpenEdit(row.indicator)"
+                              type="button"
+                              class="editable-value year-target-value"
+                              :aria-label="`编辑 ${row.indicator.code} 的 ${year} 年目标`"
+                              :title="`点击维护 ${year} 年目标；已下发指标将进入调整申请`"
+                              @click="openEdit(row.indicator)"
+                            >
+                              <strong>{{ formatTargetValue(targetOf(row.indicator, year), row.indicator.statCaliber) }}</strong>
+                            </button>
+                            <strong v-else>{{ formatTargetValue(targetOf(row.indicator, year), row.indicator.statCaliber) }}</strong>
+                          </span>
                         </div>
                         <div class="year-actual-line">
                           <span>完成 <strong :class="completionLevelClass(yearCompletionLevel(row.indicator, year))">{{ yearActualDisplay(row.indicator, year) }}</strong></span>
@@ -1395,6 +1452,18 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
                   <div class="row-actions a-expansion-actions">
                     <el-button link type="primary" @click="goDetail(node.indicator)">详情</el-button>
                     <el-button link type="primary" :disabled="!canAllocateRow(node.indicator)" @click="goAllocation(node.indicator)">{{ allocationButtonText }}</el-button>
+                    <el-tooltip
+                      v-if="canEdit"
+                      :disabled="canEditRow(node.indicator)"
+                      :content="editActionHint(node.indicator)"
+                      placement="top"
+                    >
+                      <span class="edit-action-wrapper">
+                        <el-button link type="primary" :disabled="!canOpenEdit(node.indicator)" @click="openEdit(node.indicator)">
+                          <el-icon><Edit /></el-icon>{{ hasDistributedScope(node.indicator) ? '调整' : '编辑' }}
+                        </el-button>
+                      </span>
+                    </el-tooltip>
                     <el-dropdown
                       v-if="activeRowActionsId === node.id"
                       ref="rowActionsDropdownRef"
@@ -1404,7 +1473,6 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
                       <el-button link type="primary">更多<el-icon :size="12"><ArrowDown /></el-icon></el-button>
                       <template #dropdown>
                         <el-dropdown-menu>
-                          <el-dropdown-item :disabled="!canEditRow(node.indicator)" @click="openEdit(node.indicator)">编辑</el-dropdown-item>
                           <el-dropdown-item :disabled="!canEditRow(node.indicator)" class="danger-item" @click="handleDelete(node.indicator)"><span class="danger-text">删除</span></el-dropdown-item>
                         </el-dropdown-menu>
                       </template>
@@ -1414,7 +1482,20 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
 
                   <div class="a-quant-summary">
                     <div><span>统计口径</span><StatusTag v-if="node.indicator.statCaliber" kind="StatCaliber" :value="node.indicator.statCaliber" /><template v-else>—</template></div>
-                    <div><span>五年目标</span><strong>{{ totalTargetDisplay(node.indicator) }}</strong></div>
+                    <div>
+                      <span>五年目标</span>
+                      <button
+                        v-if="node.indicator.isQuantifiable && canOpenEdit(node.indicator)"
+                        type="button"
+                        class="editable-value"
+                        :aria-label="`编辑 ${node.indicator.code} 的五年目标和各年度目标`"
+                        title="点击维护目标；已下发指标将进入调整申请"
+                        @click="openEdit(node.indicator)"
+                      >
+                        <strong>{{ totalTargetDisplay(node.indicator) }}</strong>
+                      </button>
+                      <strong v-else>{{ totalTargetDisplay(node.indicator) }}</strong>
+                    </div>
                     <div><span>当前完成</span><strong :class="completionLevelClass(aCurrentLevel(node.id))">{{ aStats(node.id)?.actualValue ?? '—' }}</strong></div>
                     <div><span>当年完成率</span><strong :class="completionLevelClass(aCurrentLevel(node.id))">{{ formatPercent(aStats(node.id)?.completionRate) }}</strong></div>
                     <div><span>五年累计</span><strong :class="completionLevelClass(aCumulativeLevel(node.indicator))">{{ formatPercent(aStats(node.id)?.cumulativeRate) }}</strong></div>
@@ -1424,7 +1505,20 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
                     <div v-for="year in years" :key="year" class="year-target-cell">
                       <div class="year-target-head">
                         <span :class="{ 'current-year': year === currentYear }">{{ year }}</span>
-                        <span class="year-target-label">目标 <strong>{{ formatTargetValue(targetOf(node.indicator, year), node.indicator.statCaliber) }}</strong></span>
+                        <span class="year-target-label">
+                          目标
+                          <button
+                            v-if="node.indicator.isQuantifiable && canOpenEdit(node.indicator)"
+                            type="button"
+                            class="editable-value year-target-value"
+                            :aria-label="`编辑 ${node.indicator.code} 的 ${year} 年目标`"
+                            :title="`点击维护 ${year} 年目标；已下发指标将进入调整申请`"
+                            @click="openEdit(node.indicator)"
+                          >
+                            <strong>{{ formatTargetValue(targetOf(node.indicator, year), node.indicator.statCaliber) }}</strong>
+                          </button>
+                          <strong v-else>{{ formatTargetValue(targetOf(node.indicator, year), node.indicator.statCaliber) }}</strong>
+                        </span>
                       </div>
                       <div class="year-actual-line">
                         <span>完成 <strong :class="completionLevelClass(yearCompletionLevel(node.indicator, year))">{{ yearActualDisplay(node.indicator, year) }}</strong></span>
@@ -1810,8 +1904,30 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
 .task-error-state { color: var(--el-color-danger); }
 .row-actions { display: flex; align-items: center; justify-content: flex-start; gap: 2px 8px; flex-wrap: wrap; }
 .row-actions :deep(.el-button) { margin: 0; padding: 0; }
+.edit-action-wrapper { display: inline-flex; }
 .a-expansion-actions { justify-content: flex-start; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--indicator-line); }
 .danger-text { color: var(--el-color-danger); }
+.editable-value {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--el-color-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.editable-value strong {
+  color: inherit !important;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.editable-value:hover { background: var(--el-color-primary-light-9); }
+.editable-value:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
+.year-target-value { margin-left: 2px; }
 
 .a-inline-expansion {
   min-width: 0;

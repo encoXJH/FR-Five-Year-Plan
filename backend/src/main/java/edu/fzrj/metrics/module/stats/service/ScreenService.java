@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
 /**
  * 可视化大屏聚合（API 约定 15.8，PRD 5.9）：一次返回大屏全部数据。
  * 本地内存缓存（ConcurrentHashMap + TTL，默认 120 秒，app.screen.cache-seconds 可配），
- * key = planId:year；大屏权限 screen:view 仅管理员 / 校领导（全校范围），缓存不含用户维度。
+ * key = planId:year；大屏权限 screen:view 仅管理员 / 校级负责人（全校范围），缓存不含用户维度。
  * 年度核算 / 解锁 / 五年核算写操作后由 SettlementService 调用 evict 失效。
  */
 @Service
