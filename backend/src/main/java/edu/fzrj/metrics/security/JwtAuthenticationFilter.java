@@ -5,6 +5,7 @@ import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.system.entity.UserRole;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.mapper.UserRoleMapper;
+import edu.fzrj.metrics.module.system.service.RolePermissionService;
 import edu.fzrj.metrics.module.system.service.UserUnitService;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
@@ -38,13 +39,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final SysUserMapper sysUserMapper;
     private final UserRoleMapper userRoleMapper;
     private final UserUnitService userUnitService;
+    private final RolePermissionService rolePermissionService;
 
     public JwtAuthenticationFilter(JwtService jwtService, SysUserMapper sysUserMapper,
-                                   UserRoleMapper userRoleMapper, UserUnitService userUnitService) {
+                                   UserRoleMapper userRoleMapper, UserUnitService userUnitService,
+                                   RolePermissionService rolePermissionService) {
         this.jwtService = jwtService;
         this.sysUserMapper = sysUserMapper;
         this.userRoleMapper = userRoleMapper;
         this.userUnitService = userUnitService;
+        this.rolePermissionService = rolePermissionService;
     }
 
     @Override
@@ -65,7 +69,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     List<String> roles = userRoleMapper.selectList(new LambdaQueryWrapper<UserRole>()
                                     .eq(UserRole::getUserId, userId))
                             .stream().map(UserRole::getRole).toList();
-                    List<String> permissions = RolePermissions.permissionsOf(roles);
+                    List<String> permissions = rolePermissionService.configuredPermissionsOf(roles);
                     LoginUser loginUser = new LoginUser(user.getId(), user.getUsername(), user.getName(),
                             user.getUnitId(), roles, permissions, userUnitService.unitIdsOf(userId));
                     UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(

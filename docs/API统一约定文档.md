@@ -270,6 +270,8 @@ sequenceDiagram
 - 多角色的数据范围同样取并集。计划详情和指标树必须在服务端校验可见范围，不能只依赖前端过滤。
 - S 总负责人只是 `direction.leaderId` 的责任关联，不新增角色或数据范围，不改变 LEADER 全校可见规则及既有调整审批链；S 配置仅限 ADMIN 的 `system:manage`。
 - 前端通过 `GET /auth/me` 获取 `roles`、`permissions`（权限码）和 `dataScope`，用来控制菜单和按钮的显示；**服务端必须对每个请求重新校验**。
+- 角色功能权限由 ADMIN 在 `GET /PUT /role-permissions` 中按四类固定角色配置。权限目录使用服务端白名单：`configurableRoles` 允许开关，`lockedRoles` 必须保留，其他角色组合禁止授予；ADMIN 的全部权限锁定。多角色仍取配置后的权限并集，服务端每次认证时重新读取，相关用户刷新页面或重新登录后更新前端展示。
+- 角色权限配置只改变功能权限，不改变角色编码、数据范围、资源归属、固定调整审批链以及目标调整、材料绑定等专属业务规则。
 - 访问超出数据范围的资源时，返回 `403` + `20005`。
 
 **权限码命名**：`{资源}:{动作}`，例如：
@@ -286,9 +288,10 @@ sequenceDiagram
 | `adjustment:apply` | 发起延期 / 转移 |
 | `adjustment:decide` | 初审、确认接收、审批 |
 | `settlement:manage` | 年度核算、解锁、五年核算 |
-| `screen:view` | 查看大屏 |
+| `screen:view` / `stats:view` | 查看大屏 / 统计报表 |
 | `audit-log:view` / `audit-log:export` | 查看 / 导出日志 |
 | `system:manage` | 系统管理 |
+| `material:view` / `material:upload` | 查看材料 / 上传业务材料（直接绑定材料库仍受业务角色限制） |
 
 ---
 
@@ -965,6 +968,8 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | GET | `/users/options` | 用户选项（负责人选择等轻量场景，返回启用用户的 id/name/username） | 已登录 |
 | PATCH | `/users/{userId}` | 修改或停用用户 | `system:manage` |
 | PUT | `/users/{userId}/roles` | 设置用户角色（必须带 `reason`） | `system:manage` |
+| GET | `/role-permissions` | 查询四类固定角色的功能权限矩阵、权限目录和各角色 `version`；`configurableRoles` 为可配置组合，`lockedRoles` 为锁定组合 | `system:manage`（仅 ADMIN） |
+| PUT | `/role-permissions/{role}` | 整体设置指定角色的功能权限 `{ permissions, reason, version }`；核心权限不可移除、未开放组合不可授予，冲突返回 `10005`，前后快照写入 `PERMISSION_CHANGE` 审计 | `system:manage`（仅 ADMIN） |
 | POST | `/users/{userId}/password-reset` | 重置用户密码（重置后吊销该用户全部 refreshToken） | `system:manage` |
 | GET | `/dicts/enums` | 全部枚举的中文名称 | 已登录 |
 | GET / PUT | `/dicts/{dictType}` | 字典（计量单位等） | 已登录 / `system:manage` |

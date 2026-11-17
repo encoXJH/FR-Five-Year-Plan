@@ -7,12 +7,16 @@ import type {
   OrgDepartmentNode,
   OrgUnitAdmin,
   OrgUnitSaveRequest,
+  RoleItem,
+  RolePermissionResponse,
+  RolePermissionSaveRequest,
   SetUserRolesRequest,
   SettingPatchItem,
   SystemSettings,
   SystemUser,
   SystemUserSaveRequest,
 } from '@/types/system'
+import type { Role } from '@/types/enums'
 
 /** GET /org-departments/tree（system:manage；全校组织架构只读树） */
 export function getOrgDepartmentTree(): Promise<OrgDepartmentNode[]> {
@@ -105,4 +109,17 @@ export function getSettings(): Promise<SystemSettings> {
 /** PATCH /settings（system:manage；逐项 key + value + version，任一失败整体不落库） */
 export function updateSettings(items: SettingPatchItem[]): Promise<SystemSettings> {
   return http.patch('/settings', { items })
+}
+
+/** GET /role-permissions（角色权限定义及四类角色的当前授权） */
+export function getRolePermissions(): Promise<RolePermissionResponse> {
+  return http.get('/role-permissions')
+}
+
+/** PUT /role-permissions/{role}（整体替换该角色权限，带原因和乐观锁版本） */
+export function updateRolePermissions(
+  role: Role,
+  data: RolePermissionSaveRequest,
+): Promise<RoleItem> {
+  return http.put(`/role-permissions/${role}`, data)
 }

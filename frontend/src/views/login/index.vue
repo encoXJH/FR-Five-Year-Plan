@@ -104,21 +104,6 @@ async function handleSubmit(): Promise<void> {
   }
 }
 
-// ---------- 演示账号快捷登录（验收环境显示） ----------
-const showDemoAccounts = true
-
-const DEMO_ACCOUNTS = [
-  { username: 'admin', name: '平台管理员', desc: '全部菜单' },
-  { username: 'leader', name: '校级负责人', desc: '审批 / 报表 / 大屏' },
-  { username: 'owner1', name: '建设方向负责人', desc: '指标 / 审核 / 初审' },
-  { username: 'c01', name: '学院负责人（智能产业学院）', desc: '工作台 / 填报' },
-] as const
-
-async function quickLogin(username: string): Promise<void> {
-  form.username = username
-  form.password = 'fzrj@12345678'
-  await handleSubmit()
-}
 </script>
 
 <template>
@@ -185,23 +170,6 @@ async function quickLogin(username: string): Promise<void> {
           <p class="feishu-hint">在飞书工作台打开可自动免登</p>
         </template>
 
-        <!-- 演示账号一键登录：验收环境显示 -->
-        <template v-if="showDemoAccounts">
-          <el-divider class="feishu-divider">演示账号</el-divider>
-          <div class="demo-accounts">
-            <el-button
-              v-for="account in DEMO_ACCOUNTS"
-              :key="account.username"
-              class="demo-account"
-              size="small"
-              :disabled="loading"
-              @click="quickLogin(account.username)"
-            >
-              <span class="demo-name">{{ account.name }}</span>
-              <span class="demo-desc">{{ account.desc }}</span>
-            </el-button>
-          </div>
-        </template>
       </el-card>
     </div>
   </div>
@@ -298,36 +266,6 @@ async function quickLogin(username: string): Promise<void> {
   font-size: 12px;
   line-height: 20px;
   text-align: center;
-  color: var(--el-text-color-secondary);
-}
-
-.demo-accounts {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-2);
-}
-
-.demo-account {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  height: auto;
-  padding: var(--space-2) var(--space-3);
-  margin: 0;
-}
-
-.demo-account :deep(span) {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-}
-
-.demo-name {
-  font-weight: 600;
-}
-
-.demo-desc {
-  font-size: 12px;
   color: var(--el-text-color-secondary);
 }
 

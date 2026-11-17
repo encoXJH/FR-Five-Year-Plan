@@ -6,6 +6,7 @@ import OrgStructurePanel from './components/OrgStructurePanel.vue'
 import DirectionPanel from './components/DirectionPanel.vue'
 import MajorGroupPanel from './components/MajorGroupPanel.vue'
 import UserPanel from './components/UserPanel.vue'
+import RolePermissionPanel from './components/RolePermissionPanel.vue'
 import DictPanel from './components/DictPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import FeishuPanel from './components/FeishuPanel.vue'
@@ -28,6 +29,7 @@ const canManageDirections = computed(() => isAdmin.value && userStore.can('syste
         <el-tab-pane v-if="canManageDirections" label="主要建设方向" name="directions" lazy><DirectionPanel /></el-tab-pane>
         <el-tab-pane label="专业群" name="majorGroups" lazy><MajorGroupPanel /></el-tab-pane>
         <el-tab-pane label="用户与角色" name="users" lazy><UserPanel /></el-tab-pane>
+        <el-tab-pane label="角色权限设置" name="rolePermissions" lazy><RolePermissionPanel /></el-tab-pane>
         <el-tab-pane label="字典" name="dicts" lazy><DictPanel /></el-tab-pane>
         <el-tab-pane label="参数配置" name="settings" lazy><SettingsPanel /></el-tab-pane>
         <el-tab-pane label="飞书集成" name="feishu" lazy><FeishuPanel /></el-tab-pane>

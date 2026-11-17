@@ -117,3 +117,32 @@ export interface SettingPatchItem {
   value: string
   version: number
 }
+
+/** GET /role-permissions 中的单个角色权限配置 */
+export interface RoleItem {
+  role: Role
+  roleName: string
+  permissions: string[]
+  version: number
+}
+
+/** 可配置权限定义；lockedRoles 优先于 configurableRoles */
+export interface PermissionDefinition {
+  code: string
+  name: string
+  group: string
+  description: string
+  configurableRoles: Role[]
+  lockedRoles: Role[]
+}
+
+export interface RolePermissionResponse {
+  roles: RoleItem[]
+  permissions: PermissionDefinition[]
+}
+
+export interface RolePermissionSaveRequest {
+  permissions: string[]
+  reason: string
+  version: number
+}

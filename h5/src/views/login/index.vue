@@ -90,18 +90,6 @@ async function handleSubmit(): Promise<void> {
   }
 }
 
-const DEMO_ACCOUNTS = [
-  { username: 'admin', name: '平台管理员', desc: '全部菜单' },
-  { username: 'leader', name: '校级负责人', desc: '审批 / 报表' },
-  { username: 'owner1', name: '建设方向负责人', desc: '指标 / 审核' },
-  { username: 'c01', name: '学院负责人', desc: '工作台 / 填报' },
-] as const
-
-async function quickLogin(username: string): Promise<void> {
-  form.username = username
-  form.password = 'Test@123456'
-  await handleSubmit()
-}
 </script>
 
 <template>
@@ -165,20 +153,6 @@ async function quickLogin(username: string): Promise<void> {
             <p class="feishu-hint">在飞书工作台打开可自动免登</p>
           </template>
 
-          <div class="divider-text"><span>演示账号</span></div>
-          <div class="demo-grid">
-            <button
-              v-for="account in DEMO_ACCOUNTS"
-              :key="account.username"
-              type="button"
-              class="demo-btn"
-              :disabled="loading"
-              @click="quickLogin(account.username)"
-            >
-              <span class="demo-name">{{ account.name }}</span>
-              <span class="demo-desc">{{ account.desc }}</span>
-            </button>
-          </div>
         </template>
       </div>
       <p class="login-footer">© 2026 福州软件职业技术学院 发展规划处</p>
@@ -296,32 +270,6 @@ async function quickLogin(username: string): Promise<void> {
 }
 .mr-4 {
   margin-right: 4px;
-}
-.demo-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-.demo-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  min-height: 52px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #fbfcfe;
-  text-align: left;
-}
-.demo-name {
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-}
-.demo-desc {
-  color: var(--text-secondary);
-  font-size: 11px;
 }
 .auto-login {
   display: flex;
