@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowDown, Bell, Menu, School } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { getUnreadNotificationCount } from '@/api/todo'
+import { changePassword as changePasswordApi } from '@/api/auth'
 import { detectClientEnv } from '@/utils/feishu'
+import { passwordChangeError } from '@/utils/password'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -41,7 +44,49 @@ onBeforeUnmount(() => {
   if (timer !== null) clearInterval(timer)
 })
 
+const passwordDialogVisible = ref(false)
+const passwordSaving = ref(false)
+const passwordForm = reactive({ password: '', confirmPassword: '' })
+const passwordLengthError = computed(() => {
+  if (!passwordForm.password) return ''
+  return passwordForm.password.length < 8 || passwordForm.password.length > 64
+    ? '密码长度必须为 8–64 位'
+    : ''
+})
+const confirmPasswordError = computed(() => {
+  if (!passwordForm.confirmPassword) return ''
+  return passwordForm.password !== passwordForm.confirmPassword ? '两次输入的密码不一致' : ''
+})
+const canSubmitPassword = computed(() =>
+  passwordChangeError(passwordForm.password, passwordForm.confirmPassword) === '',
+)
+
+function resetPasswordForm(): void {
+  passwordForm.password = ''
+  passwordForm.confirmPassword = ''
+}
+
+async function submitChangePassword(): Promise<void> {
+  if (!canSubmitPassword.value || passwordSaving.value) return
+  passwordSaving.value = true
+  try {
+    await changePasswordApi({ ...passwordForm })
+    passwordDialogVisible.value = false
+    ElMessage.success('密码修改成功，请使用新密码重新登录')
+    await userStore.logout()
+    await router.push('/login')
+  } catch {
+    // 拦截器已提示
+  } finally {
+    passwordSaving.value = false
+  }
+}
+
 async function handleCommand(command: string): Promise<void> {
+  if (command === 'changePassword') {
+    passwordDialogVisible.value = true
+    return
+  }
   if (command === 'logout') {
     await userStore.logout()
     router.push('/login')
@@ -92,14 +137,67 @@ async function handleCommand(command: string): Promise<void> {
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item v-if="!isFeishuClient" command="logout">退出登录</el-dropdown-item>
+            <el-dropdown-item command="changePassword">修改密码</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
+      <el-dialog
+        v-model="passwordDialogVisible"
+        title="修改密码"
+        width="420px"
+        :close-on-click-modal="!passwordSaving"
+        :show-close="!passwordSaving"
+        @closed="resetPasswordForm"
+      >
+        <el-alert type="info" :closable="false" show-icon class="password-tip">
+          密码长度为 8–64 位，修改成功后需要使用新密码重新登录。
+        </el-alert>
+        <el-form label-position="top" @submit.prevent>
+          <el-form-item label="新密码" required :error="passwordLengthError">
+            <el-input
+              v-model="passwordForm.password"
+              type="password"
+              show-password
+              autocomplete="new-password"
+              maxlength="64"
+              placeholder="请输入新密码"
+              :disabled="passwordSaving"
+            />
+          </el-form-item>
+          <el-form-item label="确认新密码" required :error="confirmPasswordError">
+            <el-input
+              v-model="passwordForm.confirmPassword"
+              type="password"
+              show-password
+              autocomplete="new-password"
+              maxlength="64"
+              placeholder="请再次输入新密码"
+              :disabled="passwordSaving"
+              @keyup.enter="submitChangePassword"
+            />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button :disabled="passwordSaving" @click="passwordDialogVisible = false">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="passwordSaving"
+            :disabled="!canSubmitPassword"
+            @click="submitChangePassword"
+          >
+            确认修改
+          </el-button>
+        </template>
+      </el-dialog>
     </div>
   </div>
 </template>
 
 <style scoped>
+.password-tip {
+  margin-bottom: var(--space-4);
+}
+
 .header-bar {
   display: flex;
   align-items: center;

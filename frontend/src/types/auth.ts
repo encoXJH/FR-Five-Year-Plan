@@ -7,6 +7,12 @@ export interface LoginRequest {
   password: string
 }
 
+/** POST /auth/change-password 请求体 */
+export interface ChangePasswordRequest {
+  password: string
+  confirmPassword: string
+}
+
 /** 当前登录用户（登录响应与 /auth/me 中的 user） */
 export interface CurrentUser {
   id: string

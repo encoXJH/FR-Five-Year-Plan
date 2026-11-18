@@ -46,11 +46,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -230,6 +232,36 @@ class AuthServiceTest {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    void 两次密码不一致时不修改账号() {
+        BizException error = assertThrows(BizException.class,
+                () -> authService.changePassword(7L, "NewPass@123", "Different@123"));
+
+        assertEquals(ErrorCode.PARAM_INVALID.getCode(), error.getErrorCode().getCode());
+        verify(sysUserMapper, never()).updateById(any(SysUser.class));
+        verify(refreshTokenMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void 修改密码成功更新哈希并吊销刷新令牌() {
+        SysUser user = user();
+        user.setVersion(2);
+        user.setLoginFailCount(3);
+        user.setLockedUntil(LocalDateTime.now().plusDays(1));
+        when(sysUserMapper.selectOne(any())).thenReturn(user);
+        when(passwordEncoder.encode("NewPass@123")).thenReturn("new-bcrypt-hash");
+        when(sysUserMapper.updateById(user)).thenReturn(1);
+
+        authService.changePassword(7L, "NewPass@123", "NewPass@123");
+
+        assertEquals("new-bcrypt-hash", user.getPasswordHash());
+        assertEquals(0, user.getLoginFailCount());
+        assertNull(user.getLockedUntil());
+        assertEquals(7L, user.getUpdatedBy());
+        verify(sysUserMapper).updateById(user);
+        verify(refreshTokenMapper).update(any(), any());
     }
 
     private static UserRole role(String role) {

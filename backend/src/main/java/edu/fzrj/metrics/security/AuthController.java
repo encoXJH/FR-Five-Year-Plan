@@ -1,6 +1,8 @@
 package edu.fzrj.metrics.security;
 
+import edu.fzrj.metrics.common.audit.AuditLog;
 import edu.fzrj.metrics.module.integration.service.FeishuLoginService;
+import edu.fzrj.metrics.security.dto.ChangePasswordRequest;
 import edu.fzrj.metrics.security.dto.FeishuAuthDtos;
 import edu.fzrj.metrics.security.dto.LoginRequest;
 import edu.fzrj.metrics.security.dto.MeResponse;
@@ -10,6 +12,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -57,6 +61,17 @@ public class AuthController {
     @GetMapping("/me")
     public MeResponse me() {
         return authService.me();
+    }
+
+    @Operation(summary = "当前用户修改密码",
+            description = "已登录用户；新密码与确认密码均为 8–64 位且必须一致；"
+                    + "成功后清除登录锁定并吊销该用户全部 refreshToken，审计不记录密码或哈希")
+    @PostMapping("/change-password")
+    @PreAuthorize("isAuthenticated()")
+    @AuditLog(action = "UPDATE", resourceType = "user", resourceId = "#loginUser.userId")
+    public void changePassword(@Valid @RequestBody ChangePasswordRequest request,
+                               @AuthenticationPrincipal LoginUser loginUser) {
+        authService.changePassword(loginUser.getUserId(), request.getPassword(), request.getConfirmPassword());
     }
 
     @Operation(summary = "飞书免登",

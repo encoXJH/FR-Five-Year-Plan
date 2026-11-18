@@ -1,5 +1,6 @@
 import { http } from '@/utils/request'
 import type {
+  ChangePasswordRequest,
   FeishuBindRequest,
   FeishuLoginResult,
   LoginRequest,
@@ -24,6 +25,11 @@ export function logout(): Promise<null> {
 
 export function fetchMe(): Promise<MeResponse> {
   return http.get('/auth/me')
+}
+
+/** POST /auth/change-password：当前用户修改密码，成功后需重新登录 */
+export function changePassword(data: ChangePasswordRequest): Promise<null> {
+  return http.post('/auth/change-password', data)
 }
 
 /**

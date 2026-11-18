@@ -200,6 +200,34 @@ public class AuthService {
                 .set(RefreshToken::getRevokedAt, LocalDateTime.now()));
     }
 
+    /** 当前用户自助修改密码：校验两次输入，更新哈希并吊销全部 refreshToken。 */
+    @Transactional
+    public void changePassword(Long userId, String password, String confirmPassword) {
+        if (!StringUtils.hasText(password) || password.length() < 8 || password.length() > 64) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "新密码长度必须为 8–64 位");
+        }
+        if (!java.util.Objects.equals(password, confirmPassword)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "两次输入的密码不一致");
+        }
+        SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getId, userId)
+                .eq(SysUser::getDeleted, 0L));
+        if (user == null || Boolean.FALSE.equals(user.getIsEnabled())) {
+            throw new BizException(ErrorCode.ACCOUNT_DISABLED);
+        }
+        user.setPasswordHash(passwordEncoder.encode(password));
+        user.setLoginFailCount(0);
+        user.setLockedUntil(null);
+        user.setUpdatedBy(userId);
+        if (sysUserMapper.updateById(user) == 0) {
+            throw new BizException(ErrorCode.VERSION_CONFLICT, "账号信息已被修改，请重新登录后再试");
+        }
+        refreshTokenMapper.update(null, new LambdaUpdateWrapper<RefreshToken>()
+                .eq(RefreshToken::getUserId, userId)
+                .isNull(RefreshToken::getRevokedAt)
+                .set(RefreshToken::getRevokedAt, LocalDateTime.now()));
+    }
+
     /** 当前用户信息 */
     public MeResponse me() {
         LoginUser loginUser = SecurityUtils.getLoginUser();

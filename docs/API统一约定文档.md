@@ -770,6 +770,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | POST | `/auth/refresh` | 刷新 Token | 公开（带 refreshToken） |
 | POST | `/auth/logout` | 退出登录 | 已登录 |
 | GET | `/auth/me` | 当前用户、角色、权限码、数据范围 | 已登录 |
+| POST | `/auth/change-password` | 当前用户自助修改密码 `{ password, confirmPassword }`；两项均为 8–64 位且必须一致；成功后清除登录锁定并吊销该用户全部 refreshToken，审计不记录密码或哈希 | 已登录 |
 
 ### 15.2 计划与模板（M1）
 
