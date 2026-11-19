@@ -19,6 +19,7 @@ import edu.fzrj.metrics.module.indicator.mapper.DirectionMapper;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
@@ -44,16 +45,18 @@ public class MaterialService {
     private final DirectionMapper directionMapper;
     private final TaskMapper taskMapper;
     private final MaterialQueryMapper materialQueryMapper;
+    private final TaskReadScopeService taskReadScopeService;
 
     public MaterialService(FileRefMapper fileRefMapper, FileInfoMapper fileInfoMapper,
                            IndicatorMapper indicatorMapper, DirectionMapper directionMapper, TaskMapper taskMapper,
-                           MaterialQueryMapper materialQueryMapper) {
+                           MaterialQueryMapper materialQueryMapper, TaskReadScopeService taskReadScopeService) {
         this.fileRefMapper = fileRefMapper;
         this.fileInfoMapper = fileInfoMapper;
         this.indicatorMapper = indicatorMapper;
         this.directionMapper = directionMapper;
         this.taskMapper = taskMapper;
         this.materialQueryMapper = materialQueryMapper;
+        this.taskReadScopeService = taskReadScopeService;
     }
 
     public List<MaterialDtos.IndicatorOption> accessibleIndicators(Long planId) {
@@ -95,7 +98,7 @@ public class MaterialService {
         String normalizedKeyword = StringUtils.hasText(keyword) ? keyword.trim().toLowerCase() : null;
         MaterialQuery query = new MaterialQuery(
                 planId, indicatorId, unitId, taskId, year, category, normalizedKeyword,
-                scope.ownerScope(), scope.unitScopeIds(),
+                scope.ownerScope(), scope.unitScopeIds(), scope.staffTaskIds(),
                 null, safePageSize, (long) (safePage - 1) * safePageSize);
         long total = materialQueryMapper.countMaterials(query);
         List<MaterialDtos.MaterialItem> items = total == 0 ? List.of() : materialQueryMapper.selectMaterials(query)
@@ -111,7 +114,7 @@ public class MaterialService {
         }
         return materialQueryMapper.countByIndicator(
                 new MaterialQuery(planId, null, null, null, null, null, null,
-                        scope.ownerScope(), scope.unitScopeIds(), null, 0, 0));
+                        scope.ownerScope(), scope.unitScopeIds(), scope.staffTaskIds(), null, 0, 0));
     }
 
     /** ZIP 创建前在登录上下文逐文件校验材料库可见性，异步线程只接收已授权的文件 ID。 */
@@ -137,7 +140,7 @@ public class MaterialService {
         }
         List<MaterialRow> rows = materialQueryMapper.selectMaterials(new MaterialQuery(
                 null, null, null, null, null, null, null,
-                scope.ownerScope(), scope.unitScopeIds(), fileIds, 0, 0));
+                scope.ownerScope(), scope.unitScopeIds(), scope.staffTaskIds(), fileIds, 0, 0));
         Set<Long> visibleIds = rows.stream().map(MaterialRow::getFileId).collect(Collectors.toSet());
         for (Long fileId : fileIds) {
             if (!visibleIds.contains(fileId)) {
@@ -147,20 +150,22 @@ public class MaterialService {
         }
     }
 
-    private record MaterialScope(Long ownerScope, List<Long> unitScopeIds) {
+    private record MaterialScope(Long ownerScope, List<Long> unitScopeIds, List<Long> staffTaskIds) {
     }
 
-    /** 无任何可见范围时返回 null；全校范围以两个空范围表示。 */
+    /** 无任何可见范围时返回 null；全校范围以三个空范围表示。 */
     private MaterialScope resolveScope(LoginUser user) {
         if (user.getRoles().contains("ADMIN") || user.getRoles().contains("LEADER")) {
-            return new MaterialScope(null, List.of());
+            return new MaterialScope(null, List.of(), List.of());
         }
         Long ownerScope = user.getRoles().contains("SCHOOL_OWNER") ? user.getUserId() : null;
         List<Long> unitScopeIds = user.getRoles().contains("UNIT_OWNER") ? user.getUnitIds() : List.of();
-        if (ownerScope == null && unitScopeIds.isEmpty()) {
+        List<Long> staffTaskIds = user.getRoles().contains("STAFF")
+                ? List.copyOf(taskReadScopeService.staffTaskIds(user)) : List.of();
+        if (ownerScope == null && unitScopeIds.isEmpty() && staffTaskIds.isEmpty()) {
             return null;
         }
-        return new MaterialScope(ownerScope, unitScopeIds);
+        return new MaterialScope(ownerScope, unitScopeIds, staffTaskIds);
     }
 
     @Transactional
@@ -245,6 +250,16 @@ public class MaterialService {
                             .eq(planId != null, Task::getPlanId, planId)
                             .eq(Task::getDeleted, 0L))
                     .stream().map(Task::getTopIndicatorId).filter(Objects::nonNull).forEach(visibleIds::add);
+        }
+        if (user.getRoles().contains("STAFF")) {
+            Set<Long> assignedTaskIds = taskReadScopeService.staffTaskIds(user);
+            if (!assignedTaskIds.isEmpty()) {
+                taskMapper.selectList(new LambdaQueryWrapper<Task>()
+                                .in(Task::getId, assignedTaskIds)
+                                .eq(planId != null, Task::getPlanId, planId)
+                                .eq(Task::getDeleted, 0L))
+                        .stream().map(Task::getTopIndicatorId).filter(Objects::nonNull).forEach(visibleIds::add);
+            }
         }
         return visibleIds;
     }

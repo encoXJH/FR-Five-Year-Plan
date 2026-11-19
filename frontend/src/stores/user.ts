@@ -13,11 +13,13 @@ import type { EnumDict, Role } from '@/types/enums'
 import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from '@/utils/request'
 import { clearCurrentPlan } from '@/utils/currentPlan'
 import type { ClientEnv } from '@/utils/feishu'
+import { homePathForRoles, isStaffOnly, isTaskExecutorOnly } from '@/utils/role'
 
 interface UserState {
   accessToken: string | null
   refreshToken: string | null
   userInfo: CurrentUser | null
+  passwordChangeRequired: boolean
   roles: Role[]
   permissions: string[]
   dataScope: DataScope | null
@@ -29,6 +31,7 @@ export const useUserStore = defineStore('user', {
     accessToken: getAccessToken(),
     refreshToken: getRefreshToken(),
     userInfo: null,
+    passwordChangeRequired: false,
     roles: [],
     permissions: [],
     dataScope: null,
@@ -38,8 +41,10 @@ export const useUserStore = defineStore('user', {
     isLoggedIn: (state) => state.accessToken !== null,
     isUnitOwnerOnly: (state) => state.roles.length > 0
       && state.roles.every((role) => role === 'UNIT_OWNER'),
+    isTaskExecutorOnly: (state) => isTaskExecutorOnly(state.roles),
+    isStaffOnly: (state) => isStaffOnly(state.roles),
     homePath(): string {
-      return this.isUnitOwnerOnly ? '/workbench' : '/plans'
+      return homePathForRoles(this.roles)
     },
     /** 任一权限码命中即视为有权限（菜单、按钮过滤用） */
     can: (state) => {
@@ -88,6 +93,7 @@ export const useUserStore = defineStore('user', {
     async fetchMe() {
       const me = await authApi.fetchMe()
       this.userInfo = me.user
+      this.passwordChangeRequired = me.passwordChangeRequired
       this.roles = me.roles
       this.permissions = me.permissions
       this.dataScope = me.dataScope

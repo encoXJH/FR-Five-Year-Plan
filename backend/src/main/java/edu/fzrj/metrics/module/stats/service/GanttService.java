@@ -1,6 +1,7 @@
 package edu.fzrj.metrics.module.stats.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import edu.fzrj.metrics.common.datascope.DataScopeService;
 import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
@@ -26,6 +27,8 @@ import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.module.task.service.TaskDependencyService;
 import edu.fzrj.metrics.module.task.service.support.TaskScheduleGraph;
+import edu.fzrj.metrics.security.LoginUser;
+import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -53,12 +56,13 @@ public class GanttService {
     private final TaskDependencyService dependencyService;
     private final OrgUnitMapper orgUnitMapper;
     private final UserRefResolver userRefResolver;
+    private final DataScopeService dataScopeService;
 
     public GanttService(PlanService planService, PlanReadScopeService planReadScopeService,
                         IndicatorMapper indicatorMapper, IndicatorYearTargetMapper yearTargetMapper,
                         TaskYearMapper taskYearMapper, MilestoneMapper milestoneMapper,
                         TaskDependencyService dependencyService, OrgUnitMapper orgUnitMapper,
-                        UserRefResolver userRefResolver) {
+                        UserRefResolver userRefResolver, DataScopeService dataScopeService) {
         this.planService = planService;
         this.planReadScopeService = planReadScopeService;
         this.indicatorMapper = indicatorMapper;
@@ -68,6 +72,7 @@ public class GanttService {
         this.dependencyService = dependencyService;
         this.orgUnitMapper = orgUnitMapper;
         this.userRefResolver = userRefResolver;
+        this.dataScopeService = dataScopeService;
     }
 
     public GanttDtos.View get(Long planId, Long indicatorId) {
@@ -114,10 +119,14 @@ public class GanttService {
 
         List<GanttDtos.Node> nodes = new ArrayList<>();
         Map<Long, TaskScheduleGraph.Node> scheduleNodes = new LinkedHashMap<>();
+        LoginUser loginUser = SecurityUtils.getLoginUserOrNull();
         for (Indicator root : roots) {
             List<Task> children = tasksByA.getOrDefault(root.getId(), List.of()).stream()
                     .sorted(taskOrder(units)).toList();
-            nodes.add(indicatorNode(root, children, years, taskYearIndex, targetIndex, users));
+            boolean globalManualAccess = loginUser == null || dataScopeService.isAllData(loginUser)
+                    || dataScopeService.isOwnerScope(loginUser)
+                    && Objects.equals(root.getOwnerId(), loginUser.getUserId());
+            nodes.add(indicatorNode(root, children, years, taskYearIndex, targetIndex, users, globalManualAccess));
             for (Task task : children) {
                 Indicator taskIndicator = indicators.getOrDefault(task.getIndicatorId(), root);
                 GanttDtos.Node node = taskNode(task, taskIndicator, years, taskYearIndex, units, users);
@@ -154,7 +163,7 @@ public class GanttService {
     private GanttDtos.Node indicatorNode(Indicator root, List<Task> children, List<Integer> years,
                                          Map<String, TaskYear> taskYearIndex,
                                          Map<String, IndicatorYearTarget> targetIndex,
-                                         Map<Long, SysUser> users) {
+                                         Map<Long, SysUser> users, boolean globalManualAccess) {
         List<GanttDtos.YearCell> cells = new ArrayList<>();
         List<MetricCalculator.YearResult> results = new ArrayList<>();
         Integer startYear = null;
@@ -165,7 +174,7 @@ public class GanttService {
             MetricCalculator.YearResult result;
             if (root.getStatCaliber() == null) {
                 result = MetricCalculator.YearResult.empty();
-            } else if (manual) {
+            } else if (manual && globalManualAccess) {
                 BigDecimal actual = targetRow == null ? null : targetRow.getManualActualValue();
                 result = actual == null ? MetricCalculator.YearResult.empty()
                         : new MetricCalculator.YearResult(actual, null, null, null, null, null);

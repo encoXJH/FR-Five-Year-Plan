@@ -12,6 +12,7 @@ import edu.fzrj.metrics.module.plan.service.PlanService;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.module.task.service.TaskService;
 import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -50,6 +51,8 @@ class MakeupServiceTest {
     private DataScopeService dataScopeService;
     @Mock
     private PlanService planService;
+    @Mock
+    private TaskReadScopeService taskReadScopeService;
     @InjectMocks
     private MakeupService makeupService;
 

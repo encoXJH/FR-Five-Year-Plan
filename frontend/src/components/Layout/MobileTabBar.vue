@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Bell, HomeFilled, Tickets, User } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { detectClientEnv } from '@/utils/feishu'
+import { enumLabel } from '@/utils/enumLabels'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,8 +14,8 @@ const userStore = useUserStore()
 const visible = computed(() => route.name !== 'TaskSubmit' && route.name !== 'AdjustmentApply')
 
 const homeEntry = computed(() =>
-  userStore.isUnitOwnerOnly
-    ? { path: '/workbench', label: '工作台', icon: Tickets }
+  userStore.isTaskExecutorOnly
+    ? { path: '/workbench', label: userStore.isStaffOnly ? '我的任务' : '工作台', icon: Tickets }
     : { path: '/plans', label: '首页', icon: HomeFilled },
 )
 
@@ -33,11 +34,13 @@ const profileVisible = ref(false)
 const isFeishuClient = detectClientEnv(navigator.userAgent) !== 'WEB'
 
 const rolesText = computed(() => {
-  const labels = userStore.roles.map((role) => userStore.enums.Role?.[role] ?? role)
+  const labels = userStore.roles.map((role) => enumLabel('Role', role, userStore.enums))
   return labels.length > 0 ? labels.join(' / ') : '—'
 })
 
-const unitName = computed(() => userStore.userInfo?.unit?.name ?? '校级账号')
+const unitName = computed(() =>
+  userStore.userInfo?.unit?.name ?? userStore.userInfo?.unitName ?? '校级账号',
+)
 
 async function handleLogout(): Promise<void> {
   profileVisible.value = false

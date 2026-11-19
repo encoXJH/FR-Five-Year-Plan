@@ -5,7 +5,6 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import BackButton from '@/components/BackButton.vue'
 import ReasonDialog from '@/components/ReasonDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
-import MilestonePanel from './components/MilestonePanel.vue'
 import { activatePlan, activatePlanYear, archivePlan, getPlan } from '@/api/plan'
 import { finalSettle, getYearSettlement, settleYear, unlockYear } from '@/api/settlement'
 import { completeMakeup, listTaskMakeups } from '@/api/makeup'
@@ -39,16 +38,6 @@ function syncViewportWidth(): void {
 
 onMounted(() => window.addEventListener('resize', syncViewportWidth, { passive: true }))
 onBeforeUnmount(() => window.removeEventListener('resize', syncViewportWidth))
-
-/** 计划年度列表（里程碑关联年度下拉） */
-const planYears = computed<number[]>(() => {
-  if (!plan.value) return []
-  const list: number[] = []
-  for (let year = plan.value.startYear; year <= plan.value.endYear; year += 1) {
-    list.push(year)
-  }
-  return list
-})
 
 async function loadPlan(silent = false): Promise<void> {
   if (!silent) loading.value = true
@@ -425,10 +414,6 @@ useAutoRefresh(() => Promise.all([loadPlan(true), loadSettlement(true)]))
         </div>
       </el-card>
 
-      <el-card shadow="never" class="info-card">
-        <template #header><span class="card-title">里程碑管理</span></template>
-        <MilestonePanel :plan-id="planId" :years="planYears" :readonly="isArchived" />
-      </el-card>
     </template>
   </div>
 

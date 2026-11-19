@@ -78,6 +78,19 @@ class DataScopeServiceTest {
     }
 
     @Test
+    void 干事不属于UNIT范围且使用独立ASSIGNED分类() {
+        LoginUser staff = new LoginUser(201L, "staff", "干事", UNIT_C01,
+                List.of("STAFF"), List.of(), List.of(UNIT_C01));
+        login(staff);
+
+        assertEquals(true, dataScopeService.isAssignedScope(staff));
+        assertEquals(false, dataScopeService.isUnitScope(staff));
+        BizException error = assertThrows(BizException.class,
+                () -> dataScopeService.canAccessUnit(UNIT_C01));
+        assertEquals(20005, error.getErrorCode().getCode());
+    }
+
+    @Test
     void requireAllData_非全校范围抛20005() {
         login(new LoginUser(201L, "c01owner", "张三", UNIT_C01, List.of("UNIT_OWNER"), List.of()));
         BizException e = assertThrows(BizException.class, dataScopeService::requireAllData);

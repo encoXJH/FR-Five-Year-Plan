@@ -26,6 +26,7 @@ import {
   buildMetricValue,
   computeRatio,
   formatMetricValue,
+  initialReviewNodeForRoles,
   parseSubmissionRemark,
   projectAnnualCompletionRate,
   serializeSubmissionRemark,
@@ -51,6 +52,19 @@ const submissions = ref<SubmissionListItem[]>([])
 const isDelegateFill = computed(
   () => userStore.roles.includes('ADMIN') && !userStore.roles.includes('UNIT_OWNER'),
 )
+const submitReviewNode = computed(() => initialReviewNodeForRoles(userStore.roles))
+const submitFlowHint = computed(() => {
+  if (submitReviewNode.value === 'UNIT_REVIEW') {
+    return '提交后先由学院项目负责人初审，再由校级负责人终审'
+  }
+  if (submitReviewNode.value === 'LEADER_REVIEW') return '提交后由校级负责人审核'
+  return '提交后进入审核流程'
+})
+const submitButtonText = computed(() =>
+  submitReviewNode.value === 'UNIT_REVIEW'
+    ? '提交院审'
+    : submitReviewNode.value === 'LEADER_REVIEW' ? '提交校审' : '提交审核',
+)
 
 // ---------- 年度上下文 ----------
 const currentYear = new Date().getFullYear()
@@ -64,10 +78,7 @@ const year = computed(() => yearItem.value?.year ?? currentYear)
 /** 提交遇 60003 时置位：年度已锁定（整页只读） */
 const lockedByError = ref(false)
 
-/**
- * 年度已核算锁定：年度核算后 task_year 进入 ACHIEVED / NOT_ACHIEVED / MAKEUP_PENDING / MADE_UP，
- * 或提交时后端返回 60003
- */
+/** 已达标或年度核算后的状态只读；提交遇 60003 同样锁定。 */
 const yearLocked = computed(() => {
   const status = yearItem.value?.yearStatus
   return (
@@ -77,6 +88,12 @@ const yearLocked = computed(() => {
     status === 'MAKEUP_PENDING' ||
     status === 'MADE_UP'
   )
+})
+const yearLockedText = computed(() => {
+  if (!lockedByError.value && yearItem.value?.yearStatus === 'ACHIEVED') {
+    return `${year.value} 年度已达标，不能再次填报`
+  }
+  return `${year.value} 年度已核算锁定，数据只读；如需修改请联系平台管理员解锁`
 })
 
 const primaryIndicator = computed(() => primaryTaskIndicator(task.value))
@@ -107,6 +124,9 @@ const yearSubmissions = computed(() =>
 )
 
 const latestSubmission = computed(() => yearSubmissions.value[0] ?? null)
+const canSubmitAgain = computed(() =>
+  latestSubmission.value?.status === 'APPROVED' && yearItem.value?.yearStatus === 'IN_PROGRESS',
+)
 
 /** 存在待审核填报：表单只读 + 可撤回（P08 状态约束） */
 const pendingSubmission = computed(() =>
@@ -131,6 +151,14 @@ const pendingValueText = computed(() =>
     : '',
 )
 const pendingRemarkParts = computed(() => parseSubmissionRemark(pendingSubmission.value?.remark))
+const pendingAlertTitle = computed(() => {
+  const node = pendingSubmission.value?.currentReviewNode
+  if (node === 'UNIT_REVIEW') {
+    return '当前填报待学院负责人审核，院审通过后还需校级负责人终审；审核期间不能修改'
+  }
+  if (node === 'LEADER_REVIEW') return '当前填报待校级负责人审核，审核期间不能修改'
+  return '当前填报正在审核中，审核期间不能修改'
+})
 
 // ---------- 表单 ----------
 const form = reactive({
@@ -379,7 +407,7 @@ async function handleSubmit(): Promise<void> {
   submitError.value = null
   try {
     await ElMessageBox.confirm(
-      '提交后审核期间不能修改，确认提交审核？',
+      `${submitFlowHint.value}；审核期间不能修改，确认提交？`,
       '提交审核',
       { confirmButtonText: '确认提交', cancelButtonText: '取消' },
     )
@@ -392,10 +420,14 @@ async function handleSubmit(): Promise<void> {
     await saveDraft()
     dirty.value = false
     await submitSubmission(editingId.value!, editingVersion.value, idempotencyKey)
-    ElMessage.success('已提交审核')
+    ElMessage.success(
+      submitReviewNode.value === 'UNIT_REVIEW'
+        ? '已提交，待学院负责人审核'
+        : submitReviewNode.value === 'LEADER_REVIEW' ? '已提交，待校级负责人审核' : '已提交审核',
+    )
     await reload()
   } catch (error) {
-    // 60002 材料不足 / 60006 口径不匹配 / 60007 年度目标超限 / 50004 年度未激活 / 60003 年度锁定
+    // 60002 材料不足 / 60006 口径不匹配 / 50004 年度未激活 / 60003 年度锁定
     if (error instanceof ApiError) {
       submitError.value = { code: error.code, message: error.message }
       if (error.code === 60003) lockedByError.value = true
@@ -516,10 +548,18 @@ useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.val
 
           <el-alert
             v-if="yearLocked"
-            type="warning"
+            :type="yearItem?.yearStatus === 'ACHIEVED' && !lockedByError ? 'info' : 'warning'"
             :closable="false"
             class="page-alert"
-            :title="`${year} 年度已核算锁定，数据只读；如需修改请联系平台管理员解锁`"
+            :title="yearLockedText"
+          />
+
+          <el-alert
+            v-if="canSubmitAgain"
+            type="info"
+            :closable="false"
+            class="page-alert"
+            title="上一笔填报已终审通过，本年度尚未达标，可再次填报"
           />
 
           <el-alert
@@ -527,7 +567,7 @@ useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.val
             type="warning"
             :closable="false"
             class="page-alert"
-            title="当前填报正在审核中，审核期间不能修改"
+            :title="pendingAlertTitle"
           >
             <el-button
               v-if="!isHistorical && !yearLocked"
@@ -551,10 +591,10 @@ useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.val
 
           <el-alert
             v-if="projectedExceedsTarget"
-            type="warning"
+            type="info"
             :closable="false"
             class="page-alert"
-            :title="`按已认定数据和本次填报，预计完成率 ${formatPercent(projectedRate)}，提交后将超过年度目标；请调整填报值，最终以后端校验为准（60007）`"
+            :title="`按已认定数据和本次填报，预计完成率 ${formatPercent(projectedRate)}，将超过年度目标，允许超额完成`"
           />
 
           <el-card shadow="never" class="form-card">
@@ -796,10 +836,11 @@ useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.val
       </el-row>
 
       <div v-if="yearItem && !formReadonly && !yearLocked" class="sticky-bar">
+        <span class="submit-flow-hint">{{ submitFlowHint }}</span>
         <el-button @click="goBack">取消</el-button>
         <el-button :loading="saving" :disabled="submitting" @click="handleSaveDraft">存草稿</el-button>
         <el-button type="primary" :loading="submitting" :disabled="saving" @click="handleSubmit">
-          提交审核
+          {{ submitButtonText }}
         </el-button>
       </div>
     </template>
@@ -952,6 +993,12 @@ useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.val
   font-size: 13px;
 }
 
+.submit-flow-hint {
+  margin-right: auto;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
 .sticky-bar {
   position: sticky;
   bottom: 0;
@@ -996,6 +1043,10 @@ useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.val
 
   .sticky-bar {
     padding: 0 var(--space-3);
+  }
+
+  .submit-flow-hint {
+    display: none;
   }
 
   .sticky-bar .el-button {

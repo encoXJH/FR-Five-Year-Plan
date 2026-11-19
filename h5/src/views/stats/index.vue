@@ -30,7 +30,7 @@ import type { StatCaliber } from '@/types/enums'
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
-const isUnitOwnerOnly = computed(() => userStore.isUnitOwnerOnly)
+const isTaskExecutorOnly = computed(() => userStore.isTaskExecutorOnly)
 
 const plans = ref<PlanCard[]>([])
 const planId = ref<string>(typeof route.query.planId === 'string' ? route.query.planId : '')
@@ -353,7 +353,7 @@ onMounted(async () => {
         <h1>统计报表</h1>
         <p class="muted small">{{ planName }}</p>
       </div>
-      <div v-if="!isUnitOwnerOnly" class="head-actions">
+      <div v-if="!isTaskExecutorOnly" class="head-actions">
         <van-button size="small" type="primary" :loading="printing" :disabled="!planId" @click="exportPdf">
           导出 PDF
         </van-button>

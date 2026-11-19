@@ -75,6 +75,10 @@ class TaskServiceTest {
     private SubmissionMapper submissionMapper;
     @Mock
     private FileRefMapper fileRefMapper;
+    @Mock
+    private TaskStaffService taskStaffService;
+    @Mock
+    private TaskReadScopeService taskReadScopeService;
 
     @InjectMocks
     private TaskService taskService;
@@ -218,6 +222,80 @@ class TaskServiceTest {
         assertEquals(0, result.getTotal());
         assertEquals(0, result.getItems().size());
         verify(taskMapper, never()).selectPage(any(), any());
+    }
+
+    @Test
+    void 纯干事没有任何分配时任务列表为空() {
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new LoginUser(201L, "staff", "干事", 101L, List.of("STAFF"), List.of()), null, List.of()));
+        when(dataScopeService.isAssignedScope(any())).thenReturn(true);
+        when(taskReadScopeService.staffTaskIds(any())).thenReturn(java.util.Set.of());
+
+        PageResult<TaskDtos.TaskListItem> result = taskService.page(new TaskDtos.TaskQuery());
+
+        assertEquals(0, result.getTotal());
+        assertEquals(List.of(), result.getItems());
+        verify(taskMapper, never()).selectPage(any(), any());
+    }
+
+    @Test
+    void 非任务负责人分配干事返回20005() {
+        Task task = task(7L, "A01-01");
+        task.setOwnerId(211L);
+        task.setVersion(3);
+        when(taskMapper.selectByIdForUpdate(7L)).thenReturn(task);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new LoginUser(201L, "staff", "干事", 101L, List.of("STAFF"), List.of()), null, List.of()));
+        TaskDtos.StaffPutRequest request = new TaskDtos.StaffPutRequest();
+        request.setStaffIds(List.of(301L));
+        request.setVersion(3);
+
+        BizException error = assertThrows(BizException.class, () -> taskService.assignStaff(7L, request));
+
+        assertEquals(20005, error.getErrorCode().getCode());
+        verify(taskStaffService, never()).merge(any(), any(), any());
+        verify(taskMapper, never()).updateById(any(Task.class));
+    }
+
+    @Test
+    void 干事分配实际变化时任务版本仅推进一次() {
+        Task task = task(7L, "A01-01");
+        task.setVersion(3);
+        when(taskMapper.selectByIdForUpdate(7L)).thenReturn(task);
+        when(taskMapper.selectOne(any())).thenReturn(task);
+        when(taskMapper.updateById(any(Task.class))).thenAnswer(invocation -> {
+            task.setVersion(4);
+            return 1;
+        });
+        Plan plan = new Plan();
+        plan.setId(10L);
+        plan.setDeleted(0L);
+        plan.setStatus("ACTIVE");
+        plan.setStartYear(2026);
+        plan.setEndYear(2030);
+        when(planMapper.selectById(10L)).thenReturn(plan);
+        LoginUser owner = new LoginUser(211L, "owner", "负责人", 101L,
+                List.of("UNIT_OWNER"), List.of());
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(owner, null, List.of()));
+        when(dataScopeService.isUnitScope(owner)).thenReturn(true);
+        when(taskStaffService.merge(any(), any(), any())).thenReturn(
+                new TaskStaffService.MergeResult(List.of(), List.of(301L), true));
+        when(taskStaffService.staffOf(7L)).thenReturn(List.of());
+        when(taskStaffService.assignableStaffOf(task)).thenReturn(List.of());
+        when(taskYearMapper.selectList(any())).thenReturn(List.of());
+        when(indicatorMapper.selectList(any())).thenReturn(List.of());
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of());
+        when(planYearMapper.selectList(any())).thenReturn(List.of());
+        when(userRefResolver.mapOf(any())).thenReturn(Map.of());
+        TaskDtos.StaffPutRequest request = new TaskDtos.StaffPutRequest();
+        request.setStaffIds(List.of(301L));
+        request.setVersion(3);
+
+        TaskDtos.TaskDetail result = taskService.assignStaff(7L, request);
+
+        assertEquals(4, result.version());
+        verify(taskMapper, times(1)).updateById(task);
     }
 
     private Submission submission(Long id, Long taskId, String status) {

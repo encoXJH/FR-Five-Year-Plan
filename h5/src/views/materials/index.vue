@@ -60,7 +60,7 @@ const selectedIndicator = computed(
   () => indicators.value.find((item) => item.id === selectedIndicatorId.value) ?? null,
 )
 const selectedMaterialIds = computed(() => new Set(selectedMaterials.value.map((item) => item.id)))
-const showUnitFilter = computed(() => !userStore.isUnitOwnerOnly && !selectedTaskId.value)
+const showUnitFilter = computed(() => !userStore.isTaskExecutorOnly && !selectedTaskId.value)
 const selectionTitle = computed(() => {
   if (selectedTaskId.value) {
     const code = selectedTaskCode.value || '学院任务'
@@ -356,7 +356,7 @@ onMounted(async () => {
       plans.value = data
     }).catch(() => undefined),
   ]
-  if (!userStore.isUnitOwnerOnly) {
+  if (!userStore.isTaskExecutorOnly) {
     requests.push(listOrgUnits().then((data) => {
       units.value = data
     }))

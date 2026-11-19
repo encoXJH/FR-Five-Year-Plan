@@ -24,6 +24,7 @@ import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.service.UserRefResolver;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
@@ -56,11 +57,13 @@ public class IndicatorService {
     private final UserRefResolver userRefResolver;
     private final DataScopeService dataScopeService;
     private final PlanReadScopeService planReadScopeService;
+    private final TaskReadScopeService taskReadScopeService;
 
     public IndicatorService(IndicatorMapper indicatorMapper, IndicatorYearTargetMapper yearTargetMapper,
                             DirectionMapper directionMapper, OrgUnitMapper orgUnitMapper,
                             TaskMapper taskMapper, PlanService planService, UserRefResolver userRefResolver,
-                            DataScopeService dataScopeService, PlanReadScopeService planReadScopeService) {
+                            DataScopeService dataScopeService, PlanReadScopeService planReadScopeService,
+                            TaskReadScopeService taskReadScopeService) {
         this.indicatorMapper = indicatorMapper;
         this.yearTargetMapper = yearTargetMapper;
         this.directionMapper = directionMapper;
@@ -70,6 +73,7 @@ public class IndicatorService {
         this.userRefResolver = userRefResolver;
         this.dataScopeService = dataScopeService;
         this.planReadScopeService = planReadScopeService;
+        this.taskReadScopeService = taskReadScopeService;
     }
 
     // ---------------- 查询 ----------------
@@ -810,6 +814,16 @@ public class IndicatorService {
                 return;
             }
         }
+        if (dataScopeService.isAssignedScope(user)) {
+            Set<Long> assignedTaskIds = taskReadScopeService.staffTaskIds(user);
+            if (!assignedTaskIds.isEmpty()) {
+                Long count = taskMapper.selectCount(taskRelationQuery(indicator)
+                        .in(Task::getId, assignedTaskIds));
+                if (count != null && count > 0) {
+                    return;
+                }
+            }
+        }
         throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
     }
 
@@ -820,10 +834,22 @@ public class IndicatorService {
                 || (dataScopeService.isOwnerScope(user)
                 && user.getUserId().equals(effectiveOwnerOf(indicator)));
         if (!ownerAccess) {
-            if (!dataScopeService.isUnitScope(user) || user.getUnitIds().isEmpty()) {
+            List<Long> unitIds = dataScopeService.isUnitScope(user) ? user.getUnitIds() : List.of();
+            Set<Long> assignedTaskIds = dataScopeService.isAssignedScope(user)
+                    ? taskReadScopeService.staffTaskIds(user) : Set.of();
+            if (unitIds.isEmpty() && assignedTaskIds.isEmpty()) {
                 return List.of();
             }
-            query.in(Task::getUnitId, user.getUnitIds());
+            query.and(scope -> {
+                if (!unitIds.isEmpty()) {
+                    scope.in(Task::getUnitId, unitIds);
+                    if (!assignedTaskIds.isEmpty()) {
+                        scope.or().in(Task::getId, assignedTaskIds);
+                    }
+                } else {
+                    scope.in(Task::getId, assignedTaskIds);
+                }
+            });
         }
         return taskMapper.selectList(query.orderByAsc(Task::getCode));
     }
@@ -884,7 +910,7 @@ public class IndicatorService {
     }
 
     private void requireUserIfPresent(Long userId) {
-        if (userId != null && !userRefResolver.mapOf(List.of(userId)).containsKey(userId)) {
+        if (userId != null && !userRefResolver.mapActiveOf(List.of(userId)).containsKey(userId)) {
             throw new BizException(ErrorCode.PARAM_INVALID, "负责人不存在");
         }
     }

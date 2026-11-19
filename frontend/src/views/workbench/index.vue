@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Expand, Fold, WarningFilled } from '@element-plus/icons-vue'
 import StatusTag from '@/components/StatusTag.vue'
 import ProgressWithTimeLine from '@/components/ProgressWithTimeLine.vue'
 import TaskDetailDrawer from './components/TaskDetailDrawer.vue'
-import { listAllTasks, listTasks } from '@/api/task'
+import { getTask, listAllTasks, listTasks } from '@/api/task'
 import { getStatsOverview } from '@/api/stats'
 import { listOrgUnits } from '@/api/orgUnit'
 import type { OrgUnit } from '@/api/orgUnit'
@@ -17,7 +17,7 @@ import { formatCount, formatPercent } from '@/utils/format'
 import { formatTargetValue } from '@/utils/indicator'
 import { useAutoRefresh } from '@/utils/autoRefresh'
 import { buildWarningRequests, mergeVisibleWarnings } from '@/utils/stats'
-import { averageTaskYearCompletion, canWriteTask, formatDeadline, primaryTaskIndicator, taskMaterialState } from '@/utils/task'
+import { averageTaskYearCompletion, canWriteTask, primaryTaskIndicator, taskMaterialState } from '@/utils/task'
 import { canApplyForTask } from '@/utils/adjustment'
 import type { PageResult } from '@/types/api'
 import type { TaskListItem, TaskQuery } from '@/types/task'
@@ -47,6 +47,7 @@ const currentYear = new Date().getFullYear()
 /** 学院负责人处理本单元任务；管理员 / 建设方向负责人为管理视角 */
 const isUnitOwner = computed(() => userStore.roles.includes('UNIT_OWNER'))
 const isAdminView = computed(() => !isUnitOwner.value && userStore.roles.includes('ADMIN'))
+const isStaffView = computed(() => userStore.isStaffOnly)
 
 const unitOptions = ref<OrgUnit[]>([])
 const planOptions = ref<PlanCard[]>([])
@@ -102,10 +103,23 @@ const warningCardAriaLabel = computed(() => {
 })
 
 const unitName = computed(() => {
-  if (isUnitOwner.value) return userStore.userInfo?.unit?.name ?? '本单元'
+  if (isUnitOwner.value) {
+    return userStore.userInfo?.unit?.name ?? userStore.userInfo?.unitName ?? '本单元'
+  }
   const found = unitOptions.value.find((unit) => unit.id === filters.unitId)
   return found?.name ?? '全部单元'
 })
+const taskEmptyDescription = computed(() => isStaffView.value
+  ? '暂无分配给你的任务，请联系学院负责人分配'
+  : '当前筛选下暂无任务')
+const pageTitle = computed(() => {
+  if (isAdminView.value) return '任务代填'
+  if (isStaffView.value) return '我的任务'
+  return `${unitName.value} · 学院工作台`
+})
+const taskPerspectiveText = computed(() => isStaffView.value
+  ? '仅显示分配给我的任务，填报、材料与完成进度统一处理'
+  : '任务填报、佐证材料与完成进度统一处理')
 
 function currentQuery(extra: Partial<TaskQuery> = {}): TaskQuery {
   const tab = STATUS_TABS.find((item) => item.key === filters.tab) ?? STATUS_TABS[0]
@@ -119,13 +133,19 @@ function currentQuery(extra: Partial<TaskQuery> = {}): TaskQuery {
 }
 
 let taskLoadSequence = 0
+const staffAssignmentCapabilities = ref<Record<string, boolean>>({})
+const staffAssignmentVersions = new Map<string, { version: number; value: boolean }>()
+let staffAssignmentLoadSequence = 0
 
 async function loadTasks(silent = false): Promise<void> {
   const sequence = ++taskLoadSequence
   if (!silent) loading.value = true
   try {
     const result = await listTasks(currentQuery({ page: page.value.page, pageSize: page.value.pageSize }))
-    if (sequence === taskLoadSequence) page.value = result
+    if (sequence === taskLoadSequence) {
+      page.value = result
+      void loadStaffAssignmentCapabilities(result.items)
+    }
   } finally {
     if (sequence === taskLoadSequence) loading.value = false
   }
@@ -243,7 +263,7 @@ const drawerVisible = ref(false)
 const activeTaskId = ref<string | null>(null)
 const drawerInitialYear = ref<number | null>(null)
 const drawerInitialSubmissionId = ref<string | null>(null)
-const drawerInitialTab = ref<'info' | 'submissions' | 'adjustments'>('info')
+const drawerInitialTab = ref<'info' | 'submissions' | 'adjustments' | 'staff'>('info')
 
 function openDetail(row: TaskListItem): void {
   activeTaskId.value = row.id
@@ -267,6 +287,56 @@ function openMaterials(row: TaskListItem): void {
   drawerInitialYear.value = row.displayYear ?? null
   drawerInitialSubmissionId.value = row.latestSubmissionId ?? null
   drawerInitialTab.value = 'submissions'
+  drawerVisible.value = true
+}
+
+function mayAssignStaff(row: TaskListItem): boolean {
+  return userStore.roles.includes('UNIT_OWNER')
+    && row.owner?.id === userStore.userInfo?.id
+    && canWriteTask(row)
+    && row.status !== 'TRANSFERRED_OUT'
+    && row.status !== 'CLOSED'
+}
+
+function canShowStaffAssignment(row: TaskListItem): boolean {
+  return staffAssignmentCapabilities.value[row.id] === true
+}
+
+async function loadStaffAssignmentCapabilities(items: TaskListItem[]): Promise<void> {
+  const sequence = ++staffAssignmentLoadSequence
+  const next: Record<string, boolean> = {}
+  await Promise.all(items.map(async (row) => {
+    if (!mayAssignStaff(row)) {
+      next[row.id] = false
+      return
+    }
+    if (typeof row.canAssignStaff === 'boolean') {
+      next[row.id] = row.canAssignStaff
+      staffAssignmentVersions.set(row.id, { version: row.version, value: row.canAssignStaff })
+      return
+    }
+    const cached = staffAssignmentVersions.get(row.id)
+    if (cached?.version === row.version) {
+      next[row.id] = cached.value
+      return
+    }
+    try {
+      const detail = await getTask(row.id)
+      const value = detail.canAssignStaff === true
+      next[row.id] = value
+      staffAssignmentVersions.set(row.id, { version: row.version, value })
+    } catch {
+      next[row.id] = false
+    }
+  }))
+  if (sequence === staffAssignmentLoadSequence) staffAssignmentCapabilities.value = next
+}
+
+function openStaffAssignment(row: TaskListItem): void {
+  activeTaskId.value = row.id
+  drawerInitialYear.value = null
+  drawerInitialSubmissionId.value = null
+  drawerInitialTab.value = 'staff'
   drawerVisible.value = true
 }
 
@@ -307,6 +377,7 @@ function goSubmit(row: TaskListItem): void {
 function canApplyRow(row: TaskListItem): boolean {
   return (
     canWriteTask(row) &&
+    !isStaffView.value &&
     userStore.can('adjustment:apply') &&
     canApplyForTask(row.status, primaryTaskIndicator(row)?.statCaliber, row.isHistorical)
   )
@@ -318,6 +389,20 @@ function goApply(row: TaskListItem): void {
     return
   }
   router.push({ path: '/adjustments/apply', query: { taskId: row.id } })
+}
+
+const workbenchMainRef = ref<HTMLElement | null>(null)
+
+function syncStickyTableHeader(): void {
+  const main = workbenchMainRef.value
+  const table = main?.querySelector<HTMLElement>('.workbench-table')
+  const header = main?.querySelector<HTMLElement>('.el-table__header-wrapper')
+  if (!main || !table || !header) return
+  const stickyTop = main.getBoundingClientRect().top + 110
+  const tableTop = table.getBoundingClientRect().top
+  const maxOffset = Math.max(0, table.getBoundingClientRect().height - header.getBoundingClientRect().height)
+  const offset = Math.min(Math.max(stickyTop - tableTop, 0), maxOffset)
+  header.style.transform = `translate3d(0, ${offset}px, 0)`
 }
 
 onMounted(() => {
@@ -343,6 +428,7 @@ onMounted(() => {
       })
       .catch(() => undefined)
   }
+  void nextTick(syncStickyTableHeader)
 })
 
 useAutoRefresh(
@@ -357,10 +443,10 @@ useAutoRefresh(
   <div class="workbench-page">
     <div class="page-header">
       <div class="page-heading-copy">
-        <span class="page-eyebrow">五年规划 · 任务执行</span>
-        <h1 class="page-title">{{ isAdminView ? '任务代填' : `${unitName} · 学院工作台` }}</h1>
+        <span class="page-eyebrow">五年规划 · {{ isStaffView ? '我的任务' : '任务执行' }}</span>
+        <h1 class="page-title">{{ pageTitle }}</h1>
         <p class="page-subtitle">
-          {{ filters.year ? `${filters.year} 年` : '全部年度' }}<span aria-hidden="true">/</span>任务填报、佐证材料与完成进度统一处理
+          {{ filters.year ? `${filters.year} 年` : '全部年度' }}<span aria-hidden="true">/</span>{{ taskPerspectiveText }}
         </p>
       </div>
       <div class="page-plan-filter">
@@ -429,7 +515,7 @@ useAutoRefresh(
         </Transition>
       </aside>
 
-      <div class="workbench-main">
+      <div ref="workbenchMainRef" class="workbench-main" @scroll="syncStickyTableHeader">
         <div class="simple-filter">
           <el-select
             v-if="isAdminView"
@@ -489,7 +575,7 @@ useAutoRefresh(
         <el-empty
           v-if="!loading && page.items.length === 0"
           :image-size="80"
-          description="当前筛选下暂无任务"
+          :description="taskEmptyDescription"
         />
         <div v-for="row in page.items" :key="`card-${row.id}`" class="task-card">
           <div class="task-card-header">
@@ -506,26 +592,17 @@ useAutoRefresh(
             <span>累计完成 {{ formatTargetValue(row.cumulativeActual ?? null, caliberOf(row)) }}</span>
             <span>本年目标 {{ formatTargetValue(row.yearTarget ?? null, caliberOf(row)) }}</span>
             <span>本年完成 {{ formatTargetValue(row.actualValue ?? null, caliberOf(row)) }}</span>
-            <span :class="{ 'deadline-urgent': formatDeadline(row.deadline).urgent }">
-              截止 {{ formatDeadline(row.deadline).text }}
-            </span>
           </div>
           <ProgressWithTimeLine
             :rate="row.cumulativeRate ?? null"
             :lagging="warningTaskIds.has(row.id)"
           />
-          <div
-            class="task-card-materials"
-            :class="{ 'is-missing': taskMaterialState(row).missingCount > 0 }"
-          >
+          <div class="task-card-materials">
             <div class="task-card-material-heading">
               <span>佐证材料</span>
               <el-tag :type="taskMaterialState(row).tagType" size="small" effect="light">
                 {{ taskMaterialState(row).label }}
               </el-tag>
-              <span v-if="taskMaterialState(row).missingCount > 0" class="material-missing">
-                缺 {{ taskMaterialState(row).missingCount }} 份
-              </span>
             </div>
             <div class="task-card-material-actions">
               <el-button
@@ -536,19 +613,12 @@ useAutoRefresh(
               >
                 材料预览 · 共 {{ formatCount(taskMaterialState(row).fileCount) }} 份
               </el-button>
-              <el-button
-                v-if="taskMaterialState(row).missingCount > 0 && canSubmitRow(row)"
-                type="danger"
-                plain
-                @click="goSubmit(row)"
-              >
-                去补材料
-              </el-button>
             </div>
           </div>
           <div class="app-action-row task-card-actions">
             <el-button v-if="canSubmitRow(row)" type="primary" size="small" @click="goSubmit(row)">填报</el-button>
             <el-button size="small" @click="openDetail(row)">详情</el-button>
+            <el-button v-if="canShowStaffAssignment(row)" size="small" plain @click="openStaffAssignment(row)">分配干事</el-button>
             <el-button v-if="canApplyRow(row)" type="warning" size="small" plain @click="goApply(row)">调整</el-button>
           </div>
         </div>
@@ -591,7 +661,7 @@ useAutoRefresh(
         </el-table-column>
         <el-table-column label="材料" width="148" align="center" header-align="center">
           <template #default="{ row }">
-            <div class="material-cell" :class="{ 'is-missing': taskMaterialState(row).missingCount > 0 }">
+            <div class="material-cell">
               <el-button
                 link
                 type="primary"
@@ -605,19 +675,7 @@ useAutoRefresh(
                 <el-tag :type="taskMaterialState(row).tagType" size="small" effect="light">
                   {{ taskMaterialState(row).label }}
                 </el-tag>
-                <span v-if="taskMaterialState(row).missingCount > 0" class="material-missing">
-                  缺 {{ taskMaterialState(row).missingCount }} 份
-                </span>
               </div>
-              <el-button
-                v-if="taskMaterialState(row).missingCount > 0 && canSubmitRow(row)"
-                link
-                type="danger"
-                class="material-fill"
-                @click="goSubmit(row)"
-              >
-                去补材料
-              </el-button>
             </div>
           </template>
         </el-table-column>
@@ -628,30 +686,18 @@ useAutoRefresh(
             <StatusTag v-else kind="TaskStatus" :value="row.status" />
           </template>
         </el-table-column>
-        <el-table-column label="截止时间" width="170">
-          <template #default="{ row }">
-            <span
-              :class="{
-                'deadline-overdue': formatDeadline(row.deadline).overdue,
-                'deadline-urgent': formatDeadline(row.deadline).urgent && !formatDeadline(row.deadline).overdue,
-                'empty-text': !row.deadline,
-              }"
-            >
-              {{ formatDeadline(row.deadline).text }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right" align="left">
+        <el-table-column label="操作" width="240" fixed="right" align="left">
           <template #default="{ row }">
             <el-button v-if="canSubmitRow(row)" link type="primary" @click="goSubmit(row)">填报</el-button>
             <el-button link @click="openDetail(row)">详情</el-button>
+            <el-button v-if="canShowStaffAssignment(row)" link type="primary" @click="openStaffAssignment(row)">分配干事</el-button>
             <el-button v-if="canApplyRow(row)" link type="warning" @click="goApply(row)">调整</el-button>
           </template>
         </el-table-column>
         <template #empty>
           <el-empty
             :image-size="80"
-            description="当前筛选下暂无任务"
+            :description="taskEmptyDescription"
           />
         </template>
       </el-table>
@@ -1009,6 +1055,9 @@ useAutoRefresh(
 }
 
 .workbench-summary {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1px;
@@ -1229,6 +1278,13 @@ button.summary-card {
   font-variant-numeric: tabular-nums;
 }
 
+.workbench-table :deep(.el-table__header-wrapper) {
+  position: relative;
+  z-index: 4;
+  background: var(--workbench-paper);
+  will-change: transform;
+}
+
 .workbench-table :deep(.el-table__inner-wrapper::before),
 .workbench-table :deep(.el-table__border-left-patch) {
   display: none;
@@ -1238,7 +1294,7 @@ button.summary-card {
   height: 40px;
   padding: 0;
   border-bottom: 1px solid #cfd7e3;
-  background: transparent;
+  background: var(--workbench-paper);
   color: var(--workbench-muted);
   font-size: 12px;
   font-weight: 600;
@@ -1251,7 +1307,19 @@ button.summary-card {
   background: transparent;
 }
 
+.workbench-table :deep(.el-table__header th.el-table-fixed-column--left),
+.workbench-table :deep(.el-table__header th.el-table-fixed-column--right),
+.workbench-table :deep(.el-table__body td.el-table-fixed-column--left),
+.workbench-table :deep(.el-table__body td.el-table-fixed-column--right) {
+  background: var(--workbench-paper);
+}
+
 .workbench-table :deep(.el-table__body tr:hover > td) {
+  background: #fafbfc;
+}
+
+.workbench-table :deep(.el-table__body tr:hover > td.el-table-fixed-column--left),
+.workbench-table :deep(.el-table__body tr:hover > td.el-table-fixed-column--right) {
   background: #fafbfc;
 }
 
@@ -1310,32 +1378,8 @@ button.summary-card {
   gap: 3px 6px;
 }
 
-.material-missing {
-  color: var(--el-color-danger);
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.material-fill {
-  min-height: 22px;
-  margin: 0;
-  padding: 0;
-  font-size: 12px;
-}
-
 .empty-text {
   color: var(--el-text-color-placeholder);
-}
-
-.deadline-urgent {
-  color: var(--el-color-warning);
-  font-weight: 600;
-}
-
-.deadline-overdue {
-  color: var(--el-color-danger);
-  font-weight: 600;
 }
 
 .pager {
@@ -1453,6 +1497,7 @@ button.summary-card {
   }
 
   .workbench-summary {
+    position: static;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1544,11 +1589,6 @@ button.summary-card {
     border: 1px solid var(--workbench-line);
     border-radius: 6px;
     background: var(--workbench-soft);
-  }
-
-  .task-card-materials.is-missing {
-    border-color: var(--el-color-danger-light-7);
-    background: var(--el-color-danger-light-9);
   }
 
   .task-card-material-heading {

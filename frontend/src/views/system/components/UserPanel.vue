@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  createUser,
+  deleteUser,
   listUsers,
   resetUserPassword,
   setUserRoles,
@@ -19,6 +20,7 @@ import type { Role } from '@/types/enums'
 import type { SystemUser } from '@/types/system'
 
 const userStore = useUserStore()
+const router = useRouter()
 
 const loading = ref(false)
 const rows = ref<SystemUser[]>([])
@@ -69,67 +71,38 @@ const editing = ref<SystemUser | null>(null)
 const form = reactive({
   name: '',
   username: '',
-  password: '',
-  phone: '',
   unitId: '' as string,
-  roles: [] as Role[],
   isEnabled: true,
 })
 
 function openCreate(): void {
-  editing.value = null
-  form.name = ''
-  form.username = ''
-  form.password = ''
-  form.phone = ''
-  form.unitId = ''
-  form.roles = []
-  form.isEnabled = true
-  dialogVisible.value = true
+  void router.push('/users/create')
 }
 
 function openEdit(row: SystemUser): void {
   editing.value = row
   form.name = row.name
   form.username = row.username
-  form.password = ''
-  form.phone = ''
   form.unitId = row.unitId ?? ''
-  form.roles = [...row.roles]
   form.isEnabled = row.isEnabled
   dialogVisible.value = true
 }
 
 async function submit(): Promise<void> {
-  if (!form.name.trim() || !form.username.trim()) {
-    ElMessage.warning('请填写姓名和工号')
-    return
-  }
-  if (!editing.value && !form.password) {
-    ElMessage.warning('请填写初始密码')
+  if (!editing.value) return
+  if (!form.name.trim()) {
+    ElMessage.warning('请填写姓名')
     return
   }
   saving.value = true
   try {
-    if (editing.value) {
-      await updateUser(editing.value.id, {
-        name: form.name.trim(),
-        unitId: form.unitId || null,
-        isEnabled: form.isEnabled,
-        version: editing.value.version,
-      })
-      ElMessage.success('用户已更新')
-    } else {
-      await createUser({
-        name: form.name.trim(),
-        username: form.username.trim(),
-        password: form.password,
-        phone: form.phone.trim() || undefined,
-        unitId: form.unitId || undefined,
-        roles: form.roles,
-      })
-      ElMessage.success('用户已新增')
-    }
+    await updateUser(editing.value.id, {
+      name: form.name.trim(),
+      unitId: form.unitId || null,
+      isEnabled: form.isEnabled,
+      version: editing.value.version,
+    })
+    ElMessage.success('用户已更新')
     dialogVisible.value = false
     await load()
   } catch {
@@ -189,12 +162,41 @@ async function handleResetPassword(row: SystemUser): Promise<void> {
   }
 }
 
+// ---------- 逻辑删除（保留历史业务记录；当前负责人引用和在途业务由服务端阻断） ----------
+const deleteVisible = ref(false)
+const deleteSaving = ref(false)
+const deleteTarget = ref<SystemUser | null>(null)
+
+function openDelete(row: SystemUser): void {
+  deleteTarget.value = row
+  deleteVisible.value = true
+}
+
+async function submitDelete(reason: string): Promise<void> {
+  if (!deleteTarget.value) return
+  deleteSaving.value = true
+  try {
+    await deleteUser(deleteTarget.value.id, { version: deleteTarget.value.version, reason })
+    ElMessage.success('用户已删除，历史业务记录保留')
+    deleteVisible.value = false
+    await load()
+  } catch {
+    // 拦截器已提示
+  } finally {
+    deleteSaving.value = false
+  }
+}
+
 // ---------- 设置角色（敏感操作：先选角色，再用 ReasonDialog 填原因，UI 规范 7.5） ----------
 const rolesVisible = ref(false)
 const rolesSaving = ref(false)
 const rolesTarget = ref<SystemUser | null>(null)
 const rolesForm = reactive({ roles: [] as Role[] })
 const reasonVisible = ref(false)
+const roleAssignmentOptions = computed(() =>
+  roleOptions.value.filter((option) =>
+    option.value !== 'STAFF' || rolesTarget.value?.roles.includes('STAFF')),
+)
 
 function openSetRoles(row: SystemUser): void {
   rolesTarget.value = row
@@ -316,6 +318,7 @@ useAutoRefresh(() => load(true))
                 <el-dropdown-item @click="toggleEnabled(row)">
                   {{ row.isEnabled ? '停用' : '启用' }}
                 </el-dropdown-item>
+                <el-dropdown-item divided class="delete-menu-item" @click="openDelete(row)">删除</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -346,19 +349,13 @@ useAutoRefresh(() => load(true))
       />
     </div>
 
-    <el-dialog v-model="dialogVisible" :title="editing ? '编辑用户' : '新增用户'" width="480px">
+    <el-dialog v-model="dialogVisible" title="编辑用户" width="480px">
       <el-form label-width="90px">
         <el-form-item label="姓名" required>
           <el-input v-model="form.name" />
         </el-form-item>
         <el-form-item label="工号" required>
-          <el-input v-model="form.username" :disabled="!!editing" />
-        </el-form-item>
-        <el-form-item v-if="!editing" label="初始密码" required>
-          <el-input v-model="form.password" type="password" show-password />
-        </el-form-item>
-        <el-form-item v-if="!editing" label="手机号">
-          <el-input v-model="form.phone" />
+          <el-input v-model="form.username" disabled />
         </el-form-item>
         <el-form-item label="所属单元">
           <el-select v-model="form.unitId" clearable style="width: 100%">
@@ -370,12 +367,7 @@ useAutoRefresh(() => load(true))
             />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="!editing" label="角色">
-          <el-select v-model="form.roles" multiple style="width: 100%">
-            <el-option v-for="o in roleOptions" :key="o.value" :label="o.label" :value="o.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="editing" label="状态">
+        <el-form-item label="状态">
           <el-switch v-model="form.isEnabled" active-text="启用" inactive-text="停用" />
         </el-form-item>
       </el-form>
@@ -392,7 +384,7 @@ useAutoRefresh(() => load(true))
         </el-form-item>
         <el-form-item label="角色" required>
           <el-select v-model="rolesForm.roles" multiple style="width: 100%">
-            <el-option v-for="o in roleOptions" :key="o.value" :label="o.label" :value="o.value" />
+            <el-option v-for="o in roleAssignmentOptions" :key="o.value" :label="o.label" :value="o.value" />
           </el-select>
         </el-form-item>
       </el-form>
@@ -409,6 +401,14 @@ useAutoRefresh(() => load(true))
       confirm-text="确认修改"
       :loading="rolesSaving"
       @confirm="submitRoles"
+    />
+    <ReasonDialog
+      v-model="deleteVisible"
+      title="删除用户"
+      :target="deleteTarget ? `${deleteTarget.name}（${deleteTarget.username}）` : ''"
+      confirm-text="确认删除"
+      :loading="deleteSaving"
+      @confirm="submitDelete"
     />
   </div>
 </template>
@@ -428,6 +428,10 @@ useAutoRefresh(() => load(true))
 
 .more-dropdown {
   margin-left: 12px;
+}
+
+:deep(.delete-menu-item) {
+  color: var(--el-color-danger);
 }
 
 @media (max-width: 768px) {

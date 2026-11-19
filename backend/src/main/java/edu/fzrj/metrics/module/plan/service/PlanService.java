@@ -34,6 +34,7 @@ import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.module.task.service.TaskYearActivationService;
+import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -148,8 +149,11 @@ public class PlanService {
                         .eq(TaskYear::getDeleted, 0L)).stream()
                 .collect(Collectors.groupingBy(TaskYear::getTaskId));
 
+        LoginUser user = SecurityUtils.getLoginUser();
+        boolean allData = user.getRoles().contains("ADMIN") || user.getRoles().contains("LEADER");
         List<Long> manualIds = rootAs.stream()
-                .filter(i -> "MANUAL".equals(i.getRollupMode()))
+                .filter(i -> "MANUAL".equals(i.getRollupMode())
+                        && canReadManualActual(i, user, allData))
                 .map(Indicator::getId).toList();
         Map<Long, Map<Integer, IndicatorYearTarget>> manualByYear = manualIds.isEmpty() ? Map.of()
                 : yearTargetMapper.selectList(new LambdaQueryWrapper<IndicatorYearTarget>()
@@ -163,16 +167,17 @@ public class PlanService {
             if (a.getTotalTarget() == null || a.getTotalTarget().compareTo(BigDecimal.ZERO) == 0) {
                 continue;
             }
-            boolean manual = "MANUAL".equals(a.getRollupMode());
+            boolean useManualActual = "MANUAL".equals(a.getRollupMode())
+                    && canReadManualActual(a, user, allData);
             List<Task> indicatorTasks = distributedTasks.stream()
                     .filter(task -> a.getId().equals(task.getTopIndicatorId())
                             || a.getId().equals(task.getIndicatorId()))
                     .toList();
-            if (!manual && indicatorTasks.isEmpty()) {
+            if (!useManualActual && indicatorTasks.isEmpty()) {
                 continue;
             }
             List<MetricCalculator.YearResult> years = new ArrayList<>();
-            if (manual) {
+            if (useManualActual) {
                 Map<Integer, IndicatorYearTarget> byYear = manualByYear.getOrDefault(a.getId(), Map.of());
                 for (int y = plan.getStartYear(); y <= plan.getEndYear(); y++) {
                     IndicatorYearTarget row = byYear.get(y);
@@ -202,6 +207,11 @@ public class PlanService {
             rates.add(CumulativeCalculator.of(a.getStatCaliber(), years, a.getTotalTarget()).rate());
         }
         return CumulativeCalculator.avgRate(rates);
+    }
+
+    private boolean canReadManualActual(Indicator indicator, LoginUser user, boolean allData) {
+        return allData || user.getRoles().contains("SCHOOL_OWNER")
+                && java.util.Objects.equals(indicator.getOwnerId(), user.getUserId());
     }
 
     public Plan requirePlan(Long planId) {

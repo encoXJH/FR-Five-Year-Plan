@@ -1,5 +1,5 @@
 import type { UnitRef, UserRef } from './api'
-import type { ReviewResult, StatCaliber, SubmissionStatus } from './enums'
+import type { ReviewNode, ReviewResult, StatCaliber, SubmissionStatus, SubmitterRole } from './enums'
 import type { FileInfo } from './file'
 
 /**
@@ -26,6 +26,8 @@ export interface ReviewRecord {
   id: string
   reviewer: UserRef | null
   result: ReviewResult
+  /** 新流程审核节点；历史单级审核为 null */
+  reviewNode?: ReviewNode | null
   comment: string | null
   approvedValue: MetricValue | null
   /** 是否管理员代审（API 第 10 章敏感操作标识） */
@@ -65,6 +67,8 @@ export interface SubmissionListItem {
   year: number
   statCaliber: StatCaliber
   status: SubmissionStatus
+  currentReviewNode?: ReviewNode | null
+  submitterRole?: SubmitterRole | null
   value: MetricValue
   revisionNo: number
   version: number
@@ -123,6 +127,7 @@ export interface PendingReviewQuery {
   planId?: string
   indicatorId?: string
   unitId?: string
+  reviewNode?: ReviewNode
   submittedAtFrom?: string
   submittedAtTo?: string
   keyword?: string
@@ -137,7 +142,7 @@ export type PendingReviewItem = SubmissionListItem
 export interface ReviewRequest {
   result: ReviewResult
   comment?: string | null
-  /** 核减认定值（不能大于填报值，60005） */
+  /** 核减认定值（不能大于本级认定值，60005） */
   approvedValue?: MetricValue | null
   /** 当前填报版本，审核乐观锁必传 */
   version: number

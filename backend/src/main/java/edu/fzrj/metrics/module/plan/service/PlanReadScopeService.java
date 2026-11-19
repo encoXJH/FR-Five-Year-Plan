@@ -9,6 +9,7 @@ import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
 import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
@@ -29,12 +30,14 @@ public class PlanReadScopeService {
     private final DataScopeService dataScopeService;
     private final IndicatorMapper indicatorMapper;
     private final TaskMapper taskMapper;
+    private final TaskReadScopeService taskReadScopeService;
 
     public PlanReadScopeService(DataScopeService dataScopeService, IndicatorMapper indicatorMapper,
-                                TaskMapper taskMapper) {
+                                TaskMapper taskMapper, TaskReadScopeService taskReadScopeService) {
         this.dataScopeService = dataScopeService;
         this.indicatorMapper = indicatorMapper;
         this.taskMapper = taskMapper;
+        this.taskReadScopeService = taskReadScopeService;
     }
 
     public List<Plan> filterVisiblePlans(List<Plan> plans) {
@@ -63,20 +66,29 @@ public class PlanReadScopeService {
             List<Long> unitIds = dataScopeService.isUnitScope(user) ? user.getUnitIds() : List.of();
             List<Long> ownedIndicatorIds = dataScopeService.isOwnerScope(user)
                     ? ownedIndicatorIds(user.getUserId()) : List.of();
-            if (unitIds.isEmpty() && ownedIndicatorIds.isEmpty()) {
+            Set<Long> assignedTaskIds = dataScopeService.isAssignedScope(user)
+                    ? taskReadScopeService.staffTaskIds(user) : Set.of();
+            if (unitIds.isEmpty() && ownedIndicatorIds.isEmpty() && assignedTaskIds.isEmpty()) {
                 return List.of();
             }
             query.and(wrapper -> {
-                boolean hasUnit = !unitIds.isEmpty();
-                if (hasUnit) {
+                boolean hasCondition = !unitIds.isEmpty();
+                if (hasCondition) {
                     wrapper.in(Task::getUnitId, unitIds);
                 }
                 if (!ownedIndicatorIds.isEmpty()) {
-                    if (hasUnit) {
+                    if (hasCondition) {
                         wrapper.or();
                     }
                     wrapper.in(Task::getIndicatorId, ownedIndicatorIds)
                             .or().in(Task::getTopIndicatorId, ownedIndicatorIds);
+                    hasCondition = true;
+                }
+                if (!assignedTaskIds.isEmpty()) {
+                    if (hasCondition) {
+                        wrapper.or();
+                    }
+                    wrapper.in(Task::getId, assignedTaskIds);
                 }
             });
         }
@@ -139,6 +151,16 @@ public class PlanReadScopeService {
                             .eq(Task::getDeleted, 0L)
                             .select(Task::getPlanId))
                     .forEach(task -> planIds.add(task.getPlanId()));
+        }
+        if (dataScopeService.isAssignedScope(user)) {
+            Set<Long> assignedTaskIds = taskReadScopeService.staffTaskIds(user);
+            if (!assignedTaskIds.isEmpty()) {
+                taskMapper.selectList(new LambdaQueryWrapper<Task>()
+                                .in(Task::getId, assignedTaskIds)
+                                .eq(Task::getDeleted, 0L)
+                                .select(Task::getPlanId))
+                        .forEach(task -> planIds.add(task.getPlanId()));
+            }
         }
         return planIds;
     }

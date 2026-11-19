@@ -88,6 +88,15 @@ public final class SystemDtos {
     }
 
     @Data
+    @EqualsAndHashCode(callSuper = true)
+    public static class StaffQuery extends PageQuery {
+        @JsonSerialize(using = ToStringSerializer.class)
+        private Long unitId;
+        private String keyword;
+        private Boolean isEnabled;
+    }
+
+    @Data
     public static class UserCreateRequest {
         @NotBlank(message = "登录名必填")
         @Size(max = 64, message = "登录名不超过 64 字")
@@ -128,6 +137,24 @@ public final class SystemDtos {
         private String password;
     }
 
+    @Data
+    public static class StaffPasswordResetRequest {
+        @NotBlank(message = "新密码必填")
+        @Size(min = 8, max = 64, message = "密码长度 8–64 位")
+        private String password;
+        @NotNull(message = "缺少 version（乐观锁版本号）")
+        private Integer version;
+    }
+
+    @Data
+    public static class UserDeleteRequest {
+        @NotNull(message = "缺少 version（乐观锁版本号）")
+        private Integer version;
+        @NotBlank(message = "删除用户必须填写原因（reason）")
+        @Size(min = 1, max = 500, message = "原因长度 1–500 字")
+        private String reason;
+    }
+
     public record UserItem(
             @JsonSerialize(using = ToStringSerializer.class) Long id,
             String username, String name, String phone, String email,
@@ -135,12 +162,13 @@ public final class SystemDtos {
             String unitName,
             List<String> roles,
             Boolean isEnabled, LocalDateTime lastLoginAt, Integer version,
-            @JsonSerialize(contentUsing = ToStringSerializer.class) List<Long> unitIds) {
+            @JsonSerialize(contentUsing = ToStringSerializer.class) List<Long> unitIds,
+            @JsonSerialize(using = ToStringSerializer.class) Long ownerUserId) {
         public UserItem(Long id, String username, String name, String phone, String email,
                         Long unitId, String unitName, List<String> roles,
                         Boolean isEnabled, LocalDateTime lastLoginAt, Integer version) {
             this(id, username, name, phone, email, unitId, unitName, roles, isEnabled, lastLoginAt, version,
-                    unitId == null ? List.of() : List.of(unitId));
+                    unitId == null ? List.of() : List.of(unitId), null);
         }
     }
 

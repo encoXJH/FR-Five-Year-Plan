@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useUserStore } from '@/stores/user'
+import { submissionStatusLabel } from '@/utils/enumLabels'
+import type { ReviewNode } from '@/types/submission'
 
 interface TagStyle {
   type: 'primary' | 'success' | 'info' | 'warning' | 'danger'
@@ -27,6 +29,10 @@ const STATUS_TAG: Record<string, Record<string, TagStyle>> = {
     APPROVED: { type: 'success' },
     REJECTED: { type: 'danger' },
     WITHDRAWN: { type: 'info' },
+  },
+  ReviewNode: {
+    UNIT_REVIEW: { type: 'warning' },
+    LEADER_REVIEW: { type: 'primary' },
   },
   AdjustmentStatus: {
     PENDING_OWNER_REVIEW: { type: 'warning' },
@@ -121,6 +127,10 @@ const DEFAULT_LABELS: Record<string, Record<string, string>> = {
     REJECTED: '已驳回',
     WITHDRAWN: '已撤回',
   },
+  ReviewNode: {
+    UNIT_REVIEW: '学院负责人审核',
+    LEADER_REVIEW: '校级负责人审核',
+  },
   AdjustmentStatus: {
     PENDING_OWNER_REVIEW: '待初审',
     PENDING_RECEIVER_CONFIRM: '待接收方确认',
@@ -173,18 +183,22 @@ const props = defineProps<{
   kind: string
   /** 枚举值，如 PENDING_REVIEW；未知值按原值展示 */
   value: string
+  /** SubmissionStatus=PENDING_REVIEW 时组合显示具体审核节点 */
+  reviewNode?: ReviewNode | null
 }>()
 
 const userStore = useUserStore()
 
 const style = computed<TagStyle>(() => STATUS_TAG[props.kind]?.[props.value] ?? { type: 'info' })
 
-const label = computed(
-  () =>
-    userStore.enums[props.kind]?.[props.value] ??
-    DEFAULT_LABELS[props.kind]?.[props.value] ??
-    props.value,
-)
+const label = computed(() => {
+  if (props.kind === 'SubmissionStatus') {
+    return submissionStatusLabel(props.value, props.reviewNode, userStore.enums)
+  }
+  return userStore.enums[props.kind]?.[props.value]
+    ?? DEFAULT_LABELS[props.kind]?.[props.value]
+    ?? props.value
+})
 </script>
 
 <template>

@@ -27,7 +27,7 @@ const feishuAuth = ref<FeishuAuthorizeInfo | null>(null)
 const autoLoginPending = ref(clientEnv !== 'WEB')
 const feishuLoginLoading = ref(false)
 function redirectTarget(): string {
-  if (userStore.isUnitOwnerOnly) return userStore.homePath
+  if (userStore.isTaskExecutorOnly) return userStore.homePath
   if (userStore.roles.includes('ADMIN')) return '/plans'
   return typeof route.query.redirect === 'string' ? route.query.redirect : '/'
 }

@@ -2,6 +2,7 @@ package edu.fzrj.metrics.module.stats.service;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import edu.fzrj.metrics.common.datascope.DataScopeService;
 import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.entity.IndicatorYearTarget;
@@ -21,7 +22,9 @@ import edu.fzrj.metrics.module.task.entity.TaskDependency;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.module.task.service.TaskDependencyService;
+import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,6 +34,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -68,6 +73,8 @@ class GanttServiceTest {
     private OrgUnitMapper orgUnitMapper;
     @Mock
     private UserRefResolver userRefResolver;
+    @Mock
+    private DataScopeService dataScopeService;
     @InjectMocks
     private GanttService ganttService;
 
@@ -79,6 +86,11 @@ class GanttServiceTest {
         TableInfoHelper.initTableInfo(assistant, TaskYear.class);
         TableInfoHelper.initTableInfo(assistant, Milestone.class);
         TableInfoHelper.initTableInfo(assistant, OrgUnit.class);
+    }
+
+    @AfterEach
+    void clearSecurityContext() {
+        SecurityContextHolder.clearContext();
     }
 
     @Test
@@ -174,6 +186,27 @@ class GanttServiceTest {
 
         assertDecimal("0.77", cell.actualValue());
         assertDecimal("0.770000", cell.completionRate());
+    }
+
+    @Test
+    void 干事甘特图按可见任务重算而不读取手工全校值() {
+        LoginUser staff = new LoginUser(99L, "staff", "干事", 31L, List.of("STAFF"), List.of());
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(staff, null, List.of()));
+        Plan plan = plan(11L, 2026, 2026);
+        Indicator a = indicator(1L, null, "A01", "DIRECT_PERCENT");
+        a.setRollupMode("MANUAL");
+        a.setTotalTarget(BigDecimal.ONE);
+        Task task = task(101L, 1L, 1L, 31L, "A01-C01", "DISTRIBUTED", false);
+        TaskYear year = taskYear(101L, 2026, "1", "0.9", null, null, null);
+        IndicatorYearTarget target = target(1L, 2026, "1");
+        target.setActualValue(new BigDecimal("0.1"));
+        target.setManualActualValue(new BigDecimal("0.77"));
+        stubBasic(plan, List.of(a), List.of(task), Set.of(1L), List.of(year), List.of(target));
+
+        GanttDtos.YearCell cell = ganttService.get(11L, null).nodes().get(0).years().get(0);
+
+        assertDecimal("0.9", cell.actualValue());
     }
 
     @Test

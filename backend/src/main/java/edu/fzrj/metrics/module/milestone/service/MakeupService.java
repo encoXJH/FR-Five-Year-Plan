@@ -11,6 +11,7 @@ import edu.fzrj.metrics.module.plan.service.PlanService;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.module.task.service.TaskService;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
@@ -30,14 +31,17 @@ public class MakeupService {
     private final TaskService taskService;
     private final DataScopeService dataScopeService;
     private final PlanService planService;
+    private final TaskReadScopeService taskReadScopeService;
 
     public MakeupService(MakeupMapper makeupMapper, TaskYearMapper taskYearMapper,
-                         TaskService taskService, DataScopeService dataScopeService, PlanService planService) {
+                         TaskService taskService, DataScopeService dataScopeService, PlanService planService,
+                         TaskReadScopeService taskReadScopeService) {
         this.makeupMapper = makeupMapper;
         this.taskYearMapper = taskYearMapper;
         this.taskService = taskService;
         this.dataScopeService = dataScopeService;
         this.planService = planService;
+        this.taskReadScopeService = taskReadScopeService;
     }
 
     /** 某 B 任务的待补做记录（按数据范围） */
@@ -56,7 +60,7 @@ public class MakeupService {
     public MakeupDtos.View complete(Long makeupId, Integer version) {
         Makeup makeup = requireMakeup(makeupId);
         Task task = taskService.requireTask(makeup.getTaskId());
-        dataScopeService.canAccessUnit(task.getUnitId());
+        taskReadScopeService.requireSubmitter(task);
         taskService.requireCurrentTask(task);
         planService.requireNotArchived(planService.requirePlan(task.getPlanId()));
         if (version == null) {

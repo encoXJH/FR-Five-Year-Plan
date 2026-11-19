@@ -21,6 +21,7 @@ import edu.fzrj.metrics.module.submission.mapper.SubmissionMapper;
 import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -58,6 +59,7 @@ class MaterialServiceTest {
     @Mock private SysUserMapper sysUserMapper;
     @Mock private OrgUnitMapper orgUnitMapper;
     @Mock private MaterialQueryMapper materialQueryMapper;
+    @Mock private TaskReadScopeService taskReadScopeService;
     @InjectMocks private MaterialService materialService;
 
     private MockedStatic<SecurityUtils> security;
@@ -224,6 +226,45 @@ class MaterialServiceTest {
                 () -> materialService.requireExportable(List.of(20L)));
 
         assertEquals(20004, error.getErrorCode().getCode());
+        verify(fileInfoMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void 纯干事无分配任务时材料列表为空() {
+        login(new LoginUser(2L, "staff", "干事", 100L, List.of("STAFF"), List.of("material:view")));
+        when(taskReadScopeService.staffTaskIds(any())).thenReturn(java.util.Set.of());
+
+        var result = materialService.list(4L, null, null, null, null, null, null, 1, 20);
+
+        assertEquals(0, result.getTotal());
+        verify(materialQueryMapper, never()).countMaterials(any());
+    }
+
+    @Test
+    void 干事材料与ZIP查询仅携带实时分配任务范围() {
+        LoginUser user = new LoginUser(2L, "staff", "干事", 100L, List.of("STAFF"), List.of("material:view"));
+        login(user);
+        when(taskReadScopeService.staffTaskIds(user)).thenReturn(java.util.Set.of(30L));
+        when(materialQueryMapper.countMaterials(any())).thenReturn(0L);
+
+        materialService.list(4L, null, null, null, null, null, null, 1, 20);
+
+        ArgumentCaptor<MaterialQuery> captor = ArgumentCaptor.forClass(MaterialQuery.class);
+        verify(materialQueryMapper).countMaterials(captor.capture());
+        assertEquals(List.of(30L), captor.getValue().staffTaskIds());
+        assertEquals(null, captor.getValue().unitScope());
+    }
+
+    @Test
+    void 移除分配后干事立即失去材料导出范围() {
+        LoginUser user = new LoginUser(2L, "staff", "干事", 100L, List.of("STAFF"), List.of("material:view"));
+        login(user);
+        when(taskReadScopeService.staffTaskIds(user)).thenReturn(java.util.Set.of());
+
+        BizException error = assertThrows(BizException.class,
+                () -> materialService.requireExportable(List.of(20L)));
+
+        assertEquals(20005, error.getErrorCode().getCode());
         verify(fileInfoMapper, never()).selectOne(any());
     }
 

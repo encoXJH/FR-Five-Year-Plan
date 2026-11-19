@@ -47,6 +47,7 @@ import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.module.task.service.TaskService;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
@@ -106,6 +107,7 @@ public class AdjustmentService {
     private final UserRefResolver userRefResolver;
     private final ObjectMapper objectMapper;
     private final UserUnitService userUnitService;
+    private final TaskReadScopeService taskReadScopeService;
 
     public AdjustmentService(AdjustmentMapper adjustmentMapper, AdjustmentItemMapper itemMapper,
                              ApprovalStepMapper stepMapper, TaskMapper taskMapper,
@@ -117,7 +119,8 @@ public class AdjustmentService {
                              NotificationMapper notificationMapper, TaskService taskService, IndicatorService indicatorService,
                              PlanService planService, OrgUnitAdminService orgUnitAdminService,
                              DataScopeService dataScopeService, UserRefResolver userRefResolver,
-                             ObjectMapper objectMapper, UserUnitService userUnitService) {
+                             ObjectMapper objectMapper, UserUnitService userUnitService,
+                             TaskReadScopeService taskReadScopeService) {
         this.adjustmentMapper = adjustmentMapper;
         this.itemMapper = itemMapper;
         this.stepMapper = stepMapper;
@@ -141,6 +144,7 @@ public class AdjustmentService {
         this.userRefResolver = userRefResolver;
         this.objectMapper = objectMapper;
         this.userUnitService = userUnitService;
+        this.taskReadScopeService = taskReadScopeService;
     }
 
     // ---------------- 试算（不保存） ----------------
@@ -258,7 +262,10 @@ public class AdjustmentService {
                 .eq(StringUtils.hasText(query.getType()), Adjustment::getType, query.getType())
                 .orderByDesc(Adjustment::getCreatedAt);
         switch (scope) {
-            case "MINE" -> wrapper.eq(Adjustment::getApplicantId, user.getUserId());
+            case "MINE" -> {
+                wrapper.eq(Adjustment::getApplicantId, user.getUserId());
+                applyDataScope(wrapper, user);
+            }
             case "TODO" -> {
                 List<Long> ids = todoAdjustmentIds(user);
                 if (ids.isEmpty()) {
@@ -425,7 +432,11 @@ public class AdjustmentService {
     /** 详情访问：全校 / 申请人 / 转出与接收单元 / 指标有效负责人 */
     public void requireAccess(Adjustment adjustment) {
         LoginUser user = SecurityUtils.getLoginUser();
-        if (dataScopeService.isAllData(user) || adjustment.getApplicantId().equals(user.getUserId())) {
+        if (dataScopeService.isAllData(user)) {
+            return;
+        }
+        boolean responsibleScope = dataScopeService.isUnitScope(user) || dataScopeService.isOwnerScope(user);
+        if (responsibleScope && adjustment.getApplicantId().equals(user.getUserId())) {
             return;
         }
         if (dataScopeService.isUnitScope(user)
@@ -438,6 +449,20 @@ public class AdjustmentService {
             Long owner = indicatorService.effectiveOwnerOf(indicator);
             if (owner != null && owner.equals(user.getUserId())) {
                 return;
+            }
+        }
+        if (dataScopeService.isAssignedScope(user)) {
+            Set<Long> assignedTaskIds = taskReadScopeService.staffTaskIds(user);
+            if (adjustment.getTaskId() != null && assignedTaskIds.contains(adjustment.getTaskId())) {
+                return;
+            }
+            if (!assignedTaskIds.isEmpty()) {
+                boolean assigned = itemsOf(adjustment.getId()).stream().anyMatch(item ->
+                        item.getFromTaskId() != null && assignedTaskIds.contains(item.getFromTaskId())
+                                || item.getToTaskId() != null && assignedTaskIds.contains(item.getToTaskId()));
+                if (assigned) {
+                    return;
+                }
             }
         }
         throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
@@ -1018,14 +1043,34 @@ public class AdjustmentService {
         List<Long> ownedIndicatorIds = dataScopeService.isOwnerScope(user)
                 ? ownedIndicatorIdsWithChildren(user.getUserId()) : List.of();
         List<Long> unitIds = dataScopeService.isUnitScope(user) ? user.getUnitIds() : List.of();
+        boolean responsibleScope = dataScopeService.isUnitScope(user) || dataScopeService.isOwnerScope(user);
+        Set<Long> assignedTaskIds = dataScopeService.isAssignedScope(user)
+                ? taskReadScopeService.staffTaskIds(user) : Set.of();
+        List<Long> assignedItemAdjustmentIds = assignedTaskIds.isEmpty() ? List.of()
+                : itemMapper.selectList(new LambdaQueryWrapper<AdjustmentItem>()
+                        .eq(AdjustmentItem::getDeleted, 0L)
+                        .and(item -> item.in(AdjustmentItem::getFromTaskId, assignedTaskIds)
+                                .or().in(AdjustmentItem::getToTaskId, assignedTaskIds))
+                        .select(AdjustmentItem::getAdjustmentId))
+                .stream().map(AdjustmentItem::getAdjustmentId).distinct().toList();
         wrapper.and(w -> {
-            w.eq(Adjustment::getApplicantId, user.getUserId());
+            if (responsibleScope) {
+                w.eq(Adjustment::getApplicantId, user.getUserId());
+            } else {
+                w.eq(Adjustment::getId, -1L);
+            }
             if (!unitIds.isEmpty()) {
                 w.or(x -> x.in(Adjustment::getFromUnitId, unitIds)
                         .or().in(Adjustment::getToUnitId, unitIds));
             }
             if (!ownedIndicatorIds.isEmpty()) {
                 w.or(x -> x.in(Adjustment::getIndicatorId, ownedIndicatorIds));
+            }
+            if (!assignedTaskIds.isEmpty()) {
+                w.or(x -> x.in(Adjustment::getTaskId, assignedTaskIds));
+            }
+            if (!assignedItemAdjustmentIds.isEmpty()) {
+                w.or(x -> x.in(Adjustment::getId, assignedItemAdjustmentIds));
             }
         });
     }
@@ -1045,12 +1090,20 @@ public class AdjustmentService {
     private List<Long> todoAdjustmentIds(LoginUser user) {
         boolean admin = user.getRoles().contains("ADMIN");
         boolean leader = user.getRoles().contains("LEADER");
+        boolean schoolOwner = user.getRoles().contains("SCHOOL_OWNER");
         boolean unitOwner = user.getRoles().contains("UNIT_OWNER") && !user.getUnitIds().isEmpty();
+        if (!admin && !leader && !schoolOwner && !unitOwner) {
+            return List.of();
+        }
         LambdaQueryWrapper<ApprovalStep> wrapper = new LambdaQueryWrapper<ApprovalStep>()
                 .isNull(ApprovalStep::getDecision);
         wrapper.and(main -> {
-            main.nested(x -> x.eq(ApprovalStep::getNode, AdjustmentRules.OWNER_REVIEW)
-                    .eq(ApprovalStep::getExpectedApproverId, user.getUserId()));
+            if (admin || schoolOwner) {
+                main.nested(x -> x.eq(ApprovalStep::getNode, AdjustmentRules.OWNER_REVIEW)
+                        .eq(ApprovalStep::getExpectedApproverId, user.getUserId()));
+            } else {
+                main.eq(ApprovalStep::getId, -1L);
+            }
             if (admin) {
                 main.or(x -> x.eq(ApprovalStep::getNode, AdjustmentRules.OWNER_REVIEW)
                         .isNull(ApprovalStep::getExpectedApproverId));

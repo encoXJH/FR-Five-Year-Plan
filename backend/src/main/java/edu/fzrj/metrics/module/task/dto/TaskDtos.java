@@ -181,6 +181,15 @@ public final class TaskDtos {
             Integer version) {
     }
 
+    @Data
+    public static class StaffPutRequest {
+        @NotNull(message = "staffIds 不能为空")
+        private List<Long> staffIds;
+
+        @NotNull(message = "缺少 version（乐观锁版本号）")
+        private Integer version;
+    }
+
     /** B 年度视图（详情）；actualNumerator / actualDenominator 仅 RATIO 口径有值 */
     public record TaskYearView(
             Integer year,
@@ -219,6 +228,9 @@ public final class TaskDtos {
             String deadline,
             Integer version,
             LocalDateTime createdAt,
-            LocalDateTime updatedAt) {
+            LocalDateTime updatedAt,
+            List<UserRef> staff,
+            List<UserRef> assignableStaff,
+            Boolean canAssignStaff) {
     }
 }

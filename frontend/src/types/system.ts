@@ -74,9 +74,43 @@ export interface SystemUserSaveRequest {
   phone?: string | null
   email?: string | null
   unitId?: string | null
+  unitIds?: string[]
   roles?: Role[]
   isEnabled?: boolean
   version?: number
+}
+
+/** 学院用户管理中的纯干事（GET /users/staff；手机号已脱敏） */
+export interface StaffUser extends SystemUser {
+  ownerUserId?: string | null
+  ownerName?: string | null
+}
+
+export type StaffUserQuery = {
+  keyword?: string
+  unitId?: string
+  isEnabled?: boolean
+  page?: number
+  pageSize?: number
+}
+
+/** PATCH /users/staff/{userId}；phone 缺省表示不修改 */
+export interface StaffUserUpdateRequest {
+  name?: string
+  phone?: string
+  unitId?: string
+  isEnabled?: boolean
+  version: number
+}
+
+export interface StaffPasswordResetRequest {
+  password: string
+  version: number
+}
+
+export interface SystemUserDeleteRequest {
+  version: number
+  reason: string
 }
 
 /** PUT /users/{userId}/roles 请求体（敏感操作必须带 reason，API 第 10 章） */

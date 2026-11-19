@@ -57,14 +57,14 @@ public class AuthController {
         authService.logout(request == null ? null : request.getRefreshToken());
     }
 
-    @Operation(summary = "当前用户、角色、权限码、数据范围")
+    @Operation(summary = "当前用户、角色、权限码、数据范围及是否仍使用初始密码")
     @GetMapping("/me")
     public MeResponse me() {
         return authService.me();
     }
 
     @Operation(summary = "当前用户修改密码",
-            description = "已登录用户；新密码与确认密码均为 8–64 位且必须一致；"
+            description = "已登录用户；新密码与确认密码均为 8–64 位且必须一致，新密码不能仍为初始密码；"
                     + "成功后清除登录锁定并吊销该用户全部 refreshToken，审计不记录密码或哈希")
     @PostMapping("/change-password")
     @PreAuthorize("isAuthenticated()")

@@ -1,6 +1,8 @@
 package edu.fzrj.metrics.module.task.service;
 
 import edu.fzrj.metrics.common.api.UserRef;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import edu.fzrj.metrics.common.datascope.DataScopeService;
 import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
@@ -9,16 +11,21 @@ import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.plan.service.PlanService;
 import edu.fzrj.metrics.module.system.entity.OrgUnit;
 import edu.fzrj.metrics.module.system.entity.SysUser;
+import edu.fzrj.metrics.module.system.entity.UserRole;
 import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
+import edu.fzrj.metrics.module.system.mapper.UserRoleMapper;
 import edu.fzrj.metrics.module.system.service.OrgUnitAdminService;
 import edu.fzrj.metrics.module.system.service.UserRefResolver;
+import edu.fzrj.metrics.module.system.service.UserUnitService;
 import edu.fzrj.metrics.module.task.dto.TaskDtos;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.security.LoginUser;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -71,6 +79,10 @@ class AllocationServiceTest {
     private UserRefResolver userRefResolver;
     @Mock
     private DataScopeService dataScopeService;
+    @Mock
+    private UserRoleMapper userRoleMapper;
+    @Mock
+    private UserUnitService userUnitService;
 
     @InjectMocks
     private AllocationService allocationService;
@@ -80,6 +92,12 @@ class AllocationServiceTest {
     private Task historicalTask;
     private OrgUnit unit;
     private List<TaskYear> historicalYears;
+
+    @BeforeAll
+    static void initMybatisLambdaCache() {
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(), "");
+        TableInfoHelper.initTableInfo(assistant, UserRole.class);
+    }
 
     @BeforeEach
     void setUp() {
@@ -157,6 +175,8 @@ class AllocationServiceTest {
         assertEquals(0, view.summary().get(1).allocatedTarget().compareTo(new BigDecimal("20")));
         verify(orgUnitAdminService, never()).requireBAssignable(any());
         verify(indicatorService).updateIndicator(indicator);
+        verify(userRoleMapper, never()).selectCount(any());
+        verify(userUnitService, never()).unitIdsOf(anyLong());
         verifyNoTaskWrites();
     }
 
@@ -208,7 +228,10 @@ class AllocationServiceTest {
         when(orgUnitAdminService.requireBAssignable(UNIT_ID)).thenReturn(unit);
         SysUser owner = new SysUser();
         owner.setId(OWNER_ID);
-        when(userRefResolver.mapOf(any())).thenReturn(Map.of(OWNER_ID, owner));
+        owner.setIsEnabled(true);
+        when(userRefResolver.mapActiveOf(any())).thenReturn(Map.of(OWNER_ID, owner));
+        when(userRoleMapper.selectCount(any())).thenReturn(1L);
+        when(userUnitService.unitIdsOf(OWNER_ID)).thenReturn(List.of(UNIT_ID));
         doAnswer(invocation -> {
             Task task = invocation.getArgument(0);
             task.setId(100L);
@@ -301,7 +324,15 @@ class AllocationServiceTest {
         when(orgUnitAdminService.requireUnit(UNIT_ID)).thenReturn(unit);
         when(orgUnitAdminService.requireBAssignable(42L)).thenReturn(newUnit);
         when(taskYearMapper.selectList(any())).thenReturn(historicalYears, List.of(), List.of());
-        when(userRefResolver.mapOf(any())).thenReturn(Map.of(OWNER_ID, new SysUser(), 52L, new SysUser()));
+        SysUser firstOwner = new SysUser();
+        firstOwner.setId(OWNER_ID);
+        firstOwner.setIsEnabled(true);
+        SysUser secondOwner = new SysUser();
+        secondOwner.setId(52L);
+        secondOwner.setIsEnabled(true);
+        when(userRefResolver.mapActiveOf(any())).thenReturn(Map.of(OWNER_ID, firstOwner, 52L, secondOwner));
+        when(userRoleMapper.selectCount(any())).thenReturn(1L);
+        when(userUnitService.unitIdsOf(52L)).thenReturn(List.of(42L));
         doAnswer(invocation -> {
             invocation.getArgument(0, Task.class).setId(32L);
             return 1;
@@ -332,7 +363,6 @@ class AllocationServiceTest {
         when(taskMapper.selectList(any())).thenReturn(List.of(historicalTask));
         when(orgUnitAdminService.requireUnit(UNIT_ID)).thenReturn(unit);
         when(taskYearMapper.selectList(any())).thenReturn(historicalYears);
-        when(userRefResolver.mapOf(any())).thenReturn(Map.of(OWNER_ID, new SysUser(), 52L, new SysUser()));
 
         BizException targetError = assertThrows(BizException.class,
                 () -> allocationService.putAllocation(INDICATOR_ID,
@@ -361,6 +391,70 @@ class AllocationServiceTest {
 
         assertEquals(50003, error.getErrorCode().getCode());
         verifyNoTaskWrites();
+    }
+
+    @Test
+    void 纯STAFF不能被保存为任务负责人() {
+        usePureA();
+        stubNewAllocation();
+        SysUser staff = new SysUser();
+        staff.setId(52L);
+        staff.setIsEnabled(true);
+        when(userRefResolver.mapActiveOf(any())).thenReturn(Map.of(52L, staff));
+        when(userRoleMapper.selectCount(any())).thenReturn(0L);
+
+        BizException error = assertThrows(BizException.class,
+                () -> allocationService.putAllocation(INDICATOR_ID,
+                        request(List.of(row(52L, "10", "20")))));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        assertTrue(error.getMessage().contains("STAFF"));
+        verify(userUnitService, never()).unitIdsOf(anyLong());
+        verifyNoTaskWrites();
+    }
+
+    @Test
+    void 停用用户不能被保存为任务负责人() {
+        usePureA();
+        stubNewAllocation();
+        SysUser disabled = new SysUser();
+        disabled.setId(52L);
+        disabled.setIsEnabled(false);
+        when(userRefResolver.mapActiveOf(any())).thenReturn(Map.of(52L, disabled));
+
+        BizException error = assertThrows(BizException.class,
+                () -> allocationService.putAllocation(INDICATOR_ID,
+                        request(List.of(row(52L, "10", "20")))));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        verify(userRoleMapper, never()).selectCount(any());
+        verifyNoTaskWrites();
+    }
+
+    @Test
+    void 负责人必须属于任务单元user_unit() {
+        usePureA();
+        stubNewAllocation();
+        SysUser owner = new SysUser();
+        owner.setId(52L);
+        owner.setIsEnabled(true);
+        when(userRefResolver.mapActiveOf(any())).thenReturn(Map.of(52L, owner));
+        when(userRoleMapper.selectCount(any())).thenReturn(1L);
+        when(userUnitService.unitIdsOf(52L)).thenReturn(List.of(42L));
+
+        BizException error = assertThrows(BizException.class,
+                () -> allocationService.putAllocation(INDICATOR_ID,
+                        request(List.of(row(52L, "10", "20")))));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        verifyNoTaskWrites();
+    }
+
+    private void stubNewAllocation() {
+        when(indicatorService.requireIndicator(INDICATOR_ID)).thenReturn(indicator);
+        when(planService.requirePlan(PLAN_ID)).thenReturn(plan);
+        when(taskMapper.selectList(any())).thenReturn(List.of());
+        when(orgUnitAdminService.requireBAssignable(UNIT_ID)).thenReturn(unit);
     }
 
     private void usePureA() {

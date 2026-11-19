@@ -27,6 +27,7 @@ public final class RolePermissions {
     public static final String AUDIT_LOG_VIEW = "audit-log:view";
     public static final String AUDIT_LOG_EXPORT = "audit-log:export";
     public static final String SYSTEM_MANAGE = "system:manage";
+    public static final String USER_CREATE = "user:create";
     public static final String MATERIAL_VIEW = "material:view";
     public static final String MATERIAL_UPLOAD = "material:upload";
 
@@ -34,17 +35,17 @@ public final class RolePermissions {
             PLAN_MANAGE, INDICATOR_EDIT, ALLOCATION_EDIT, TASK_DISTRIBUTE, TASK_ACCEPT,
             SUBMISSION_SUBMIT, SUBMISSION_REVIEW, ADJUSTMENT_APPLY, ADJUSTMENT_DECIDE,
             SETTLEMENT_MANAGE, SCREEN_VIEW, STATS_VIEW,
-            AUDIT_LOG_VIEW, AUDIT_LOG_EXPORT, SYSTEM_MANAGE, MATERIAL_VIEW, MATERIAL_UPLOAD);
+            AUDIT_LOG_VIEW, AUDIT_LOG_EXPORT, SYSTEM_MANAGE, USER_CREATE, MATERIAL_VIEW, MATERIAL_UPLOAD);
 
     private static final Map<String, Set<String>> ROLE_MAP = Map.of(
             "ADMIN", ALL,
-            "LEADER", Set.of(ADJUSTMENT_DECIDE, SCREEN_VIEW, STATS_VIEW,
-                    AUDIT_LOG_VIEW, MATERIAL_VIEW),
+            "LEADER", Set.of(SUBMISSION_REVIEW, ADJUSTMENT_DECIDE, SCREEN_VIEW, STATS_VIEW,
+                    AUDIT_LOG_VIEW, USER_CREATE, MATERIAL_VIEW),
             "SCHOOL_OWNER", Set.of(INDICATOR_EDIT, ALLOCATION_EDIT, TASK_DISTRIBUTE,
-                    SUBMISSION_REVIEW, ADJUSTMENT_APPLY, ADJUSTMENT_DECIDE, STATS_VIEW,
-                    MATERIAL_VIEW, MATERIAL_UPLOAD),
-            "UNIT_OWNER", Set.of(SUBMISSION_SUBMIT, ADJUSTMENT_DECIDE, STATS_VIEW,
-                    MATERIAL_VIEW, MATERIAL_UPLOAD));
+                    ADJUSTMENT_APPLY, ADJUSTMENT_DECIDE, STATS_VIEW,
+                    USER_CREATE, MATERIAL_VIEW, MATERIAL_UPLOAD),
+            "UNIT_OWNER", Set.of(SUBMISSION_SUBMIT, SUBMISSION_REVIEW, ADJUSTMENT_DECIDE, STATS_VIEW,
+                    USER_CREATE, MATERIAL_VIEW, MATERIAL_UPLOAD));
 
     public static final List<String> ROLE_ORDER = List.of("ADMIN", "LEADER", "SCHOOL_OWNER", "UNIT_OWNER");
 
@@ -52,7 +53,8 @@ public final class RolePermissions {
             "ADMIN", "平台管理员",
             "LEADER", "校级负责人",
             "SCHOOL_OWNER", "建设方向负责人",
-            "UNIT_OWNER", "学院项目负责人");
+            "UNIT_OWNER", "学院项目负责人",
+            "STAFF", "干事");
 
     /**
      * 权限目录。lockedRoles 表示该角色必须保留的权限，configurableRoles 表示允许管理员开关的角色；
@@ -79,8 +81,8 @@ public final class RolePermissions {
                     "历史任务接收确认权限；现行普通下发无需确认", Set.of(), ADMIN_ONLY),
             new PermissionDefinition(SUBMISSION_SUBMIT, "完成值填报", "任务执行",
                     "填写完成值、上传佐证材料并提交审核", Set.of("UNIT_OWNER"), ADMIN_ONLY),
-            new PermissionDefinition(SUBMISSION_REVIEW, "填报审核", "任务执行",
-                    "审核负责范围内的学院填报", Set.of("SCHOOL_OWNER"), ADMIN_ONLY),
+            new PermissionDefinition(SUBMISSION_REVIEW, "审核中心", "任务执行",
+                    "按当前审核节点处理本人可审核的学院填报", Set.of("LEADER"), Set.of("ADMIN", "UNIT_OWNER")),
             new PermissionDefinition(ADJUSTMENT_APPLY, "发起调整", "调整审批",
                     "发起符合业务规则的延期、转移等调整申请", Set.of("SCHOOL_OWNER"), ADMIN_ONLY),
             new PermissionDefinition(ADJUSTMENT_DECIDE, "调整审批", "调整审批",
@@ -97,6 +99,9 @@ public final class RolePermissions {
                     "导出全校操作日志", Set.of(), ADMIN_ONLY),
             new PermissionDefinition(SYSTEM_MANAGE, "系统管理", "系统与材料",
                     "管理组织、用户、角色权限、字典、参数和集成", Set.of(), ADMIN_ONLY),
+            new PermissionDefinition(USER_CREATE, "用户添加", "系统与材料",
+                    "按创建人角色矩阵创建用户，其他用户管理仍需要系统管理权限",
+                    Set.of("LEADER", "SCHOOL_OWNER", "UNIT_OWNER"), ADMIN_ONLY),
             new PermissionDefinition(MATERIAL_VIEW, "材料库查看", "系统与材料",
                     "检索、预览和下载本人数据范围内的材料",
                     Set.of("LEADER", "SCHOOL_OWNER", "UNIT_OWNER"), ADMIN_ONLY),

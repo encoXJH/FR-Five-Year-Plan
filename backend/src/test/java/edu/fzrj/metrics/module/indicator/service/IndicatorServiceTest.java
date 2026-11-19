@@ -20,6 +20,7 @@ import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.service.UserRefResolver;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
@@ -67,6 +68,8 @@ class IndicatorServiceTest {
     private DataScopeService dataScopeService;
     @Mock
     private PlanReadScopeService planReadScopeService;
+    @Mock
+    private TaskReadScopeService taskReadScopeService;
 
     @InjectMocks
     private IndicatorService indicatorService;

@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 校级审核接口（API 约定 15.5）
+ * 两级填报审核接口（API 约定 15.5）
  */
 @Tag(name = "审核")
 @RestController
@@ -31,8 +31,9 @@ public class ReviewController {
         this.reviewService = reviewService;
     }
 
-    @Operation(summary = "待审核列表（过滤计划 / 学院 / 指标 / 年度 / 关键字 / 提交时间）",
-            description = "权限：submission:review；建设方向负责人只待审本人负责指标的")
+    @Operation(summary = "待审核列表（过滤计划 / 学院 / 指标 / 年度 / 审核节点 / 关键字 / 提交时间）",
+            description = "权限：submission:review；学院负责人仅审核归属干事且当前为院审的填报，"
+                    + "校级负责人仅终审校审记录，管理员按当前节点代审")
     @GetMapping("/reviews/pending")
     @PreAuthorize("hasAuthority('submission:review')")
     public PageResult<SubmissionDtos.ListItem> pending(@ModelAttribute SubmissionDtos.PendingQuery query) {
@@ -40,8 +41,9 @@ public class ReviewController {
     }
 
     @Operation(summary = "审核：{ result, comment, approvedValue? }，approvedValue 用于核减",
-            description = "权限：submission:review（指标负责人；管理员代审 reason 选填）；必须带 Idempotency-Key；"
-                    + "驳回必须意见 60004 / 认定值不能大于填报值 60005 / 年度已锁定 60003")
+            description = "权限：submission:review（学院负责人初审、校级负责人终审；管理员代审 reason 选填）；"
+                    + "必须带 Idempotency-Key；院审通过仅转校审，终审通过才计完成值；"
+                    + "驳回必须意见 60004 / 认定值不能大于本级认定值 60005 / 年度已锁定 60003")
     @PostMapping("/submissions/{submissionId}/review")
     @PreAuthorize("hasAuthority('submission:review')")
     @Idempotent

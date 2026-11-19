@@ -7,6 +7,7 @@ import PageState from '@/components/PageState.vue'
 import PlanSwitcher from '@/components/PlanSwitcher.vue'
 import MetricValueInput from '@/components/MetricValueInput.vue'
 import AttachmentList from '@/components/AttachmentList.vue'
+import SubmissionReviewTimeline from '@/components/SubmissionReviewTimeline.vue'
 import { batchReview, listPendingReviews, reviewSubmission } from '@/api/review'
 import { getSubmission, listSubmissions } from '@/api/submission'
 import { listIndicators } from '@/api/indicator'
@@ -17,7 +18,10 @@ import { useUserStore } from '@/stores/user'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { getCurrentPlan } from '@/utils/currentPlan'
 import { ApiError } from '@/utils/request'
-import { formatDateTime, formatPercent } from '@/utils/format'
+import { formatDateTime } from '@/utils/format'
+import { enumOptions } from '@/utils/enumLabels'
+import { canReviewSubmission, initialReviewValue } from '@/utils/review'
+import type { ReviewNodeTarget } from '@/utils/review'
 import {
   approvedReduction,
   buildMetricValue,
@@ -26,7 +30,7 @@ import {
   parseSubmissionRemark,
 } from '@/utils/submission'
 import type { PageResult } from '@/types/api'
-import type { StatCaliber } from '@/types/enums'
+import type { ReviewNode, StatCaliber } from '@/types/enums'
 import type { MetricValue, PendingReviewItem, SubmissionDetail, SubmissionListItem } from '@/types/submission'
 import type { PlanCard } from '@/types/plan'
 
@@ -55,9 +59,13 @@ const filters = reactive({
   planId: (typeof route.query.planId === 'string' ? route.query.planId : '') || getCurrentPlan()?.id || '',
   indicatorId: '',
   unitId: '',
+  reviewNode: (route.query.reviewNode === 'UNIT_REVIEW' || route.query.reviewNode === 'LEADER_REVIEW'
+    ? route.query.reviewNode
+    : '') as '' | ReviewNode,
   keyword: '',
   dateRange: null as [string, string] | null,
 })
+const reviewNodeOptions = computed(() => enumOptions('ReviewNode', userStore.enums))
 
 const indicatorPickerVisible = ref(false)
 const unitPickerVisible = ref(false)
@@ -124,12 +132,26 @@ const page = ref<PageResult<PendingReviewItem>>({ items: [], total: 0, page: 1, 
 const checkedIds = ref<string[]>([])
 const selectedId = ref<string | null>(null)
 
+function canOperate(item: ReviewNodeTarget): boolean {
+  return userStore.can('submission:review') && canReviewSubmission(userStore.roles, item)
+}
+
+function reviewGuardMessage(item: ReviewNodeTarget): string {
+  if (item.status !== 'PENDING_REVIEW') return '该填报当前不在待审核状态'
+  if (item.currentReviewNode === 'UNIT_REVIEW') return '当前为学院负责人审核节点，仅任务负责人或管理员可处理'
+  if (item.currentReviewNode === 'LEADER_REVIEW') return '当前为校级负责人审核节点，仅校级负责人或管理员可处理'
+  return '当前填报缺少有效审核节点，暂不能处理'
+}
+
+const operablePageItems = computed(() => page.value.items.filter(canOperate))
+
 function currentQuery() {
   const [from, to] = filters.dateRange ?? [undefined, undefined]
   return {
     planId: filters.planId || undefined,
     indicatorId: filters.indicatorId || undefined,
     unitId: filters.unitId || undefined,
+    reviewNode: filters.reviewNode || undefined,
     keyword: filters.keyword || undefined,
     submittedAtFrom: from ? `${from}T00:00:00+08:00` : undefined,
     submittedAtTo: to ? `${to}T23:59:59+08:00` : undefined,
@@ -163,9 +185,15 @@ function applyFilters(): void {
   void loadList()
 }
 
+function chooseReviewNode(value: string): void {
+  filters.reviewNode = value === 'UNIT_REVIEW' || value === 'LEADER_REVIEW' ? value : ''
+  applyFilters()
+}
+
 function resetFilters(): void {
   filters.indicatorId = ''
   filters.unitId = ''
+  filters.reviewNode = ''
   filters.keyword = ''
   filters.dateRange = null
   applyFilters()
@@ -187,6 +215,20 @@ const valueText = computed(() =>
 )
 const remarkParts = computed(() => parseSubmissionRemark(detail.value?.remark))
 const detailFiles = computed(() => detail.value?.files ?? [])
+const canOperateDetail = computed(() => detail.value ? canOperate(detail.value) : false)
+const currentNodeHint = computed(() => {
+  const item = detail.value
+  if (!item) return ''
+  if (item.currentReviewNode === 'UNIT_REVIEW') {
+    return '学院负责人初审通过后转校级负责人终审，暂不认定完成值。'
+  }
+  if (item.currentReviewNode === 'LEADER_REVIEW') {
+    return item.approvedValue
+      ? '校级负责人终审默认继承院审认定值，可继续核减；终审通过后计入完成值。'
+      : '校级负责人终审通过后计入完成值。'
+  }
+  return ''
+})
 
 async function loadDetail(id: string): Promise<void> {
   detailLoadSequence += 1
@@ -221,25 +263,27 @@ const approving = ref(false)
 const rejecting = ref(false)
 
 function initReviewForm(data: SubmissionDetail): void {
-  reviewValue.value = { ...data.value }
+  reviewValue.value = initialReviewValue(data)
   comment.value = ''
   reviewReason.value = ''
 }
 
+const reviewBaseline = computed(() => detail.value ? initialReviewValue(detail.value) : {})
 const approvedValue = computed(() =>
   caliber.value === 'BOOLEAN'
-    ? buildMetricValue(caliber.value, { achieved: detail.value?.value.achieved ?? null })
+    ? buildMetricValue(caliber.value, { achieved: reviewBaseline.value.achieved ?? null })
     : buildMetricValue(caliber.value, reviewValue.value),
 )
 const reduction = computed(() =>
-  detail.value ? approvedReduction(caliber.value, detail.value.value, approvedValue.value) : null,
+  detail.value ? approvedReduction(caliber.value, reviewBaseline.value, approvedValue.value) : null,
 )
 
 function validateApproved(): string[] {
   const errors: string[] = []
   if (!detail.value) return errors
-  if (caliber.value !== 'BOOLEAN' && !isApprovedValueValid(caliber.value, detail.value.value, approvedValue.value)) {
-    errors.push('认定值不能大于填报值（60005）')
+  if (caliber.value !== 'BOOLEAN'
+    && !isApprovedValueValid(caliber.value, reviewBaseline.value, approvedValue.value)) {
+    errors.push('认定值不能大于本级认定值（60005）')
   }
   if (reduction.value !== null && !comment.value.trim()) {
     errors.push('核减认定值时必须填写审核意见')
@@ -250,18 +294,22 @@ function validateApproved(): string[] {
 async function handleApprove(): Promise<void> {
   const target = detail.value
   if (!target) return
+  if (!canOperate(target)) {
+    showToast(reviewGuardMessage(target))
+    return
+  }
   const errors = validateApproved()
   if (errors.length > 0) {
     showToast(errors[0])
     return
   }
+  const isUnitReview = target.currentReviewNode === 'UNIT_REVIEW'
+  const reductionText = reduction.value !== null ? `，本级认定值核减 ${reduction.value}` : ''
   try {
     const { showConfirmDialog } = await import('vant')
     await showConfirmDialog({
-      title: '通过填报',
-      message: reduction.value !== null
-        ? `确认通过「${target.task?.code ?? ''}」的填报？认定值核减 ${reduction.value}。`
-        : `确认通过「${target.task?.code ?? ''}」的填报？`,
+      title: isUnitReview ? '通过院审' : '通过校审',
+      message: `确认通过「${target.task?.code ?? ''}」的填报${reductionText}？${isUnitReview ? '院审通过后转校级负责人终审，暂不认定完成值。' : '终审通过后计入完成值。'}`,
       confirmButtonText: '确认通过',
     })
   } catch {
@@ -284,7 +332,9 @@ async function handleApprove(): Promise<void> {
           reason: reviewReason.value || undefined,
         }
     await reviewSubmission(target.id, body, newIdempotencyKey())
-    showToast(reduction.value !== null ? `已通过（核减 ${reduction.value}）` : '已通过')
+    showToast(isUnitReview
+      ? '院审已通过，待校级负责人审核'
+      : reduction.value !== null ? `校审已通过（核减 ${reduction.value}）` : '校审已通过')
     detailVisible.value = false
     await loadList()
   } catch (error) {
@@ -297,6 +347,10 @@ async function handleApprove(): Promise<void> {
 async function handleReject(): Promise<void> {
   const target = detail.value
   if (!target) return
+  if (!canOperate(target)) {
+    showToast(reviewGuardMessage(target))
+    return
+  }
   if (!comment.value.trim()) {
     showToast('驳回时必须填写审核意见（60004）')
     return
@@ -304,8 +358,8 @@ async function handleReject(): Promise<void> {
   try {
     const { showConfirmDialog } = await import('vant')
     await showConfirmDialog({
-      title: '驳回填报',
-      message: `确认驳回「${target.task?.code ?? ''}」的填报？驳回后学院需修改后重新提交。`,
+      title: target.currentReviewNode === 'UNIT_REVIEW' ? '院审驳回' : '校审驳回',
+      message: `确认驳回「${target.task?.code ?? ''}」的填报？驳回后学院需修改并重新走审核链。`,
       confirmButtonText: '确认驳回',
     })
   } catch {
@@ -334,15 +388,27 @@ async function handleReject(): Promise<void> {
 }
 
 // 批量
-const checkedItems = computed(() => page.value.items.filter((item) => checkedIds.value.includes(item.id)))
+const checkedItems = computed(() => page.value.items.filter((item) => checkedIds.value.includes(item.id) && canOperate(item)))
 function toggleCheck(id: string, checked: boolean): void {
+  const target = page.value.items.find((item) => item.id === id)
+  if (checked && target && !canOperate(target)) {
+    showToast(reviewGuardMessage(target))
+    return
+  }
   checkedIds.value = checked
     ? [...checkedIds.value, id]
     : checkedIds.value.filter((item) => item !== id)
 }
 function toggleCheckAll(checked: boolean): void {
-  checkedIds.value = checked ? page.value.items.map((item) => item.id) : []
+  checkedIds.value = checked ? operablePageItems.value.map((item) => item.id) : []
 }
+const batchNodeSummary = computed(() => {
+  const unitCount = checkedItems.value.filter((item) => item.currentReviewNode === 'UNIT_REVIEW').length
+  const leaderCount = checkedItems.value.filter((item) => item.currentReviewNode === 'LEADER_REVIEW').length
+  return [unitCount ? `院审 ${unitCount} 条` : '', leaderCount ? `校审 ${leaderCount} 条` : '']
+    .filter(Boolean)
+    .join(' · ')
+})
 const batchVisible = ref(false)
 const batchComment = ref('')
 const batchReason = ref('')
@@ -350,7 +416,7 @@ const batchLoading = ref(false)
 
 function openBatch(): void {
   if (checkedItems.value.length === 0) {
-    showToast('请先勾选要批量通过的填报')
+    showToast(checkedIds.value.length > 0 ? '勾选内容中没有当前账号可处理的节点' : '请先勾选要批量通过的填报')
     return
   }
   batchComment.value = ''
@@ -359,7 +425,13 @@ function openBatch(): void {
 }
 
 async function confirmBatch(): Promise<void> {
-  const ids = checkedItems.value.map((item) => item.id)
+  const targets = page.value.items.filter((item) => checkedIds.value.includes(item.id))
+  const blocked = targets.find((item) => !canOperate(item))
+  if (blocked) {
+    showToast(reviewGuardMessage(blocked))
+    return
+  }
+  const ids = targets.map((item) => item.id)
   if (ids.length === 0) return
   batchLoading.value = true
   try {
@@ -375,7 +447,7 @@ async function confirmBatch(): Promise<void> {
         message: `成功 ${results.length - failures.length} 条，失败 ${failures.length} 条：\n${failures.map((f) => `${f.message}（${f.code}）`).join('\n')}`,
       })
     } else {
-      showToast(`已批量通过 ${results.length} 条`)
+      showToast(`已完成 ${results.length} 条当前节点审核`)
     }
     await loadList()
   } finally {
@@ -391,6 +463,7 @@ async function handleDeepLink(id: string): Promise<void> {
       showToast('该填报当前不在待审核状态，无需继续审核')
       return
     }
+    if (!canOperate(linked)) showToast(reviewGuardMessage(linked))
     selectedId.value = id
     await loadDetail(id)
   } catch {
@@ -427,6 +500,23 @@ const planSwitcherPlans = computed(() => plans.value)
       @change="onPlanChange"
     />
 
+    <div class="filter-scroll review-node-filter" aria-label="审核节点筛选">
+      <button
+        type="button"
+        class="filter-chip"
+        :class="{ 'is-active': filters.reviewNode === '' }"
+        @click="chooseReviewNode('')"
+      >全部节点</button>
+      <button
+        v-for="option in reviewNodeOptions"
+        :key="option.value"
+        type="button"
+        class="filter-chip"
+        :class="{ 'is-active': filters.reviewNode === option.value }"
+        @click="chooseReviewNode(option.value)"
+      >待{{ option.label }}</button>
+    </div>
+
     <div class="filter-grid">
       <button type="button" class="filter-btn" @click="indicatorPickerVisible = true">
         <span class="ellipsis">{{ indicatorLabel }}</span>
@@ -452,12 +542,13 @@ const planSwitcherPlans = computed(() => plans.value)
       <span class="small muted">待审核 {{ page.total }} 条</span>
       <div class="row">
         <van-checkbox
-          :model-value="checkedIds.length === page.items.length && page.items.length > 0"
+          :model-value="checkedItems.length === operablePageItems.length && operablePageItems.length > 0"
+          :disabled="operablePageItems.length === 0"
           shape="square"
           @update:model-value="toggleCheckAll"
-        >全选</van-checkbox>
-        <van-button size="mini" type="primary" :disabled="checkedIds.length === 0" @click="openBatch">
-          批量通过{{ checkedIds.length ? `（${checkedIds.length}）` : '' }}
+        >全选可审</van-checkbox>
+        <van-button size="mini" type="primary" :disabled="checkedItems.length === 0" @click="openBatch">
+          批量通过{{ checkedItems.length ? `（${checkedItems.length}）` : '' }}
         </van-button>
       </div>
     </div>
@@ -476,13 +567,14 @@ const planSwitcherPlans = computed(() => plans.value)
             <div class="row">
               <van-checkbox
                 :model-value="checkedIds.includes(item.id)"
+                :disabled="!canOperate(item)"
                 shape="square"
                 @click.stop
                 @update:model-value="(checked: boolean) => toggleCheck(item.id, checked)"
               />
               <strong>{{ item.task?.code ?? '—' }}</strong>
             </div>
-            <StatusTag kind="SubmissionStatus" :value="item.status" />
+            <StatusTag kind="SubmissionStatus" :value="item.status" :review-node="item.currentReviewNode" />
           </div>
           <div class="small ellipsis-2">{{ item.topIndicator?.name ?? item.indicator?.name ?? '—' }}</div>
           <div class="small muted">{{ item.unit?.name ?? '—' }} · {{ item.year }} 年 · {{ formatDateTime(item.submittedAt ?? item.createdAt) }}</div>
@@ -518,7 +610,7 @@ const planSwitcherPlans = computed(() => plans.value)
             <div class="card card--tight">
               <div class="row--between">
                 <strong>{{ detail.task?.code ?? '—' }}</strong>
-                <StatusTag kind="SubmissionStatus" :value="detail.status" />
+                <StatusTag kind="SubmissionStatus" :value="detail.status" :review-node="detail.currentReviewNode" />
               </div>
               <div class="small ellipsis-2">{{ detail.topIndicator?.name ?? detail.indicator?.name ?? '—' }}</div>
               <div class="small muted">{{ detail.unit?.name ?? '—' }} · {{ detail.year }} 年</div>
@@ -536,23 +628,32 @@ const planSwitcherPlans = computed(() => plans.value)
               <AttachmentList :files="detailFiles" empty-text="本次提交未上传材料" />
             </div>
 
-            <div class="card card--tight">
-              <div class="section-title">审核</div>
-              <template v-if="caliber !== 'BOOLEAN'">
-                <p class="small muted">可在此核减认定值，认定值不能大于填报值（60005）。</p>
-                <MetricValueInput v-model="reviewValue" :caliber="caliber" />
-              </template>
-              <p v-else class="small muted">是否型只做通过 / 驳回，认定值与填报值一致。</p>
+            <div v-if="detail.reviews.length > 0" class="card card--tight">
+              <div class="section-title">审核记录</div>
+              <SubmissionReviewTimeline :reviews="detail.reviews" :caliber="caliber" />
+            </div>
 
-              <div class="field">
-                <label>审核意见{{ reduction !== null ? '（核减必填）' : '' }}</label>
-                <van-field v-model="comment" type="textarea" rows="2" maxlength="500" show-word-limit placeholder="驳回时必须填写意见" />
-              </div>
-              <div v-if="isDelegateReview" class="field">
-                <label>代审原因</label>
-                <van-field v-model="reviewReason" type="textarea" rows="2" maxlength="500" show-word-limit placeholder="管理员代审原因（选填，写入审计日志）" />
-              </div>
-              <p v-if="reduction !== null" class="small text-warning">核减量：{{ reduction }}</p>
+            <div class="card card--tight">
+              <div class="section-title">当前节点处理</div>
+              <p v-if="currentNodeHint" class="small muted node-hint">{{ currentNodeHint }}</p>
+              <template v-if="canOperateDetail">
+                <template v-if="caliber !== 'BOOLEAN'">
+                  <p class="small muted">可在本级核减认定值，认定值不能大于本级认定值（60005）。</p>
+                  <MetricValueInput v-model="reviewValue" :caliber="caliber" />
+                </template>
+                <p v-else class="small muted">是否型只做通过 / 驳回，认定值与填报值一致。</p>
+
+                <div class="field">
+                  <label>审核意见{{ reduction !== null ? '（核减必填）' : '' }}</label>
+                  <van-field v-model="comment" type="textarea" rows="2" maxlength="500" show-word-limit placeholder="驳回或核减时必须填写意见" />
+                </div>
+                <div v-if="isDelegateReview" class="field">
+                  <label>代审原因</label>
+                  <van-field v-model="reviewReason" type="textarea" rows="2" maxlength="500" show-word-limit placeholder="管理员代审原因（选填，写入审计日志）" />
+                </div>
+                <p v-if="reduction !== null" class="small text-warning">本级核减量：{{ reduction }}</p>
+              </template>
+              <p v-else class="small text-warning guard-text">{{ reviewGuardMessage(detail) }}</p>
             </div>
 
             <div class="card card--tight">
@@ -562,7 +663,7 @@ const planSwitcherPlans = computed(() => plans.value)
                 <div v-for="item in history" :key="item.id" class="history-item">
                   <div class="row--between">
                     <span class="small">{{ formatDateTime(item.submittedAt ?? item.createdAt) }}</span>
-                    <StatusTag kind="SubmissionStatus" :value="item.status" />
+                    <StatusTag kind="SubmissionStatus" :value="item.status" :review-node="item.currentReviewNode" />
                   </div>
                   <div class="small">{{ formatMetricValue(item.value, caliber) }}</div>
                 </div>
@@ -570,9 +671,13 @@ const planSwitcherPlans = computed(() => plans.value)
             </div>
           </template>
         </div>
-        <div class="detail-footer">
-          <van-button block type="danger" plain :loading="rejecting" @click="handleReject">驳回</van-button>
-          <van-button block type="primary" :loading="approving" @click="handleApprove">通过</van-button>
+        <div v-if="canOperateDetail" class="detail-footer">
+          <van-button block type="danger" plain :loading="rejecting" @click="handleReject">
+            {{ detail?.currentReviewNode === 'UNIT_REVIEW' ? '院审驳回' : '校审驳回' }}
+          </van-button>
+          <van-button block type="primary" :loading="approving" @click="handleApprove">
+            {{ detail?.currentReviewNode === 'UNIT_REVIEW' ? '院审通过' : '校审通过' }}
+          </van-button>
         </div>
       </div>
     </van-popup>
@@ -652,6 +757,9 @@ const planSwitcherPlans = computed(() => plans.value)
             <van-icon name="cross" size="18" />
           </button>
         </div>
+        <p class="small muted batch-node-summary">
+          {{ batchNodeSummary }}。院审通过后转校审，校审通过后计入完成值；校审自动继承院审认定值。
+        </p>
         <div class="field">
           <label>批量审核意见</label>
           <van-field v-model="batchComment" type="textarea" rows="2" maxlength="500" show-word-limit />
@@ -679,6 +787,10 @@ const planSwitcherPlans = computed(() => plans.value)
 }
 .page-head p {
   margin: 3px 0 0;
+}
+.review-node-filter {
+  max-width: 100%;
+  margin-top: 4px;
 }
 .filter-grid {
   display: grid;
@@ -729,10 +841,16 @@ const planSwitcherPlans = computed(() => plans.value)
   gap: 8px;
 }
 .review-card {
+  min-width: 0;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #fff;
+  overflow-wrap: anywhere;
+}
+.review-card .row--between > *,
+.review-card .row {
+  min-width: 0;
 }
 .review-card.is-active {
   border-color: var(--brand);
@@ -752,6 +870,7 @@ const planSwitcherPlans = computed(() => plans.value)
 .detail-sheet {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   height: 100%;
 }
 .sheet-head {
@@ -775,8 +894,16 @@ const planSwitcherPlans = computed(() => plans.value)
 }
 .detail-body {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
   padding: 10px 12px;
+}
+.node-hint,
+.guard-text,
+.batch-node-summary {
+  margin: 0 0 8px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
 }
 .detail-footer {
   display: flex;

@@ -28,6 +28,9 @@ public class Review {
     /** 对应的提交序号 */
     private Integer revisionNo;
 
+    /** 审核节点：UNIT_REVIEW / LEADER_REVIEW；历史单级审核为空 */
+    private String reviewNode;
+
     /** 审核人，引用 sys_user.id */
     @JsonSerialize(using = ToStringSerializer.class)
     private Long reviewerId;

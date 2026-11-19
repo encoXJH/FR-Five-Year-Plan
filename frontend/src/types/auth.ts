@@ -16,8 +16,15 @@ export interface ChangePasswordRequest {
 /** 当前登录用户（登录响应与 /auth/me 中的 user） */
 export interface CurrentUser {
   id: string
+  username?: string
   name: string
-  unit: UnitRef | null
+  phone?: string | null
+  email?: string | null
+  unit?: UnitRef | null
+  unitId?: string | null
+  unitName?: string | null
+  units?: UnitRef[]
+  unitIds?: string[]
   roles: Role[]
 }
 
@@ -68,9 +75,10 @@ export type RefreshResponse = Omit<LoginResponse, 'user'>
 
 /** 数据范围（API 约定 4.3） */
 export interface DataScope {
-  /** ALL 全校 / INDICATOR 本人负责指标 / UNIT 本单元 */
-  type: 'ALL' | 'INDICATOR' | 'UNIT'
+  /** ALL 全校 / OWNER 本人负责指标 / UNIT 本单元 / ASSIGNED 分配给本人 */
+  type: 'ALL' | 'OWNER' | 'UNIT' | 'ASSIGNED' | 'INDICATOR'
   unitId: string | null
+  unitIds?: string[]
   indicatorIds: string[]
 }
 
@@ -80,4 +88,5 @@ export interface MeResponse {
   roles: Role[]
   permissions: string[]
   dataScope: DataScope
+  passwordChangeRequired: boolean
 }

@@ -33,31 +33,48 @@ public class RolePermissionService {
         this.versionMapper = versionMapper;
     }
 
-    /** 多角色取数据库配置并集；未初始化的角色仅用于迁移前兼容，回退到默认矩阵。 */
+    /** 多角色取数据库配置并集；STAFF 动态继承 UNIT_OWNER 当前配置，但不继承用户创建和填报审核。 */
     public List<String> configuredPermissionsOf(List<String> roles) {
         List<String> knownRoles = roles.stream()
-                .filter(RolePermissions.ROLE_ORDER::contains)
+                .filter(role -> RolePermissions.ROLE_ORDER.contains(role) || "STAFF".equals(role))
                 .distinct()
                 .toList();
         if (knownRoles.isEmpty()) {
             return List.of();
         }
+        Set<String> rolesToLoad = knownRoles.stream()
+                .filter(RolePermissions.ROLE_ORDER::contains)
+                .collect(Collectors.toCollection(java.util.LinkedHashSet::new));
+        if (knownRoles.contains("STAFF")) {
+            rolesToLoad.add("UNIT_OWNER");
+        }
         Set<String> initialized = versionMapper.selectList(new LambdaQueryWrapper<RolePermissionVersion>()
-                        .in(RolePermissionVersion::getRole, knownRoles)
+                        .in(RolePermissionVersion::getRole, rolesToLoad)
                         .select(RolePermissionVersion::getRole))
                 .stream().map(RolePermissionVersion::getRole).collect(Collectors.toSet());
         Map<String, Set<String>> grants = rolePermissionMapper.selectList(new LambdaQueryWrapper<RolePermission>()
-                        .in(RolePermission::getRole, knownRoles)
+                        .in(RolePermission::getRole, rolesToLoad)
                         .select(RolePermission::getRole, RolePermission::getPermission))
                 .stream().collect(Collectors.groupingBy(RolePermission::getRole,
                         Collectors.mapping(RolePermission::getPermission, Collectors.toSet())));
-        return knownRoles.stream()
-                .flatMap(role -> initialized.contains(role)
-                        ? grants.getOrDefault(role, Set.of()).stream()
-                        : RolePermissions.defaultPermissions(role).stream())
-                .distinct()
-                .sorted()
-                .toList();
+        Set<String> resolved = new TreeSet<>();
+        knownRoles.stream().filter(RolePermissions.ROLE_ORDER::contains)
+                .forEach(role -> resolved.addAll(effectivePermissions(role, initialized, grants)));
+        if (knownRoles.contains("STAFF")) {
+            Set<String> staffPermissions = new TreeSet<>(
+                    effectivePermissions("UNIT_OWNER", initialized, grants));
+            staffPermissions.remove(RolePermissions.USER_CREATE);
+            staffPermissions.remove(RolePermissions.SUBMISSION_REVIEW);
+            resolved.addAll(staffPermissions);
+        }
+        return List.copyOf(resolved);
+    }
+
+    private Set<String> effectivePermissions(String role, Set<String> initialized,
+                                             Map<String, Set<String>> grants) {
+        return initialized.contains(role)
+                ? grants.getOrDefault(role, Set.of())
+                : RolePermissions.defaultPermissions(role);
     }
 
     public RolePermissionDtos.MatrixView matrix() {

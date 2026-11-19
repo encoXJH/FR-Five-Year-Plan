@@ -11,9 +11,12 @@ import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.plan.service.PlanService;
 import edu.fzrj.metrics.module.system.entity.OrgUnit;
 import edu.fzrj.metrics.module.system.entity.SysUser;
+import edu.fzrj.metrics.module.system.entity.UserRole;
 import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
+import edu.fzrj.metrics.module.system.mapper.UserRoleMapper;
 import edu.fzrj.metrics.module.system.service.OrgUnitAdminService;
 import edu.fzrj.metrics.module.system.service.UserRefResolver;
+import edu.fzrj.metrics.module.system.service.UserUnitService;
 import edu.fzrj.metrics.module.task.dto.TaskDtos;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
@@ -50,11 +53,14 @@ public class AllocationService {
     private final OrgUnitAdminService orgUnitAdminService;
     private final UserRefResolver userRefResolver;
     private final DataScopeService dataScopeService;
+    private final UserRoleMapper userRoleMapper;
+    private final UserUnitService userUnitService;
 
     public AllocationService(IndicatorService indicatorService, PlanService planService,
                              TaskMapper taskMapper, TaskYearMapper taskYearMapper,
                              OrgUnitMapper orgUnitMapper, OrgUnitAdminService orgUnitAdminService,
-                             UserRefResolver userRefResolver, DataScopeService dataScopeService) {
+                             UserRefResolver userRefResolver, DataScopeService dataScopeService,
+                             UserRoleMapper userRoleMapper, UserUnitService userUnitService) {
         this.indicatorService = indicatorService;
         this.planService = planService;
         this.taskMapper = taskMapper;
@@ -63,6 +69,8 @@ public class AllocationService {
         this.orgUnitAdminService = orgUnitAdminService;
         this.userRefResolver = userRefResolver;
         this.dataScopeService = dataScopeService;
+        this.userRoleMapper = userRoleMapper;
+        this.userUnitService = userUnitService;
     }
 
     /** 获取分解矩阵（含未保存过的空 rows）+ 合计校验 */
@@ -102,8 +110,8 @@ public class AllocationService {
             OrgUnit unit = readOnlyTask ? orgUnitAdminService.requireUnit(row.getUnitId())
                     : orgUnitAdminService.requireBAssignable(row.getUnitId());
             units.put(unit.getId(), unit);
-            if (!historical) {
-                requireUserIfPresent(row.getOwnerId());
+            if (!historical && !readOnlyTask) {
+                requireAssignableOwnerIfPresent(row.getOwnerId(), row.getUnitId());
             }
             IndicatorRules.requirePlanYears(
                     row.getYearTargets().stream().map(TaskDtos.AllocationYearTargetItem::getYear).toList(),
@@ -343,9 +351,25 @@ public class AllocationService {
         taskMapper.updateById(task);
     }
 
-    private void requireUserIfPresent(Long userId) {
-        if (userId != null && !userRefResolver.mapOf(List.of(userId)).containsKey(userId)) {
+    private void requireAssignableOwnerIfPresent(Long userId, Long unitId) {
+        if (userId == null) {
+            return;
+        }
+        SysUser owner = userRefResolver.mapActiveOf(List.of(userId)).get(userId);
+        if (owner == null) {
             throw new BizException(ErrorCode.PARAM_INVALID, "学院项目负责人不存在");
+        }
+        if (!Boolean.TRUE.equals(owner.getIsEnabled())) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "学院项目负责人已停用");
+        }
+        Long unitOwnerRoles = userRoleMapper.selectCount(new LambdaQueryWrapper<UserRole>()
+                .eq(UserRole::getUserId, userId)
+                .eq(UserRole::getRole, "UNIT_OWNER"));
+        if (unitOwnerRoles == null || unitOwnerRoles == 0) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "任务负责人必须具有 UNIT_OWNER 角色，STAFF 不能作为负责人");
+        }
+        if (!userUnitService.unitIdsOf(userId).contains(unitId)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "学院项目负责人不属于该任务单元");
         }
     }
 

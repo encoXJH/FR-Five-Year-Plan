@@ -34,14 +34,18 @@ const activeTab = ref(route.query.tab === 'notifications' ? 'notifications' : 't
 const todosLoading = ref(false)
 const todosResult = ref<TodosResult | null>(null)
 const activeGroup = ref<string>('')
+const availableTodoGroups = computed(() => userStore.isStaffOnly
+  ? TODO_GROUPS.filter((group) => group.value === 'FILL')
+  : TODO_GROUPS)
 const groupCounts = computed(() => {
   const summary = todosResult.value?.summary ?? {}
-  return TODO_GROUPS.map((g) => ({ ...g, count: Number(summary[g.value as TodoGroup] ?? 0) }))
+  return availableTodoGroups.value.map((g) => ({ ...g, count: Number(summary[g.value as TodoGroup] ?? 0) }))
 })
 const totalTodos = computed(() => groupCounts.value.reduce((sum, g) => sum + g.count, 0))
 const visibleTodos = computed<TodoItem[]>(() => {
   const items = todosResult.value?.items ?? []
-  const sorted = sortTodoItems(items)
+  const scopedItems = userStore.isStaffOnly ? items.filter((item) => item.type === 'FILL') : items
+  const sorted = sortTodoItems(scopedItems)
   if (!activeGroup.value) return sorted
   return sorted.filter((item) => item.type === activeGroup.value)
 })
@@ -157,7 +161,7 @@ onMounted(() => {
   <div class="page page--tabbar">
     <div class="page-head">
       <h1>待办与消息</h1>
-      <p class="muted small">任务填报、审核、接收确认与调整审批统一提醒</p>
+      <p class="muted small">{{ userStore.isStaffOnly ? '分配任务的填报待办与消息统一提醒' : '任务填报、审核、接收确认与调整审批统一提醒' }}</p>
     </div>
 
     <div class="tab-switch">

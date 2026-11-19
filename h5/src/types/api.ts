@@ -32,6 +32,7 @@ export interface PageQuery {
 export interface UserRef {
   id: string
   name: string
+  username?: string | null
 }
 
 /** 执行单元引用对象（API 约定 3.4） */

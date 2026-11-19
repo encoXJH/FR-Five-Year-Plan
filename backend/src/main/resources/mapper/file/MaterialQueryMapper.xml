@@ -5,21 +5,23 @@
     <sql id="materialFromWhere">
         FROM file_ref fr
         JOIN file_info f ON f.id = fr.file_id AND f.deleted = 0
-        LEFT JOIN submission s ON fr.biz_type = 'SUBMISSION' AND s.id = fr.biz_id
+        LEFT JOIN submission s ON fr.biz_type = 'SUBMISSION' AND s.id = fr.biz_id AND s.deleted = 0
         LEFT JOIN task t ON t.id = s.task_id AND t.deleted = 0
-        LEFT JOIN adjustment a ON fr.biz_type = 'ADJUSTMENT' AND a.id = fr.biz_id
-        LEFT JOIN milestone m ON fr.biz_type = 'MILESTONE' AND m.id = fr.biz_id
+        LEFT JOIN adjustment a ON fr.biz_type = 'ADJUSTMENT' AND a.id = fr.biz_id AND a.deleted = 0
+        LEFT JOIN task adj_task ON adj_task.id = a.task_id AND adj_task.deleted = 0
+        LEFT JOIN milestone m ON fr.biz_type = 'MILESTONE' AND m.id = fr.biz_id AND m.deleted = 0
+        LEFT JOIN task mt ON mt.id = m.task_id AND mt.deleted = 0
         JOIN indicator i ON i.id = CASE fr.biz_type
             WHEN 'INDICATOR' THEN fr.biz_id
             WHEN 'SUBMISSION' THEN s.indicator_id
             WHEN 'ADJUSTMENT' THEN a.indicator_id
-            WHEN 'MILESTONE' THEN m.indicator_id
+            WHEN 'MILESTONE' THEN COALESCE(m.indicator_id, mt.indicator_id)
             ELSE NULL END AND i.deleted = 0
         JOIN indicator ti ON ti.id = COALESCE(i.parent_id, i.id)
             AND ti.level = 'A' AND ti.deleted = 0
         LEFT JOIN direction d ON d.id = ti.direction_id AND d.deleted = 0
         LEFT JOIN sys_user su ON su.id = f.uploaded_by
-        LEFT JOIN org_unit ou ON ou.id = COALESCE(s.unit_id, su.unit_id) AND ou.deleted = 0
+        LEFT JOIN org_unit ou ON ou.id = COALESCE(s.unit_id, adj_task.unit_id, mt.unit_id, su.unit_id) AND ou.deleted = 0
         WHERE fr.biz_type IN ('INDICATOR', 'SUBMISSION', 'ADJUSTMENT', 'MILESTONE')
         AND (fr.biz_type != 'SUBMISSION' OR s.status = 'APPROVED')
         <if test="query.planId != null">
@@ -63,12 +65,12 @@
                 #{fileId}
             </foreach>
         </if>
-        <if test="query.ownerScope != null or (query.unitScopeIds != null and !query.unitScopeIds.isEmpty())">
+        <if test="query.ownerScope != null or (query.unitScopeIds != null and !query.unitScopeIds.isEmpty()) or (query.staffTaskIds != null and !query.staffTaskIds.isEmpty())">
             AND (
             <if test="query.ownerScope != null">
                 ti.owner_id = #{query.ownerScope}
             </if>
-            <if test="query.ownerScope != null and query.unitScopeIds != null and !query.unitScopeIds.isEmpty()">
+            <if test="query.ownerScope != null and ((query.unitScopeIds != null and !query.unitScopeIds.isEmpty()) or (query.staffTaskIds != null and !query.staffTaskIds.isEmpty()))">
                 OR
             </if>
             <if test="query.unitScopeIds != null and !query.unitScopeIds.isEmpty()">
@@ -80,12 +82,27 @@
                 </foreach>
                 AND EXISTS (
                     SELECT 1 FROM task scoped_task
-                    WHERE scoped_task.top_indicator_id = ti.id
-                        AND scoped_task.unit_id = s.unit_id
-                        AND scoped_task.deleted = 0
+                    WHERE scoped_task.id = s.task_id AND scoped_task.deleted = 0
                 ))
                 OR
-                (fr.biz_type != 'SUBMISSION' AND EXISTS (
+                (fr.biz_type = 'ADJUSTMENT' AND
+                (a.from_unit_id IN
+                <foreach collection="query.unitScopeIds" item="scopeUnitId" open="(" separator="," close=")">
+                    #{scopeUnitId}
+                </foreach>
+                OR a.to_unit_id IN
+                <foreach collection="query.unitScopeIds" item="scopeUnitId" open="(" separator="," close=")">
+                    #{scopeUnitId}
+                </foreach>
+                ))
+                OR
+                (fr.biz_type = 'MILESTONE' AND m.task_id IS NOT NULL AND mt.unit_id IN
+                <foreach collection="query.unitScopeIds" item="scopeUnitId" open="(" separator="," close=")">
+                    #{scopeUnitId}
+                </foreach>
+                )
+                OR
+                (fr.biz_type = 'INDICATOR' AND EXISTS (
                     SELECT 1 FROM user_unit scoped_uu
                     JOIN task scoped_task ON scoped_task.unit_id = scoped_uu.unit_id
                         AND scoped_task.top_indicator_id = ti.id AND scoped_task.deleted = 0
@@ -95,6 +112,43 @@
                             #{scopeUnitId}
                         </foreach>
                 ))
+                )
+            </if>
+            <if test="(query.unitScopeIds != null and !query.unitScopeIds.isEmpty()) and (query.staffTaskIds != null and !query.staffTaskIds.isEmpty())">
+                OR
+            </if>
+            <if test="query.staffTaskIds != null and !query.staffTaskIds.isEmpty()">
+                (
+                (fr.biz_type = 'SUBMISSION' AND s.task_id IN
+                <foreach collection="query.staffTaskIds" item="scopeTaskId" open="(" separator="," close=")">
+                    #{scopeTaskId}
+                </foreach>
+                )
+                OR
+                (fr.biz_type = 'MILESTONE' AND m.task_id IN
+                <foreach collection="query.staffTaskIds" item="scopeTaskId" open="(" separator="," close=")">
+                    #{scopeTaskId}
+                </foreach>
+                )
+                OR
+                (fr.biz_type = 'ADJUSTMENT' AND
+                (a.task_id IN
+                <foreach collection="query.staffTaskIds" item="scopeTaskId" open="(" separator="," close=")">
+                    #{scopeTaskId}
+                </foreach>
+                OR EXISTS (
+                    SELECT 1 FROM adjustment_item scoped_ai
+                    WHERE scoped_ai.adjustment_id = a.id AND scoped_ai.deleted = 0
+                        AND (scoped_ai.from_task_id IN
+                        <foreach collection="query.staffTaskIds" item="scopeTaskId" open="(" separator="," close=")">
+                            #{scopeTaskId}
+                        </foreach>
+                        OR scoped_ai.to_task_id IN
+                        <foreach collection="query.staffTaskIds" item="scopeTaskId" open="(" separator="," close=")">
+                            #{scopeTaskId}
+                        </foreach>
+                        )
+                )))
                 )
             </if>
             )
@@ -115,8 +169,8 @@
             fr.biz_type,
             f.uploaded_at,
             s.year AS submission_year,
-            s.task_id AS task_id,
-            t.code AS task_code,
+            COALESCE(s.task_id, a.task_id, m.task_id) AS task_id,
+            COALESCE(t.code, adj_task.code, mt.code) AS task_code,
             ti.id AS indicator_id,
             ti.code AS indicator_code,
             ti.name AS indicator_name,

@@ -409,18 +409,24 @@ public class SettlementService {
                         .eq(Indicator::getDeleted, 0L))
                 .stream().sorted(Comparator.comparing(Indicator::getSort).thenComparing(Indicator::getCode))
                 .toList();
+        List<Task> scopedTasks = scope.all() ? List.of()
+                : taskMapper.selectList(new LambdaQueryWrapper<Task>()
+                        .eq(Task::getPlanId, plan.getId())
+                        .ne(Task::getStatus, "PENDING_DISTRIBUTION")
+                        .eq(Task::getDeleted, 0L))
+                .stream().filter(scope::test).toList();
+        Map<Long, Task> scopedTaskMap = scopedTasks.stream()
+                .collect(Collectors.toMap(Task::getId, Function.identity()));
+        List<TaskYear> scopedTaskYears = scopedTasks.isEmpty() ? List.of()
+                : taskYearMapper.selectList(new LambdaQueryWrapper<TaskYear>()
+                        .in(TaskYear::getTaskId, scopedTaskMap.keySet())
+                        .eq(TaskYear::getDeleted, 0L));
         if (!scope.all()) {
             Set<Long> visibleIndicatorIds = new HashSet<>(scope.indicatorIds());
-            if (!aList.isEmpty()) {
-                taskMapper.selectList(new LambdaQueryWrapper<Task>()
-                                .eq(Task::getPlanId, plan.getId())
-                                .ne(Task::getStatus, "PENDING_DISTRIBUTION")
-                                .eq(Task::getDeleted, 0L))
-                        .stream().filter(scope::test).forEach(task -> {
-                            visibleIndicatorIds.add(task.getIndicatorId());
-                            visibleIndicatorIds.add(task.getTopIndicatorId());
-                        });
-            }
+            scopedTasks.forEach(task -> {
+                visibleIndicatorIds.add(task.getIndicatorId());
+                visibleIndicatorIds.add(task.getTopIndicatorId());
+            });
             aList = aList.stream().filter(a -> visibleIndicatorIds.contains(a.getId())).toList();
         }
         List<IndicatorYearTarget> allTargets = aList.isEmpty() ? List.of()
@@ -434,8 +440,26 @@ public class SettlementService {
         List<SettlementDtos.FinalItem> items = new ArrayList<>();
         for (Indicator a : aList) {
             List<MetricCalculator.YearResult> yearResults = new ArrayList<>();
+            BigDecimal scopedPreviousTotal = a.getBaselineValue();
             for (int y = plan.getStartYear(); y <= plan.getEndYear(); y++) {
                 int yy = y;
+                if (!scope.all() && !scope.hasGlobalIndicatorAccess(a)) {
+                    List<MetricCalculator.YearResult> sources = scopedTaskYears.stream()
+                            .filter(ty -> ty.getYear() == yy)
+                            .filter(ty -> {
+                                Task task = scopedTaskMap.get(ty.getTaskId());
+                                return a.getId().equals(ty.getIndicatorId())
+                                        || task != null && a.getId().equals(task.getTopIndicatorId());
+                            })
+                            .map(ty -> new MetricCalculator.YearResult(ty.getActualValue(), ty.getActualNumerator(),
+                                    ty.getActualDenominator(), ty.getActualTotal(), null, null))
+                            .toList();
+                    MetricCalculator.YearResult result = MetricCalculator.rollup(
+                            a.getStatCaliber(), sources, scopedPreviousTotal);
+                    yearResults.add(result);
+                    scopedPreviousTotal = result.total();
+                    continue;
+                }
                 IndicatorYearTarget row = byIndicator.getOrDefault(a.getId(), List.of()).stream()
                         .filter(t -> t.getYear() == yy).findFirst().orElse(null);
                 yearResults.add(row == null ? MetricCalculator.YearResult.empty()
@@ -443,8 +467,8 @@ public class SettlementService {
                         row.getActualDenominator(), row.getActualTotal(), null, null));
             }
             BigDecimal fiveYearActual = SettlementRules.fiveYearActual(a.getStatCaliber(), yearResults);
-            // MANUAL 的 A：末年有人工认定值时以认定值为准
-            if ("MANUAL".equals(a.getRollupMode())) {
+            // MANUAL 的全局认定值仅 ALL / OWNER 可读，UNIT / ASSIGNED 已按可见 B 重算。
+            if ("MANUAL".equals(a.getRollupMode()) && scope.hasGlobalIndicatorAccess(a)) {
                 IndicatorYearTarget lastRow = byIndicator.getOrDefault(a.getId(), List.of()).stream()
                         .filter(t -> t.getYear() == plan.getEndYear()).findFirst().orElse(null);
                 if (lastRow != null && lastRow.getManualActualValue() != null) {

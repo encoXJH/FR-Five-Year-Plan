@@ -3,7 +3,6 @@ package edu.fzrj.metrics.module.submission.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import edu.fzrj.metrics.common.api.PageResult;
-import edu.fzrj.metrics.common.datascope.DataScopeService;
 import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
@@ -21,6 +20,8 @@ import edu.fzrj.metrics.module.submission.mapper.ReviewMapper;
 import edu.fzrj.metrics.module.submission.mapper.SubmissionMapper;
 import edu.fzrj.metrics.module.submission.service.support.AnnualTargetGuard;
 import edu.fzrj.metrics.module.submission.service.support.SubmissionValueRules;
+import edu.fzrj.metrics.module.system.entity.SysUser;
+import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.service.TaskService;
@@ -39,8 +40,8 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 校级审核（API 约定 15.5、PRD 5.5）：待审核列表、单条审核（通过 / 驳回 / 核减）、批量通过。
- * 通过后在同一事务内重算 B 完成值并逐级刷新 A+、A 缓存（ActualRecalcService），通知填报人。
+ * 两级填报审核：干事由学院负责人初审、校级负责人终审，负责人填报直接终审。
+ * 终审通过后在同一事务内重算完成值并逐级刷新缓存，通知填报人。
  */
 @Service
 public class ReviewService {
@@ -57,7 +58,7 @@ public class ReviewService {
     private final IndicatorService indicatorService;
     private final TaskService taskService;
     private final TaskMapper taskMapper;
-    private final DataScopeService dataScopeService;
+    private final SysUserMapper sysUserMapper;
     private final PlanService planService;
     private final TransactionTemplate requiresNewTemplate;
     private final AnnualTargetGuard annualTargetGuard;
@@ -66,7 +67,7 @@ public class ReviewService {
                          IndicatorMapper indicatorMapper, PlanYearMapper planYearMapper,
                          NotificationMapper notificationMapper, SubmissionService submissionService,
                          ActualRecalcService actualRecalcService, IndicatorService indicatorService,
-                         TaskService taskService, TaskMapper taskMapper, DataScopeService dataScopeService,
+                         TaskService taskService, TaskMapper taskMapper, SysUserMapper sysUserMapper,
                          PlanService planService, PlatformTransactionManager transactionManager,
                          AnnualTargetGuard annualTargetGuard) {
         this.submissionMapper = submissionMapper;
@@ -79,7 +80,7 @@ public class ReviewService {
         this.indicatorService = indicatorService;
         this.taskService = taskService;
         this.taskMapper = taskMapper;
-        this.dataScopeService = dataScopeService;
+        this.sysUserMapper = sysUserMapper;
         this.planService = planService;
         this.requiresNewTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTemplate.setPropagationBehavior(TransactionTemplate.PROPAGATION_REQUIRES_NEW);
@@ -88,15 +89,21 @@ public class ReviewService {
 
     // ---------------- 待审核列表 ----------------
 
-    /** 待审核列表（submission:review；SCHOOL_OWNER 只待审本人负责指标的，管理员 / 校级负责人全部） */
+    /** 待审核列表只包含当前用户可处理的节点与非历史任务。 */
     public PageResult<SubmissionDtos.ListItem> pending(SubmissionDtos.PendingQuery query) {
         LoginUser user = SecurityUtils.getLoginUser();
+        if (StringUtils.hasText(query.getReviewNode())
+                && !Set.of("UNIT_REVIEW", "LEADER_REVIEW").contains(query.getReviewNode())) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "审核节点取值不合法：" + query.getReviewNode());
+        }
         LambdaQueryWrapper<Submission> wrapper = new LambdaQueryWrapper<Submission>()
                 .eq(Submission::getStatus, "PENDING_REVIEW")
                 .eq(Submission::getDeleted, 0L)
                 .eq(query.getPlanId() != null, Submission::getPlanId, query.getPlanId())
                 .eq(query.getUnitId() != null, Submission::getUnitId, query.getUnitId())
                 .eq(query.getYear() != null, Submission::getYear, query.getYear())
+                .eq(StringUtils.hasText(query.getReviewNode()),
+                        Submission::getCurrentReviewNode, query.getReviewNode())
                 .orderByAsc(Submission::getSubmittedAt);
         List<Long> historicalTaskIds = taskMapper.selectList(new LambdaQueryWrapper<Task>()
                         .eq(Task::getIsHistorical, true)
@@ -106,16 +113,7 @@ public class ReviewService {
         if (!historicalTaskIds.isEmpty()) {
             wrapper.notIn(Submission::getTaskId, historicalTaskIds);
         }
-        if (!dataScopeService.isAllData(user)) {
-            if (!dataScopeService.isOwnerScope(user)) {
-                return new PageResult<>(List.of(), 0L, query.getPage(), query.getPageSize());
-            }
-            List<Long> visible = ownedIndicatorIdsWithChildren(user.getUserId());
-            if (visible.isEmpty()) {
-                return new PageResult<>(List.of(), 0L, query.getPage(), query.getPageSize());
-            }
-            wrapper.in(Submission::getIndicatorId, visible);
-        }
+        applyActionableScope(wrapper, user);
         if (query.getIndicatorId() != null) {
             List<Long> ids = new ArrayList<>(List.of(query.getIndicatorId()));
             ids.addAll(childrenOf(List.of(query.getIndicatorId())));
@@ -153,6 +151,57 @@ public class ReviewService {
         Page<Submission> page = submissionMapper.selectPage(query.toPage(SORT_FIELDS), wrapper);
         return new PageResult<>(submissionService.toListItems(page.getRecords()), page.getTotal(),
                 query.getPage(), query.getPageSize());
+    }
+
+    /** 添加当前用户可处理的审核节点及数据范围，不附加状态或逻辑删除条件。 */
+    public void applyActionableScope(LambdaQueryWrapper<Submission> wrapper, LoginUser user) {
+        if (user.getRoles().contains("ADMIN")) {
+            return;
+        }
+        boolean leader = user.getRoles().contains("LEADER");
+        boolean unitOwner = user.getRoles().contains("UNIT_OWNER");
+        List<Long> ownedTaskIds = List.of();
+        List<Long> ownedStaffIds = List.of();
+        if (unitOwner) {
+            ownedTaskIds = taskMapper.selectList(new LambdaQueryWrapper<Task>()
+                            .eq(Task::getOwnerId, user.getUserId())
+                            .eq(Task::getDeleted, 0L)
+                            .select(Task::getId))
+                    .stream().map(Task::getId).toList();
+            if (!ownedTaskIds.isEmpty()) {
+                ownedStaffIds = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                                .eq(SysUser::getOwnerUserId, user.getUserId())
+                                .eq(SysUser::getDeleted, 0L)
+                                .select(SysUser::getId))
+                        .stream().map(SysUser::getId).toList();
+            }
+        }
+        if (!leader && (ownedTaskIds.isEmpty() || ownedStaffIds.isEmpty())) {
+            wrapper.eq(Submission::getId, -1L);
+            return;
+        }
+        List<Long> unitTaskIds = ownedTaskIds;
+        List<Long> unitStaffIds = ownedStaffIds;
+        boolean hasUnitScope = !unitTaskIds.isEmpty() && !unitStaffIds.isEmpty();
+        wrapper.and(scope -> {
+            if (leader) {
+                scope.eq(Submission::getCurrentReviewNode, "LEADER_REVIEW");
+                if (unitOwner) {
+                    scope.ne(Submission::getSubmittedBy, user.getUserId());
+                }
+                if (hasUnitScope) {
+                    scope.or(unit -> unit.eq(Submission::getCurrentReviewNode, "UNIT_REVIEW")
+                            .eq(Submission::getSubmitterRole, "STAFF")
+                            .in(Submission::getTaskId, unitTaskIds)
+                            .in(Submission::getSubmittedBy, unitStaffIds));
+                }
+            } else {
+                scope.and(unit -> unit.eq(Submission::getCurrentReviewNode, "UNIT_REVIEW")
+                        .eq(Submission::getSubmitterRole, "STAFF")
+                        .in(Submission::getTaskId, unitTaskIds)
+                        .in(Submission::getSubmittedBy, unitStaffIds));
+            }
+        });
     }
 
     // ---------------- 审核 ----------------
@@ -199,6 +248,10 @@ public class ReviewService {
         if (!"PENDING_REVIEW".equals(submission.getStatus())) {
             throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "该填报不在待审核状态");
         }
+        String reviewNode = submission.getCurrentReviewNode();
+        if (!"UNIT_REVIEW".equals(reviewNode) && !"LEADER_REVIEW".equals(reviewNode)) {
+            throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "待审核填报缺少有效审核节点");
+        }
         String result = request.getResult();
         if (!"APPROVED".equals(result) && !"REJECTED".equals(result)) {
             throw new BizException(ErrorCode.PARAM_INVALID, "审核结果只能是 APPROVED / REJECTED");
@@ -211,29 +264,43 @@ public class ReviewService {
         planService.requireNotArchived(planService.requirePlan(submission.getPlanId()));
         requireYearNotLocked(submission.getPlanId(), submission.getYear());
         String caliber = submission.getStatCaliber();
-        SubmissionDtos.MetricValue approved = request.getApprovedValue();
-        if ("APPROVED".equals(result) && approved != null) {
-            String caliberError = SubmissionValueRules.caliberError(caliber, approved.getAmount(),
-                    approved.getTotal(), approved.getNumerator(), approved.getDenominator(),
-                    approved.getPercent(), approved.getAchieved());
+        SubmissionDtos.MetricValue requested = request.getApprovedValue();
+        if ("APPROVED".equals(result) && requested != null) {
+            String caliberError = SubmissionValueRules.caliberError(caliber, requested.getAmount(),
+                    requested.getTotal(), requested.getNumerator(), requested.getDenominator(),
+                    requested.getPercent(), requested.getAchieved());
             if (caliberError != null) {
                 throw new BizException(ErrorCode.VALUE_CALIBER_MISMATCH, caliberError);
             }
+            SubmissionDtos.MetricValue reviewBase = submissionService.valueViewOf(submission);
+            SubmissionDtos.MetricValue unitApproved = "LEADER_REVIEW".equals(reviewNode)
+                    ? submissionService.approvedValueViewOf(submission) : null;
+            if (unitApproved != null) {
+                reviewBase = unitApproved;
+            }
             boolean exceeds = SubmissionValueRules.exceedsSubmitted(caliber,
-                    submission.getAmount(), submission.getTotal(), submission.getNumerator(),
-                    submission.getDenominator(), submission.getPercent(), submission.getAchieved(),
-                    approved.getAmount(), approved.getTotal(), approved.getNumerator(),
-                    approved.getDenominator(), approved.getPercent(), approved.getAchieved());
+                    reviewBase.getAmount(), reviewBase.getTotal(), reviewBase.getNumerator(),
+                    reviewBase.getDenominator(), reviewBase.getPercent(), reviewBase.getAchieved(),
+                    requested.getAmount(), requested.getTotal(), requested.getNumerator(),
+                    requested.getDenominator(), requested.getPercent(), requested.getAchieved());
             if (exceeds) {
                 throw new BizException(ErrorCode.CONFIRMED_EXCEEDS_SUBMITTED);
             }
         }
+        SubmissionDtos.MetricValue effective = null;
+        if ("APPROVED".equals(result)) {
+            effective = requested;
+            if (effective == null && "LEADER_REVIEW".equals(reviewNode)) {
+                effective = submissionService.approvedValueViewOf(submission);
+            }
+            if (effective == null) {
+                effective = submissionService.valueViewOf(submission);
+            }
+        }
         actualRecalcService.lockAggregationForReview(submission.getTaskYearId());
         if ("APPROVED".equals(result)) {
-            SubmissionDtos.MetricValue candidate = approved != null ? approved
-                    : submissionService.valueViewOf(submission);
             annualTargetGuard.checkReview(submission,
-                    indicatorService.requireIndicator(submission.getIndicatorId()), candidate);
+                    indicatorService.requireIndicator(submission.getIndicatorId()), effective);
         } else {
             annualTargetGuard.lockForReview(submission);
         }
@@ -243,40 +310,44 @@ public class ReviewService {
         Review review = new Review();
         review.setSubmissionId(submissionId);
         review.setRevisionNo(submission.getRevisionNo());
+        review.setReviewNode(reviewNode);
         review.setReviewerId(userId);
         review.setResult(result);
         review.setComment(request.getComment());
-        SubmissionDtos.MetricValue approvedSnapshot = "APPROVED".equals(result)
-                ? (approved != null ? approved : submissionService.valueViewOf(submission)) : null;
-        review.setApprovedValueJson(approvedSnapshot == null ? null
-                : submissionService.writeJson(approvedSnapshot));
+        review.setApprovedValueJson(effective == null ? null : submissionService.writeJson(effective));
         review.setIsProxy(proxy);
         review.setProxyReason(proxy ? request.getReason() : null);
         review.setCreatedAt(now);
         reviewMapper.insert(review);
 
-        submission.setStatus(result);
+        boolean unitApproved = "UNIT_REVIEW".equals(reviewNode) && "APPROVED".equals(result);
+        submission.setStatus(unitApproved ? "PENDING_REVIEW" : result);
+        submission.setCurrentReviewNode(unitApproved ? "LEADER_REVIEW" : null);
         submission.setReviewedAt(now);
         submission.setReviewerId(userId);
         submission.setUpdatedBy(userId);
         if ("APPROVED".equals(result)) {
-            SubmissionDtos.MetricValue effective = approved != null ? approved
-                    : submissionService.valueViewOf(submission);
-            submission.setApprovedAmount(effective.getAmount());
-            submission.setApprovedTotal(effective.getTotal());
-            submission.setApprovedNumerator(effective.getNumerator());
-            submission.setApprovedDenominator(effective.getDenominator());
-            submission.setApprovedPercent(effective.getPercent());
-            submission.setApprovedAchieved(effective.getAchieved());
+            applyApprovedValue(submission, effective);
         }
         if (submissionMapper.updateById(submission) == 0) {
             throw new BizException(ErrorCode.VERSION_CONFLICT,
                     "数据已被他人修改，当前最新版本号：" + requireSubmissionVersion(submissionId));
         }
 
-        actualRecalcService.recalcTaskYear(submission.getTaskYearId());
-        notifySubmitter(submission, result, request.getComment());
+        if ("LEADER_REVIEW".equals(reviewNode) || "REJECTED".equals(result)) {
+            actualRecalcService.recalcTaskYear(submission.getTaskYearId());
+        }
+        notifySubmitter(submission, reviewNode, result, request.getComment());
         return submissionService.detail(submissionId);
+    }
+
+    private void applyApprovedValue(Submission submission, SubmissionDtos.MetricValue value) {
+        submission.setApprovedAmount(value.getAmount());
+        submission.setApprovedTotal(value.getTotal());
+        submission.setApprovedNumerator(value.getNumerator());
+        submission.setApprovedDenominator(value.getDenominator());
+        submission.setApprovedPercent(value.getPercent());
+        submission.setApprovedAchieved(value.getAchieved());
     }
 
     private void requireVersion(Submission submission, Integer version) {
@@ -294,15 +365,34 @@ public class ReviewService {
     }
 
     /**
-     * 审核人校验：指标有效负责人本人审核；平台管理员可代审，代审原因选填。
+     * 按数据库当前节点鉴权：学院负责人仅审归属干事，校级负责人仅终审，管理员可代审。
      *
      * @return true 表示管理员代审
      */
     private boolean requireReviewer(Submission submission) {
         LoginUser user = SecurityUtils.getLoginUser();
-        Indicator indicator = indicatorService.requireIndicator(submission.getIndicatorId());
-        Long effectiveOwner = indicatorService.effectiveOwnerOf(indicator);
-        if (effectiveOwner != null && effectiveOwner.equals(user.getUserId())) {
+        if (!user.getRoles().contains("ADMIN") && user.getRoles().contains("UNIT_OWNER")
+                && user.getUserId().equals(submission.getSubmittedBy())) {
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
+        }
+        if ("UNIT_REVIEW".equals(submission.getCurrentReviewNode())
+                && user.getRoles().contains("UNIT_OWNER")) {
+            Task task = taskService.requireTask(submission.getTaskId());
+            if (!user.getUserId().equals(task.getOwnerId())
+                    || !"STAFF".equals(submission.getSubmitterRole())
+                    || submission.getSubmittedBy() == null) {
+                throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
+            }
+            SysUser submitter = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                    .eq(SysUser::getId, submission.getSubmittedBy())
+                    .eq(SysUser::getDeleted, 0L));
+            if (submitter == null || !user.getUserId().equals(submitter.getOwnerUserId())) {
+                throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
+            }
+            return false;
+        }
+        if ("LEADER_REVIEW".equals(submission.getCurrentReviewNode())
+                && user.getRoles().contains("LEADER")) {
             return false;
         }
         if (user.getRoles().contains("ADMIN")) {
@@ -322,20 +412,25 @@ public class ReviewService {
         }
     }
 
-    private void notifySubmitter(Submission submission, String result, String comment) {
-        if (submission.getCreatedBy() == null) {
+    private void notifySubmitter(Submission submission, String reviewNode, String result, String comment) {
+        Long recipientId = submission.getSubmittedBy() != null
+                ? submission.getSubmittedBy() : submission.getCreatedBy();
+        if (recipientId == null) {
             return;
         }
         Task task = taskService.requireTask(submission.getTaskId());
         Indicator indicator = indicatorService.requireIndicator(submission.getIndicatorId());
+        boolean unitApproved = "UNIT_REVIEW".equals(reviewNode) && "APPROVED".equals(result);
         boolean approved = "APPROVED".equals(result);
         Notification notification = new Notification();
-        notification.setUserId(submission.getCreatedBy());
+        notification.setUserId(recipientId);
         notification.setType("REVIEW_RESULT");
-        notification.setTitle("填报审核" + (approved ? "通过" : "驳回") + "：" + task.getCode());
+        notification.setTitle(unitApproved ? "填报院审通过：" + task.getCode()
+                : "填报审核" + (approved ? "通过" : "驳回") + "：" + task.getCode());
+        String outcome = unitApproved ? "院审通过，待校级负责人审核。"
+                : approved ? "已审核通过。" : "已被驳回。";
         notification.setContent("【" + indicator.getName() + "】" + submission.getYear() + " 年度填报"
-                + (approved ? "已审核通过。" : "已被驳回。")
-                + (StringUtils.hasText(comment) ? "审核意见：" + comment : ""));
+                + outcome + (StringUtils.hasText(comment) ? "审核意见：" + comment : ""));
         notification.setBizType("submission");
         notification.setBizId(submission.getId());
         notification.setLink("/tasks/" + submission.getTaskId() + "/submit?year=" + submission.getYear());

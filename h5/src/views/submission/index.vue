@@ -8,6 +8,7 @@ import PageState from '@/components/PageState.vue'
 import MetricValueInput from '@/components/MetricValueInput.vue'
 import FileUploader from '@/components/FileUploader.vue'
 import TaskDetailSheet from '@/components/TaskDetailSheet.vue'
+import SubmissionReviewTimeline from '@/components/SubmissionReviewTimeline.vue'
 import { getTask } from '@/api/task'
 import {
   createSubmission,
@@ -50,6 +51,16 @@ const detailVisible = ref(false)
 const isDelegateFill = computed(
   () => userStore.roles.includes('ADMIN') && !userStore.roles.includes('UNIT_OWNER'),
 )
+const submitterRole = computed<'STAFF' | 'UNIT_OWNER'>(() =>
+  userStore.roles.includes('STAFF')
+  && !userStore.roles.includes('UNIT_OWNER')
+  && !userStore.roles.includes('ADMIN')
+    ? 'STAFF'
+    : 'UNIT_OWNER',
+)
+const submitFlowHint = computed(() => submitterRole.value === 'STAFF'
+  ? '提交后将由学院项目负责人初审，再由校级负责人终审'
+  : '提交后将由校级负责人终审')
 
 const currentYear = new Date().getFullYear()
 const yearItem = computed<TaskYearItem | null>(
@@ -64,6 +75,12 @@ const yearLocked = computed(() => {
     || status === 'NOT_ACHIEVED'
     || status === 'MAKEUP_PENDING'
     || status === 'MADE_UP'
+})
+const yearLockedText = computed(() => {
+  if (!lockedByError.value && yearItem.value?.yearStatus === 'ACHIEVED') {
+    return `${year.value} 年度已达标，不能再次填报`
+  }
+  return `${year.value} 年度已核算锁定，数据只读；如需修改请联系平台管理员解锁`
 })
 const primaryIndicator = computed(() => primaryTaskIndicator(task.value))
 const caliber = computed<StatCaliber>(() => primaryIndicator.value?.statCaliber ?? 'INCREMENT')
@@ -84,6 +101,9 @@ const yearSubmissions = computed(() =>
     .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')),
 )
 const latestSubmission = computed(() => yearSubmissions.value[0] ?? null)
+const canSubmitAgain = computed(() =>
+  latestSubmission.value?.status === 'APPROVED' && yearItem.value?.yearStatus === 'IN_PROGRESS',
+)
 const pendingSubmission = computed(() =>
   latestSubmission.value?.status === 'PENDING_REVIEW' ? latestSubmission.value : null,
 )
@@ -101,6 +121,25 @@ const pendingValueText = computed(() =>
     : '',
 )
 const pendingRemarkParts = computed(() => parseSubmissionRemark(pendingSubmission.value?.remark))
+const pendingStatusText = computed(() => {
+  const node = pendingSubmission.value?.currentReviewNode
+  if (node === 'UNIT_REVIEW') return '当前填报待学院负责人审核'
+  if (node === 'LEADER_REVIEW') return '当前填报待校级负责人审核'
+  return '当前填报正在审核中'
+})
+const pendingChainHint = computed(() => {
+  const item = pendingSubmission.value
+  if (!item) return ''
+  if (item.currentReviewNode === 'UNIT_REVIEW') {
+    return '后续流程：学院负责人初审 → 校级负责人终审；初审通过前不计入完成值。'
+  }
+  if (item.currentReviewNode === 'LEADER_REVIEW') {
+    return item.submitterRole === 'STAFF'
+      ? '院审已通过，待校级负责人终审；终审通过后才计入完成值。'
+      : '后续流程：校级负责人终审；终审通过后计入完成值。'
+  }
+  return '审核期间不能修改，可撤回后重新提交。'
+})
 
 // ---------- 表单 ----------
 const value = ref<MetricValue>({
@@ -313,7 +352,7 @@ async function handleSubmit(): Promise<void> {
   try {
     await showConfirmDialog({
       title: '提交审核',
-      message: '提交后审核期间不能修改，确认提交审核？',
+      message: `${submitFlowHint.value}；审核期间不能修改，确认提交审核？`,
       confirmButtonText: '确认提交',
     })
   } catch {
@@ -324,8 +363,10 @@ async function handleSubmit(): Promise<void> {
   try {
     await saveDraft()
     dirty.value = false
-    await submitSubmission(editingId.value!, editingVersion.value, idempotencyKey)
-    showToast('已提交审核')
+    const submitted = await submitSubmission(editingId.value!, editingVersion.value, idempotencyKey)
+    showToast(submitted.currentReviewNode === 'UNIT_REVIEW'
+      ? '已提交，待学院负责人审核'
+      : submitted.currentReviewNode === 'LEADER_REVIEW' ? '已提交，待校级负责人审核' : '已提交审核')
     await reload()
   } catch (error) {
     if (error instanceof ApiError) {
@@ -340,10 +381,17 @@ async function handleSubmit(): Promise<void> {
 async function handleWithdraw(): Promise<void> {
   const target = pendingSubmission.value
   if (!canWriteTask(task.value) || !target || yearLocked.value) return
+  const staffFlow = target.submitterRole === 'STAFF'
+    || (!target.submitterRole && submitterRole.value === 'STAFF')
+  const message = target.currentReviewNode === 'UNIT_REVIEW'
+    ? '撤回后可修改填报；重新提交仍需学院负责人初审和校级负责人终审。确认撤回？'
+    : target.currentReviewNode === 'LEADER_REVIEW' && staffFlow
+      ? '撤回将清除本轮院审结果，重新提交需重新经过院审和校审。确认撤回？'
+      : '撤回后可修改填报，并重新提交校级负责人审核。确认撤回？'
   try {
     await showConfirmDialog({
       title: '撤回填报',
-      message: '撤回后本次填报回到待提交状态，可修改后重新提交。确认撤回？',
+      message,
       confirmButtonText: '确认撤回',
     })
   } catch {
@@ -421,9 +469,11 @@ function submissionType(status: string): string {
           </div>
 
           <div v-if="isHistorical" class="info-box">历史任务只读，可查看填报内容、佐证材料和审核记录</div>
-          <div v-if="yearLocked" class="warn-box">{{ year }} 年度已核算锁定，数据只读；如需修改请联系平台管理员解锁</div>
+          <div v-if="yearLocked" class="warn-box">{{ yearLockedText }}</div>
+          <div v-if="canSubmitAgain" class="info-box">上一笔填报已终审通过，本年度尚未达标，可再次填报</div>
           <div v-if="pendingSubmission" class="warn-box">
-            当前填报正在审核中，审核期间不能修改
+            {{ pendingStatusText }}，审核期间不能修改
+            <span class="pending-chain">{{ pendingChainHint }}</span>
             <van-button
               v-if="!isHistorical && !yearLocked"
               size="mini"
@@ -435,8 +485,8 @@ function submissionType(status: string): string {
             >撤回</van-button>
           </div>
           <div v-if="submitError" class="error-box">{{ submitError.message }}（{{ submitError.code }}）</div>
-          <div v-if="projectedExceedsTarget" class="warn-box">
-            按已认定数据和本次填报，预计完成率 {{ formatPercent(projectedRate) }}，提交后将超过年度目标；请调整填报值，最终以后端校验为准（60007）
+          <div v-if="projectedExceedsTarget" class="info-box">
+            按已认定数据和本次填报，预计完成率 {{ formatPercent(projectedRate) }}，将超过年度目标，允许超额完成
           </div>
 
           <div class="card">
@@ -563,7 +613,7 @@ function submissionType(status: string): string {
               <div v-for="item in yearSubmissions" :key="item.id" class="timeline-item">
                 <div class="row--between">
                   <strong>{{ formatMetricValue(item.value, caliber, unitLabel) }}</strong>
-                  <StatusTag kind="SubmissionStatus" :value="item.status" />
+                  <StatusTag kind="SubmissionStatus" :value="item.status" :review-node="item.currentReviewNode" />
                 </div>
                 <div class="small muted">
                   {{ formatDateTime(item.submittedAt ?? item.createdAt) }}
@@ -572,14 +622,12 @@ function submissionType(status: string): string {
                 <div v-if="item.status === 'APPROVED' && item.approvedValue" class="small">
                   认定 {{ formatMetricValue(item.approvedValue, caliber, unitLabel) }}
                 </div>
-                <div v-for="review in item.reviews ?? []" :key="review.id" class="review-line">
-                  <span class="small muted">{{ review.reviewer?.name ?? '审核人' }}</span>
-                  <span class="chip" :class="review.result === 'APPROVED' ? 'chip--success' : 'chip--danger'">
-                    {{ review.result === 'APPROVED' ? '通过' : '驳回' }}
-                  </span>
-                  <span v-if="review.isProxy" class="chip chip--warning">代</span>
-                  <span v-if="review.comment" class="small">“{{ review.comment }}”</span>
-                </div>
+                <SubmissionReviewTimeline
+                  v-if="(item.reviews?.length ?? 0) > 0"
+                  :reviews="item.reviews ?? []"
+                  :caliber="caliber"
+                  :unit-label="unitLabel"
+                />
               </div>
             </div>
           </div>
@@ -658,7 +706,13 @@ function submissionType(status: string): string {
   color: var(--danger);
 }
 .withdraw-btn {
+  margin-top: 6px;
   margin-left: 8px;
+}
+.pending-chain {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 .calc-hint {
   margin: 6px 0 10px;
@@ -693,16 +747,11 @@ function submissionType(status: string): string {
   gap: 10px;
 }
 .timeline-item {
+  min-width: 0;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: #fbfcfe;
-}
-.review-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 </style>

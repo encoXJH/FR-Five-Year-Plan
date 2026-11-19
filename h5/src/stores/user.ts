@@ -13,6 +13,7 @@ import type { EnumDict, Role } from '@/types/enums'
 import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from '@/utils/request'
 import { clearCurrentPlan } from '@/utils/currentPlan'
 import type { ClientEnv } from '@/utils/feishu'
+import { homePathForRoles, isStaffOnly, usesTaskWorkbenchHome } from '@/utils/role'
 
 /** 后端 /auth/me 返回 unitId / unitName（无 unit 对象），统一归一化供页面显示与数据范围判断 */
 function normalizeUser(user: CurrentUser): CurrentUser {
@@ -49,8 +50,10 @@ export const useUserStore = defineStore('user', {
     isLoggedIn: (state) => state.accessToken !== null,
     isUnitOwnerOnly: (state) => state.roles.length > 0
       && state.roles.every((role) => role === 'UNIT_OWNER'),
+    isStaffOnly: (state) => isStaffOnly(state.roles),
+    isTaskExecutorOnly: (state) => usesTaskWorkbenchHome(state.roles),
     homePath(): string {
-      return this.isUnitOwnerOnly ? '/workbench' : '/plans'
+      return homePathForRoles(this.roles)
     },
     /** 任一权限码命中即视为有权限（菜单、按钮过滤用） */
     can: (state) => {

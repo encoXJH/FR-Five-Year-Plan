@@ -20,7 +20,7 @@ export type RollupMode = 'AUTO_SUM' | 'MANUAL'
 
 export type OrgUnitType = 'COLLEGE' | 'INTERNATIONAL_COLLEGE' | 'MARXISM_COLLEGE' | 'SCHOOL_OFFICE'
 
-export type Role = 'ADMIN' | 'LEADER' | 'SCHOOL_OWNER' | 'UNIT_OWNER'
+export type Role = 'ADMIN' | 'LEADER' | 'SCHOOL_OWNER' | 'UNIT_OWNER' | 'STAFF'
 
 export type TaskStatus =
   | 'PENDING_DISTRIBUTION'
@@ -40,6 +40,10 @@ export type TaskYearStatus =
   | 'MADE_UP'
 
 export type SubmissionStatus = 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'
+
+export type ReviewNode = 'UNIT_REVIEW' | 'LEADER_REVIEW'
+
+export type SubmitterRole = 'STAFF' | 'UNIT_OWNER'
 
 export type ReviewResult = 'APPROVED' | 'REJECTED'
 

@@ -119,8 +119,8 @@ useAutoRefresh(() => load(true), { intervalMs: 60_000 })
         <el-table-column label="上传时间" width="150">
           <template #default="{ row }">{{ formatDateTime(row.submittedAt) }}</template>
         </el-table-column>
-        <el-table-column label="审核状态" width="110" align="center">
-          <template #default="{ row }"><StatusTag kind="SubmissionStatus" :value="row.status" /></template>
+        <el-table-column label="审核状态" width="160" align="center">
+          <template #default="{ row }"><StatusTag kind="SubmissionStatus" :value="row.status" :review-node="row.currentReviewNode" /></template>
         </el-table-column>
       </el-table>
       <el-empty v-else :image-size="60" description="当年暂无已上传的指标填报记录" />

@@ -60,6 +60,8 @@ export interface TaskListItem {
   acceptedAt?: string | null
   /** 历史任务保留只读详情，不参与任何执行写操作 */
   isHistorical: boolean
+  /** 列表如未返回该字段，工作台按任务详情解析 */
+  canAssignStaff?: boolean
   /** 展示年度填报截止日（YYYY-MM-DD；无展示年度时为 null） */
   deadline?: string | null
   version: number
@@ -84,6 +86,13 @@ export interface TaskYearItem {
 export interface TaskDetail extends TaskListItem {
   years: TaskYearItem[]
   plan?: TaskPlanRef | null
+  staff?: UserRef[]
+  assignableStaff?: UserRef[]
+}
+
+export interface TaskStaffUpdateRequest {
+  staffIds: string[]
+  version: number
 }
 
 /** 待补做记录 */

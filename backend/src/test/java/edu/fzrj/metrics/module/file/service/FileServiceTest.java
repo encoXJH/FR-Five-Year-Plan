@@ -18,10 +18,14 @@ import edu.fzrj.metrics.module.file.mapper.FileInfoMapper;
 import edu.fzrj.metrics.module.file.mapper.FileRefMapper;
 import edu.fzrj.metrics.module.file.mapper.FileUploadSessionMapper;
 import edu.fzrj.metrics.module.milestone.entity.Milestone;
+import edu.fzrj.metrics.module.indicator.entity.Indicator;
+import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
 import edu.fzrj.metrics.module.milestone.service.MilestoneService;
 import edu.fzrj.metrics.module.submission.entity.Submission;
 import edu.fzrj.metrics.module.submission.service.SubmissionService;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
+import edu.fzrj.metrics.module.system.service.UserUnitService;
+import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
@@ -90,6 +94,12 @@ class FileServiceTest {
     private ObjectProvider<DirectStorageService> directStorageProvider;
     @Mock
     private DirectStorageService directStorageService;
+    @Mock
+    private IndicatorMapper indicatorMapper;
+    @Mock
+    private TaskMapper taskMapper;
+    @Mock
+    private UserUnitService userUnitService;
 
     @InjectMocks
     private FileService fileService;
@@ -267,6 +277,25 @@ class FileServiceTest {
         BizException error = assertThrows(BizException.class, () -> fileService.requireReadable(1L));
 
         assertEquals(20005, error.getErrorCode().getCode());
+    }
+
+    @Test
+    void 纯干事不能通过INDICATOR直绑材料旁路读取文件() {
+        LoginUser staff = new LoginUser(99L, "staff", "干事", 31L,
+                List.of("STAFF"), List.of("material:view"));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(staff, null, List.of()));
+        when(fileInfoMapper.selectOne(any())).thenReturn(file("BOUND", 88L));
+        when(fileRefMapper.selectList(any())).thenReturn(List.of(ref("INDICATOR", 60L)));
+        Indicator indicator = new Indicator();
+        indicator.setId(60L);
+        indicator.setDeleted(0L);
+        when(indicatorMapper.selectById(60L)).thenReturn(indicator);
+
+        BizException error = assertThrows(BizException.class, () -> fileService.requireReadable(1L));
+
+        assertEquals(20005, error.getErrorCode().getCode());
+        verify(taskMapper, never()).selectCount(any());
     }
 
     @Test

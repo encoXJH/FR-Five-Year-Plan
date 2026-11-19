@@ -202,7 +202,7 @@ public class DirectionService {
         if (leaderId == null) {
             return null;
         }
-        SysUser leader = userRefResolver.mapOf(List.of(leaderId)).get(leaderId);
+        SysUser leader = userRefResolver.mapActiveOf(List.of(leaderId)).get(leaderId);
         if (leader == null || !Boolean.TRUE.equals(leader.getIsEnabled())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "S 级总负责人不存在或已停用");
         }

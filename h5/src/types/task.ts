@@ -84,6 +84,9 @@ export interface TaskYearItem {
 export interface TaskDetail extends TaskListItem {
   years: TaskYearItem[]
   plan?: TaskPlanRef | null
+  staff?: UserRef[]
+  assignableStaff?: UserRef[]
+  canAssignStaff?: boolean
 }
 
 /** 待补做记录 */

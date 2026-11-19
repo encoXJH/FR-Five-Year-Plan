@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { showConfirmDialog } from 'vant'
 import { useUserStore } from '@/stores/user'
+import { enumLabel } from '@/utils/enumLabels'
 import { detectClientEnv } from '@/utils/feishu'
 import { getCurrentPlan } from '@/utils/currentPlan'
 import { getLastRequestId } from '@/utils/request'
@@ -12,20 +13,20 @@ const userStore = useUserStore()
 
 const isFeishuClient = detectClientEnv(navigator.userAgent) !== 'WEB'
 const rolesText = computed(() =>
-  userStore.roles.map((role) => userStore.enums.Role?.[role] ?? role).join(' / ') || '—')
+  userStore.roles.map((role) => enumLabel('Role', role, userStore.enums)).join(' / ') || '—')
 const unitName = computed(() => userStore.userInfo?.unit?.name ?? '校级账号')
 const currentPlan = getCurrentPlan()
 
 const modules = computed(() => {
   const list = [
-    { name: '首页计划', desc: '计划列表与新建', icon: 'wap-home-o', path: '/plans', hide: userStore.isUnitOwnerOnly },
-    { name: '学院工作台', desc: '任务填报与材料', icon: 'todo-list-o', path: '/workbench' },
-    { name: '指标总表', desc: '指标、年度目标与任务', icon: 'apps-o', path: '/indicators', hide: userStore.isUnitOwnerOnly, permission: '' },
+    { name: '首页计划', desc: '计划列表与新建', icon: 'wap-home-o', path: '/plans', hide: userStore.isTaskExecutorOnly },
+    { name: userStore.isStaffOnly ? '我的任务' : '学院工作台', desc: '任务填报与材料', icon: 'todo-list-o', path: '/workbench' },
+    { name: '指标总表', desc: '指标、年度目标与任务', icon: 'apps-o', path: '/indicators', hide: userStore.isTaskExecutorOnly, permission: '' },
     { name: '分解下发', desc: '学院目标分解与下发', icon: 'cluster-o', path: '/allocation', permission: 'allocation:edit' },
     { name: '模板管理', desc: '计划模板维护', icon: 'description', path: '/templates', permission: 'plan:manage' },
     { name: '材料库', desc: '佐证材料检索与导出', icon: 'folder-o', path: '/materials', permission: 'material:view' },
-    { name: '审核中心', desc: '填报审核与核减', icon: 'records-o', path: '/reviews', permission: 'submission:review' },
-    { name: '调整审批', desc: '延期 / 转移 / 目标调整', icon: 'exchange', path: '/adjustments', permissions: ['adjustment:apply', 'adjustment:decide'] },
+    { name: '审核中心', desc: '填报审核与核减', icon: 'records-o', path: '/reviews', permission: 'submission:review', hide: userStore.isStaffOnly },
+    { name: userStore.isStaffOnly ? '调整记录' : '调整审批', desc: userStore.isStaffOnly ? '分配任务的调整历史' : '延期 / 转移 / 目标调整', icon: 'exchange', path: '/adjustments', permissions: ['adjustment:apply', 'adjustment:decide'] },
     { name: '统计报表', desc: '完成率、排名与下钻', icon: 'bar-chart-o', path: '/stats', permission: 'stats:view' },
     { name: '操作日志', desc: '审计留痕与导出', icon: 'notes-o', path: '/logs', permission: 'audit-log:view' },
     { name: '待办与消息', desc: '统一待办和通知', icon: 'bell', path: '/todos' },
@@ -81,7 +82,7 @@ const lastRequestId = getLastRequestId()
       <div class="kv-list">
         <div class="kv"><span class="kv__label">当前项目</span><span class="kv__value">{{ currentPlan?.name ?? '未选择' }}</span></div>
         <div class="kv"><span class="kv__label">权限数量</span><span class="kv__value">{{ userStore.permissions.length }}</span></div>
-        <div class="kv"><span class="kv__label">数据范围</span><span class="kv__value">{{ userStore.dataScope?.type === 'ALL' ? '全校' : userStore.dataScope?.type === 'UNIT' ? '本单元' : userStore.dataScope?.type === 'INDICATOR' ? '本人负责指标' : '—' }}</span></div>
+        <div class="kv"><span class="kv__label">数据范围</span><span class="kv__value">{{ userStore.dataScope?.type === 'ALL' ? '全校' : userStore.dataScope?.type === 'UNIT' ? '本单元' : userStore.dataScope?.type === 'INDICATOR' ? '本人负责指标' : userStore.dataScope?.type === 'ASSIGNED' ? '已分配任务' : '—' }}</span></div>
         <div class="kv"><span class="kv__label">客户端</span><span class="kv__value">{{ isFeishuClient ? '飞书内置浏览器' : '手机浏览器' }}</span></div>
         <div v-if="lastRequestId" class="kv"><span class="kv__label">最近请求编号</span><span class="kv__value mono">{{ lastRequestId }}</span></div>
       </div>

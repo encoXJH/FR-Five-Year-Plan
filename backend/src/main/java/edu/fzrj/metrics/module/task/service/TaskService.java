@@ -71,13 +71,16 @@ public class TaskService {
     private final SettingService settingService;
     private final SubmissionMapper submissionMapper;
     private final FileRefMapper fileRefMapper;
+    private final TaskStaffService taskStaffService;
+    private final TaskReadScopeService taskReadScopeService;
 
     public TaskService(TaskMapper taskMapper, TaskYearMapper taskYearMapper,
                        IndicatorMapper indicatorMapper, OrgUnitMapper orgUnitMapper,
                        PlanMapper planMapper, PlanYearMapper planYearMapper,
                        UserRefResolver userRefResolver, DataScopeService dataScopeService,
                        SettingService settingService, SubmissionMapper submissionMapper,
-                       FileRefMapper fileRefMapper) {
+                       FileRefMapper fileRefMapper, TaskStaffService taskStaffService,
+                       TaskReadScopeService taskReadScopeService) {
         this.taskMapper = taskMapper;
         this.taskYearMapper = taskYearMapper;
         this.indicatorMapper = indicatorMapper;
@@ -89,6 +92,8 @@ public class TaskService {
         this.settingService = settingService;
         this.submissionMapper = submissionMapper;
         this.fileRefMapper = fileRefMapper;
+        this.taskStaffService = taskStaffService;
+        this.taskReadScopeService = taskReadScopeService;
     }
 
     /** 填报截止日（YYYY-MM-DD）：年度 + 系统参数 plan.fillDeadline（默认 12-31，界面设计规范 A8） */
@@ -117,7 +122,10 @@ public class TaskService {
         boolean isAll = dataScopeService.isAllData(user);
         boolean isUnit = dataScopeService.isUnitScope(user);
         boolean isOwner = dataScopeService.isOwnerScope(user);
-        if (TaskScopeRules.noVisibleUnitScope(isAll, isUnit, isOwner, Set.copyOf(user.getUnitIds()))) {
+        Set<Long> assignedTaskIds = dataScopeService.isAssignedScope(user)
+                ? taskReadScopeService.staffTaskIds(user) : Set.of();
+        if (assignedTaskIds.isEmpty()
+                && TaskScopeRules.noVisibleUnitScope(isAll, isUnit, isOwner, Set.copyOf(user.getUnitIds()))) {
             return new PageResult<>(List.of(), 0L, query.getPage(), query.getPageSize());
         }
         if (StringUtils.hasText(query.getStatus()) && !TASK_STATUSES.contains(query.getStatus())) {
@@ -139,7 +147,7 @@ public class TaskService {
         List<Long> unitIds = isUnit ? user.getUnitIds() : List.of();
         List<Long> ownedIndicatorIds = isOwner ? ownedIndicatorIds(user.getUserId()) : List.of();
         if (!isAll) {
-            if (unitIds.isEmpty() && ownedIndicatorIds.isEmpty()) {
+            if (unitIds.isEmpty() && ownedIndicatorIds.isEmpty() && assignedTaskIds.isEmpty()) {
                 return new PageResult<>(List.of(), 0L, query.getPage(), query.getPageSize());
             }
             wrapper.and(w -> {
@@ -154,6 +162,13 @@ public class TaskService {
                     }
                     w.in(Task::getIndicatorId, ownedIndicatorIds)
                             .or().in(Task::getTopIndicatorId, ownedIndicatorIds);
+                    hasCondition = true;
+                }
+                if (!assignedTaskIds.isEmpty()) {
+                    if (hasCondition) {
+                        w.or();
+                    }
+                    w.in(Task::getId, assignedTaskIds);
                 }
             });
         }
@@ -217,6 +232,49 @@ public class TaskService {
         return toDetail(task);
     }
 
+    // ---------------- 干事分配 ----------------
+
+    @Transactional
+    public TaskDtos.TaskDetail assignStaff(Long taskId, TaskDtos.StaffPutRequest request) {
+        Task task = taskMapper.selectByIdForUpdate(taskId);
+        if (task == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "任务不存在");
+        }
+        requireTaskVersion(task, request.getVersion());
+        LoginUser user = SecurityUtils.getLoginUser();
+        if (!dataScopeService.isUnitScope(user) || !Objects.equals(task.getOwnerId(), user.getUserId())
+                || task.getUnitId() == null || !user.getUnitIds().contains(task.getUnitId())) {
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED, "只有任务负责人本人可以分配干事");
+        }
+        requireCurrentTask(task);
+        if ("TRANSFERRED_OUT".equals(task.getStatus()) || "CLOSED".equals(task.getStatus())) {
+            throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "已全部转出或已结束的任务不能分配干事");
+        }
+        Plan plan = planMapper.selectById(task.getPlanId());
+        if (plan == null || plan.getDeleted() != null && plan.getDeleted() != 0L) {
+            throw new BizException(ErrorCode.NOT_FOUND, "计划不存在");
+        }
+        if ("ARCHIVED".equals(plan.getStatus())) {
+            throw new BizException(ErrorCode.PLAN_ARCHIVED);
+        }
+
+        TaskStaffService.MergeResult merge = taskStaffService.merge(
+                task, request.getStaffIds(), user.getUserId());
+        if (merge.changed()) {
+            task.setUpdatedBy(user.getUserId());
+            if (taskMapper.updateById(task) == 0) {
+                Task latest = requireTask(taskId);
+                throw new BizException(ErrorCode.VERSION_CONFLICT,
+                        "数据已被他人修改，当前最新版本号：" + latest.getVersion());
+            }
+        }
+        return toDetail(requireTask(taskId));
+    }
+
+    public Map<String, List<Long>> staffAuditSnapshot(Long taskId) {
+        return Map.of("staffIds", taskStaffService.staffIds(taskId));
+    }
+
     // ---------------- 确认接收 ----------------
 
     /** 学院确认接收（PRD 6.2：已下发 → 执行中）；仅本单元（管理员可代为操作）；重复接收幂等 */
@@ -264,7 +322,7 @@ public class TaskService {
                 dataScopeService.isAllData(user), dataScopeService.isUnitScope(user),
                 dataScopeService.isOwnerScope(user), user.getUserId(), Set.copyOf(user.getUnitIds()),
                 task.getUnitId(), indicatorOwner, topOwner);
-        if (!ok) {
+        if (!ok && !taskReadScopeService.isAssigned(task.getId(), user)) {
             throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
         }
     }
@@ -438,6 +496,7 @@ public class TaskService {
                         .select(PlanYear::getYear))
                 .stream().map(PlanYear::getYear).max(Integer::compareTo).orElse(null);
         CumulativeCalculator.Cumulative cumulative = CumulativeCalculator.ofTask(caliber, years);
+        boolean canAssignStaff = canAssignStaff(task, plan, SecurityUtils.getLoginUser());
         return new TaskDtos.TaskDetail(task.getId(), task.getPlanId(), task.getCode(),
                 indicatorRef(refs.indicators().get(task.getIndicatorId())),
                 indicatorRef(refs.indicators().get(task.getTopIndicatorId())),
@@ -447,7 +506,18 @@ public class TaskService {
                 userRefResolver.refOf(task.getDistributedBy(), refs.users()),
                 task.getAcceptedAt(), userRefResolver.refOf(task.getAcceptedBy(), refs.users()),
                 yearViews, cumulative.actual(), cumulative.rate(), fillDeadlineOfYear(activeYear),
-                task.getVersion(), task.getCreatedAt(), task.getUpdatedAt());
+                task.getVersion(), task.getCreatedAt(), task.getUpdatedAt(),
+                taskStaffService.staffOf(task.getId()),
+                canAssignStaff ? taskStaffService.assignableStaffOf(task) : List.of(), canAssignStaff);
+    }
+
+    private boolean canAssignStaff(Task task, Plan plan, LoginUser user) {
+        return plan != null && !"ARCHIVED".equals(plan.getStatus())
+                && !Boolean.TRUE.equals(task.getIsHistorical())
+                && !"TRANSFERRED_OUT".equals(task.getStatus()) && !"CLOSED".equals(task.getStatus())
+                && dataScopeService.isUnitScope(user)
+                && Objects.equals(task.getOwnerId(), user.getUserId())
+                && task.getUnitId() != null && user.getUnitIds().contains(task.getUnitId());
     }
 
     private record Refs(Map<Long, Indicator> indicators, Map<Long, OrgUnit> units, Map<Long, SysUser> users) {

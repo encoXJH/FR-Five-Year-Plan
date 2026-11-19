@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { passwordChangeError } from '../password'
+import { INITIAL_PASSWORD, passwordChangeError } from '../password'
 
 describe('修改密码校验', () => {
   it('密码不能为空', () => {
@@ -17,6 +17,10 @@ describe('修改密码校验', () => {
 
   it('两次密码必须一致', () => {
     expect(passwordChangeError('NewPass@123', 'Different@123')).toBe('两次输入的密码不一致')
+  })
+
+  it('首次改密不能继续使用初始密码', () => {
+    expect(passwordChangeError(INITIAL_PASSWORD, INITIAL_PASSWORD, true)).toBe('新密码不能仍为初始密码')
   })
 
   it('两次密码一致时通过', () => {

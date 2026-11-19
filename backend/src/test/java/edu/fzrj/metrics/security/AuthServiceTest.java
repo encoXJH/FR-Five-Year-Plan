@@ -46,6 +46,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -96,6 +97,7 @@ class AuthServiceTest {
         ReflectionTestUtils.setField(authService, "maxFailCount", 5);
         ReflectionTestUtils.setField(authService, "lockMinutes", 15);
         ReflectionTestUtils.setField(authService, "refreshExpireDays", 7);
+        ReflectionTestUtils.setField(authService, "initialPassword", "fzrj@12345678");
     }
 
     @AfterEach
@@ -153,6 +155,37 @@ class AuthServiceTest {
         assertEquals(2, response.getUser().getUnits().size());
         assertEquals("OWNER", response.getDataScope().getType());
         assertEquals(List.of(103L, 104L), response.getDataScope().getUnitIds());
+        assertFalse(response.isPasswordChangeRequired());
+    }
+
+    @Test
+    void 纯干事当前用户返回ASSIGNED数据范围() {
+        SysUser user = user();
+        when(sysUserMapper.selectById(7L)).thenReturn(user);
+        LoginUser loginUser = new LoginUser(7L, "staff", "干事", 103L,
+                List.of("STAFF"), List.of(), List.of(103L));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(loginUser, null, List.of()));
+
+        MeResponse response = authService.me();
+
+        assertEquals("ASSIGNED", response.getDataScope().getType());
+        assertEquals(List.of(103L), response.getDataScope().getUnitIds());
+    }
+
+    @Test
+    void 当前用户仍使用初始密码时返回强制改密标记() {
+        SysUser user = user();
+        when(sysUserMapper.selectById(7L)).thenReturn(user);
+        when(passwordEncoder.matches("fzrj@12345678", "hash")).thenReturn(true);
+        LoginUser loginUser = new LoginUser(7L, "user", "用户", null,
+                List.of("UNIT_OWNER"), List.of(), List.of());
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(loginUser, null, List.of()));
+
+        MeResponse response = authService.me();
+
+        assertTrue(response.isPasswordChangeRequired());
     }
 
     @Test
@@ -240,6 +273,17 @@ class AuthServiceTest {
                 () -> authService.changePassword(7L, "NewPass@123", "Different@123"));
 
         assertEquals(ErrorCode.PARAM_INVALID.getCode(), error.getErrorCode().getCode());
+        verify(sysUserMapper, never()).updateById(any(SysUser.class));
+        verify(refreshTokenMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void 新密码仍为初始密码时拒绝修改() {
+        BizException error = assertThrows(BizException.class,
+                () -> authService.changePassword(7L, "fzrj@12345678", "fzrj@12345678"));
+
+        assertEquals(ErrorCode.PARAM_INVALID.getCode(), error.getErrorCode().getCode());
+        assertEquals("新密码不能仍为初始密码", error.getMessage());
         verify(sysUserMapper, never()).updateById(any(SysUser.class));
         verify(refreshTokenMapper, never()).update(any(), any());
     }

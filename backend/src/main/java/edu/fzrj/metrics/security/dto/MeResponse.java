@@ -18,6 +18,7 @@ public class MeResponse {
     private java.util.List<String> roles;
     private java.util.List<String> permissions;
     private DataScope dataScope;
+    private boolean passwordChangeRequired;
 
     @Data
     @AllArgsConstructor
@@ -47,7 +48,7 @@ public class MeResponse {
     @Data
     @AllArgsConstructor
     public static class DataScope {
-        /** ALL 全校 / OWNER 本人负责 / UNIT 本单元 */
+        /** ALL 全校 / OWNER 本人负责 / UNIT 本单元 / ASSIGNED 分配给本人的任务 */
         private String type;
         @JsonSerialize(using = ToStringSerializer.class)
         private Long unitId;

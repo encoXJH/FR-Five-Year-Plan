@@ -218,6 +218,7 @@
 | `Indicator` | `directionId` | string / null | A 可空且不作为下发门槛；只能由 ADMIN 在系统管理中修改，自身或下属已下发后锁定；普通指标表单、列表和详情不展示该字段或 S 信息 |
 | `OrgUnit` | `isBAssignable` | boolean | 与既有 `isEnabled` 共同决定能否承接新 B；分解预览、保存、下发和转移接收统一校验二者均为 `true`，不得按单元编码硬编码 |
 | `Task` | `isHistorical` | boolean | 列表和详情必须返回。`true` 时目标冻结、全部执行写操作禁止，详情和审计仍按数据范围可读 |
+| `Task` | `staff` / `assignableStaff` / `canAssignStaff` | array / array / boolean | 详情返回当前干事、当前负责人可选择的本人干事及是否可编辑；无干事或无候选人返回 `[]`，不通过全校用户选项组装候选人 |
 | `IndicatorDtos` | `bSummaries` | array | 指标详情的下属 B 概要数组，空时返回 `[]`；数组项使用 `level=B` 和 `isHistorical` |
 | 统计树节点 | `level` / `isHistorical` | string / boolean | B 叶节点固定返回 `level=B`，并返回 `isHistorical`；所有节点均不返回 `directionId`，统计树固定为 A → A+ → B，不包含 S 层 |
 
@@ -262,16 +263,20 @@ sequenceDiagram
 
 ### 4.3 鉴权模型
 
-- **功能权限**：用户可能同时有多个角色（`ADMIN`、`LEADER`、`SCHOOL_OWNER`、`UNIT_OWNER`），服务端按所有角色的**并集**计算权限，前端不需要传当前角色。
+- **功能权限**：用户可能同时有多个角色（`ADMIN`、`LEADER`、`SCHOOL_OWNER`、`UNIT_OWNER`、`STAFF`），服务端按所有角色的**并集**计算权限，前端不需要传当前角色。
 - **数据权限**：
   - 平台管理员、校级负责人：全校数据；
   - 建设方向负责人：自己负责的 A / A+ 及其下属的 B，以及这些指标所属的计划；
-  - 学院项目负责人：本单元的 B 任务、这些任务关联的 A / A+ 及父 A，以及所属计划；无关兄弟指标和其他学院任务不可见。
-- 多角色的数据范围同样取并集。计划详情和指标树必须在服务端校验可见范围，不能只依赖前端过滤。
+  - 学院项目负责人：本单元的 B 任务、这些任务关联的 A / A+ 及父 A，以及所属计划；无关兄弟指标和其他学院任务不可见；
+  - 干事：`ASSIGNED` 范围，仅实时 `task_staff` 分配给本人的 B 任务及其必要关联数据；不能因所属单元看到全院任务，移除分配后立即失效。
+- 多角色的数据范围同样取并集。计划详情和指标树必须在服务端校验可见范围，不能只依赖前端过滤，也不能从可见 A 带出其他不可见兄弟 B。
 - S 总负责人只是 `direction.leaderId` 的责任关联，不新增角色或数据范围，不改变 LEADER 全校可见规则及既有调整审批链；S 配置仅限 ADMIN 的 `system:manage`。
 - 前端通过 `GET /auth/me` 获取 `roles`、`permissions`（权限码）和 `dataScope`，用来控制菜单和按钮的显示；**服务端必须对每个请求重新校验**。
-- 角色功能权限由 ADMIN 在 `GET /PUT /role-permissions` 中按四类固定角色配置。权限目录使用服务端白名单：`configurableRoles` 允许开关，`lockedRoles` 必须保留，其他角色组合禁止授予；ADMIN 的全部权限锁定。多角色仍取配置后的权限并集，服务端每次认证时重新读取，相关用户刷新页面或重新登录后更新前端展示。
-- 角色权限配置只改变功能权限，不改变角色编码、数据范围、资源归属、固定调整审批链以及目标调整、材料绑定等专属业务规则。
+- 角色功能权限由 ADMIN 在 `GET /PUT /role-permissions` 中按四类固定角色配置。权限目录使用服务端白名单：`configurableRoles` 允许开关，`lockedRoles` 必须保留，其他角色组合禁止授予；ADMIN 的全部权限锁定。`user:create` 允许 ADMIN 取消 LEADER / SCHOOL_OWNER / UNIT_OWNER 的授权，取消后菜单、路由、`POST /users` 及 `/users/staff` 管理接口均失效。多角色仍取配置后的权限并集，服务端每次认证时重新读取，相关用户刷新页面或重新登录后更新前端展示。
+- STAFF 不作为第五类独立配置角色，动态继承 UNIT_OWNER 当前生效权限并排除 `user:create`、`submission:review`，再与本人其他角色权限取并集；STAFF + UNIT_OWNER 时保留 UNIT_OWNER 自身的 `user:create` 和 `submission:review`。任务分配不新增权限码，仅当前任务负责人本人可操作。
+- UNIT_OWNER 的 `/users/staff` 管理范围不是 `createdBy` 或 `owner_user_id`，而是当前负责人 `unitIds` 与目标用户 `user_unit` 的交集，并且目标用户必须仅具有 STAFF 一个角色。跨创建人同学院干事可见可管，多角色、外院和无学院关系账号排除；角色、创建人及干事归属不可通过该组接口修改。
+- `DELETE /users/{userId}` 仅限 `system:manage`，必须携带 `version + reason`。逻辑删除后清理当前 `user_role`、`user_unit`、`task_staff` 并吊销 refreshToken，历史业务外键及姓名展示保留；当前有效负责人引用、未删除下属干事、草稿/待审填报和在途调整必须阻断，禁止删除本人及最后一名启用 ADMIN。
+- 角色权限配置只改变功能权限，不改变角色编码、数据范围、资源归属、固定调整审批链以及目标调整、材料绑定等专属业务规则。`submission:review` 授予 LEADER 和 UNIT_OWNER，UNIT_OWNER 初审归属干事填报、LEADER 终审全校填报；SCHOOL_OWNER 不参与新审核链，STAFF 不继承审核权限。
 - 访问超出数据范围的资源时，返回 `403` + `20005`。
 
 **权限码命名**：`{资源}:{动作}`，例如：
@@ -291,6 +296,7 @@ sequenceDiagram
 | `screen:view` / `stats:view` | 查看大屏 / 统计报表 |
 | `audit-log:view` / `audit-log:export` | 查看 / 导出日志 |
 | `system:manage` | 系统管理 |
+| `user:create` | 按创建人角色矩阵分级创建用户；UNIT_OWNER 还可管理本学院全部纯 STAFF 账号，其他角色的用户管理仍使用 `system:manage` |
 | `material:view` / `material:upload` | 查看材料 / 上传业务材料（直接绑定材料库仍受业务角色限制） |
 
 ---
@@ -505,13 +511,13 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | 50004 | 409 | 该年度尚未激活，不能填报 |
 | 50005 | 409 | 历史保留错误码：原未定稿不能下发；新流程不再主动抛出 |
 | 50006 | 409 | 历史 B 任务只读（`TASK_HISTORICAL_READ_ONLY`），禁止确认接收、填报、审核、调整、补做及其他写操作 |
-| 60001 | 409 | 当前状态不允许此操作（提交、撤回、审核） |
+| 60001 | 409 | 当前状态不允许此操作（新建、提交、撤回、审核）；年度已达标后禁止再次新建或提交 |
 | 60002 | 422 | 缺少必须上传的佐证材料 |
 | 60003 | 409 | 该年度已核算锁定 |
 | 60004 | 422 | 驳回时必须填写审核意见 |
 | 60005 | 422 | 认定值不能大于填报值 |
 | 60006 | 422 | 填报值与统计口径不匹配（见 3.5） |
-| 60007 | 422 | 提交或审核后年度完成值将超过年度目标；仅适用于 HIGHER_BETTER 的非 BOOLEAN 指标 |
+| 60007 | 422 | 历史保留错误码：原年度目标上限；现允许超额完成，新流程不再主动抛出 |
 | 70001 | 422 | 调整数量超过尚未完成的量 |
 | 70002 | 422 | 违反守恒规则 |
 | 70003 | 422 | 目标年份超出规划期，或早于原年份 |
@@ -591,7 +597,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | `GET /files/materials?planId=&indicatorId=&unitId=&taskId=&year=&category=&keyword=&page=&pageSize=` | 跨学院材料分页检索，返回材料名、所属 A 指标、所属学院、类型、大小、上传人、上传时间。`taskId` / `year` 为可选精确定位参数：传入时只返回对应 B 任务、对应年度的材料。SUBMISSION 材料仅在填报审核通过（`APPROVED`）后进入材料库 |
 | `POST /files/materials/bind` | 请求体 `{ indicatorId, fileIds[] }`，把已上传的 `TEMP` 材料绑定到指标并置为 `BOUND`；仅 ADMIN / SCHOOL_OWNER 可操作，学院负责人须通过任务填报上传佐证材料 |
 
-- 数据范围：管理员、校级负责人可查看全校材料；建设方向负责人仅本人负责 A 的材料；学院负责人仅本单元材料；越权返回 `20005`。
+- 数据范围：管理员、校级负责人可查看全校材料；建设方向负责人仅本人负责 A 的材料；学院负责人仅本单元材料；干事仅已分配任务通过 SUBMISSION / ADJUSTMENT / MILESTONE 真实任务关联的材料，不开放 INDICATOR 直绑材料旁路；文件下载和 ZIP 导出逐文件复用同一范围，越权返回 `20005`。
 - 非本人上传的材料不允许绑定（管理员除外），指标必须存在且在当前用户可关联范围内。
 - 检索结果中的 `indicator` 一律归集到 A 类层级，历史 A+ 材料也会归并展示。
 - 检索由数据库联表完成筛选、数据范围判断、排序和分页，只读取当前页；不得在应用内存加载全量 `file_ref` 后分页。
@@ -627,11 +633,13 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | `TargetDirection` 达成方向 | `HIGHER_BETTER` / `LOWER_BETTER` | 越大越好 / 越小越好 |
 | `RollupMode` 汇总方式 | `AUTO_SUM` / `MANUAL` | 自动汇总 / 手工认定 |
 | `OrgUnitType` 执行单元类型 | `COLLEGE` / `INTERNATIONAL_COLLEGE` / `MARXISM_COLLEGE` / `SCHOOL_OFFICE` | 二级学院 / 国际学院 / 马克思主义学院 / 校办公室 |
-| `Role` 角色 | `ADMIN` / `LEADER` / `SCHOOL_OWNER` / `UNIT_OWNER` | 平台管理员 / 校级负责人 / 建设方向负责人 / 学院项目负责人 |
+| `Role` 角色 | `ADMIN` / `LEADER` / `SCHOOL_OWNER` / `UNIT_OWNER` / `STAFF` | 平台管理员 / 校级负责人 / 建设方向负责人 / 学院项目负责人 / 干事 |
 | `TaskStatus` B 任务状态 | `PENDING_DISTRIBUTION` / `DISTRIBUTED` / `IN_PROGRESS` / `TRANSFERRED_OUT` / `CLOSED` | 待下发 / 已下发 / 执行中 / 已全部转出 / 已结束 |
 | `TaskYearStatus` B 年度状态 | `NOT_ACTIVATED` / `IN_PROGRESS` / `PENDING_REVIEW` / `ADJUSTING` / `ACHIEVED` / `NOT_ACHIEVED` / `MAKEUP_PENDING` / `MADE_UP` | 未激活 / 进行中 / 待审核 / 调整审批中 / 已达标 / 未达标 / 待补做 / 已补做 |
 | `SubmissionStatus` 填报状态 | `DRAFT` / `PENDING_REVIEW` / `APPROVED` / `REJECTED` / `WITHDRAWN` | 草稿 / 待审核 / 已通过 / 已驳回 / 已撤回 |
 | `ReviewResult` 审核结果 | `APPROVED` / `REJECTED` | 通过 / 驳回 |
+| `ReviewNode` 审核节点 | `UNIT_REVIEW` / `LEADER_REVIEW` | 学院负责人审核 / 校级负责人审核；历史单级审核记录的节点为 `null` |
+| `SubmitterRole` 填报流程来源 | `STAFF` / `UNIT_OWNER` | 干事两级审核 / 学院负责人直送校级审核 |
 | `AdjustmentType` 调整类型 | `POSTPONE` / `TRANSFER` / `POSTPONE_TRANSFER` / `TARGET_CHANGE` | 延期 / 转移 / 延期 + 转移 / 目标调整 |
 | `AdjustmentStatus` 调整状态 | `PENDING_OWNER_REVIEW` / `PENDING_RECEIVER_CONFIRM` / `PENDING_LEADER_APPROVAL` / `APPROVED` / `REJECTED` / `WITHDRAWN` | 待初审 / 待接收方确认 / 待校级负责人审批 / 已生效 / 已驳回 / 已撤回 |
 | `ApprovalNode` 审批环节 | `OWNER_REVIEW` / `RECEIVER_CONFIRM` / `LEADER_APPROVAL` | 建设方向负责人初审 / 接收方确认 / 校级负责人审批 |
@@ -769,8 +777,8 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | POST | `/auth/login` | 账号密码登录 | 公开 |
 | POST | `/auth/refresh` | 刷新 Token | 公开（带 refreshToken） |
 | POST | `/auth/logout` | 退出登录 | 已登录 |
-| GET | `/auth/me` | 当前用户、角色、权限码、数据范围 | 已登录 |
-| POST | `/auth/change-password` | 当前用户自助修改密码 `{ password, confirmPassword }`；两项均为 8–64 位且必须一致；成功后清除登录锁定并吊销该用户全部 refreshToken，审计不记录密码或哈希 | 已登录 |
+| GET | `/auth/me` | 当前用户、角色、权限码、数据范围；`passwordChangeRequired` 表示当前密码仍匹配初始密码，PC 据此显示单次安全提醒，知悉状态由前端按账号在当前浏览器记录 | 已登录 |
+| POST | `/auth/change-password` | 当前用户自助修改密码 `{ password, confirmPassword }`；两项均为 8–64 位且必须一致，新密码不能仍为初始密码；成功后清除登录锁定并吊销该用户全部 refreshToken，审计不记录密码或哈希 | 已登录 |
 
 ### 15.2 计划与模板（M1）
 
@@ -820,11 +828,14 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | POST ⚡ | `/plans/{planId}/distribute` | DRAFT 与历史 FINALIZED 均可直接下发；`indicatorIds` 为空时处理全部可下发 A+。下发前依次复核完整性（10001）、年度目标五年守恒（40002）、A/A+ 拆分守恒（40003）、B 分解平衡（50001）及学院负责人（50002），并再次校验单元资格；已下发指标存在追加的待下发 B 时仅处理新任务，无待办对象幂等跳过。下发成功后，计划年度已激活的年份其 `task_year.year_status` 同步置为 `IN_PROGRESS`，学院可直接填报 | `task:distribute` |
 | POST ⚡ | `/plans/{planId}/years/{year}/activate` | 管理员手动激活年度；计划启动后各年度默认未激活，激活后该年已下发任务的年度状态转为进行中，重复激活幂等。填报仅允许当前自然年份且年度未锁定；历史任务跳过且不生成待办或提醒 | `settlement:manage` |
 | GET | `/tasks` | B 任务列表（可按 `planId`、`unitId`、`indicatorId`、`year`、`status`、`yearStatus`、`isHistorical` 过滤），每项返回 `isHistorical`；同时返回 `displayYear/latestSubmissionId/latestSubmissionStatus/fileCount/requiredFileCount` 材料摘要，供工作台定位展示年度最新填报及材料缺口；`adjustableAmount` 为 INCREMENT 展示年度剩余可调整量（目标 − 已认定 − 已冻结），其他口径为 null；学院端可见本单元全部任务，`PENDING_DISTRIBUTION` 任务仅只读展示，不能填报 | 按数据范围 |
-| GET | `/tasks/{taskId}` | B 任务详情（各年度目标、完成值、状态、`isHistorical`）；历史任务及既有记录只读可见；待下发任务可查看但不可填报 | 按数据范围 |
+| GET | `/tasks/{taskId}` | B 任务详情（各年度目标、完成值、状态、`isHistorical`）；历史任务及既有记录只读可见；待下发任务可查看但不可填报；另返回当前 `staff`、负责人可选择的 `assignableStaff` 和 `canAssignStaff` | 按数据范围 |
+| PUT | `/tasks/{taskId}/staff` | 整体保存任务干事 `{ staffIds, version }`，支持多人、部分或全部移除；仅具有 UNIT_OWNER 的当前任务负责人本人可操作，候选人必须是归属本人且属于任务单元的启用干事；差异合并，实际变化时任务版本只推进一次并记录前后 staffIds 审计，不修改 owner、目标和年度状态 | 当前任务负责人 |
 | POST ⚡ | `/tasks/{taskId}/accept` | 历史兼容接口；现行学院角色不再分配此权限，下发后无需接收即可按年度状态填报 | `task:accept` |
 | POST ⚡ | `/task-completion-links` | 创建任务完成进度直接关联，请求 `{ taskAId, taskBId, sourceNote? }`；ID 按字符串传输，来源说明不超过 500 字；允许跨计划，双方须为非历史任务且统计口径一致，同一任务自关联或重复活跃关联返回 10001；建联后立即双向重算各年度既有审核进度 | `system:manage` |
 | GET | `/task-completion-links` | 关联列表；可选 `taskId` 过滤任一侧包含该任务的直接关联 | `system:manage` |
 
+> 任务干事整体保存示例：`PUT /tasks/1930000000000000001`，请求体 `{ "staffIds": ["1930000000000000101", "1930000000000000102"], "version": 3 }`；全部移除时 `staffIds` 传 `[]`。响应为更新后的任务详情。任务版本冲突返回 `409 + 10005`，非当前任务负责人或候选人不符合归属、启用、STAFF 角色和任务单元要求时整体拒绝，不产生部分分配。
+>
 > 分解预览、草稿保存、下发和转移接收必须共用同一套 `isEnabled && isBAssignable` 校验，初始前 8 个二级学院（现行编码 01–08）合格，但接口不得按编码硬编码。历史 B 不出现在可编辑矩阵行中，其目标作为只读冻结基数参与守恒；历史任务详情、目标、已审核完成值、快照和审计不删除、不重编号。
 >
 > 历史 B 的确认接收、填报写入、提交、撤回、单笔/批量审核、调整发起或处理、补做及年度批处理写入，均由服务端统一返回 `409 + 50006（TASK_HISTORICAL_READ_ONLY）`；批量请求混入历史任务时不得部分写入。历史记录查询不受此限制。
@@ -840,13 +851,17 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | GET | `/submissions/{submissionId}` | 填报详情（含材料、审核记录）；历史记录只读 | 按数据范围 |
 | PATCH | `/submissions/{submissionId}` | 修改非历史任务的草稿或被驳回填报；历史任务禁止 | `submission:submit` |
 | DELETE | `/submissions/{submissionId}` | 删除非历史任务的草稿；历史任务禁止 | `submission:submit` |
-| POST ⚡ | `/submissions/{submissionId}/submit` | 提交非历史任务审核；历史任务禁止 | `submission:submit` |
-| POST ⚡ | `/submissions/{submissionId}/withdraw` | 撤回非历史任务的待审核填报（审核前才可以）；历史任务禁止 | `submission:submit` |
-| GET | `/plans/{planId}/submissions/uploads?year=` | 当年已上传指标清单：已提交审核（待审核/已通过/已驳回）的填报记录，返回指标名称、所属学院、上传人、上传时间、审核状态；历史 A+ 归一到所属 A 展示 | 按数据范围 |
-| GET | `/reviews/pending` | 待审核列表，只包含非历史任务，不包含迁移时已终止记录 | `submission:review` |
-| POST ⚡ | `/submissions/{submissionId}/review` | 审核非历史任务：`{ result, comment, approvedValue? }`，`approvedValue` 用于核减；历史任务禁止 | `submission:review` |
-| POST ⚡ | `/submissions/batch-review` | 批量审核通过；仅接受非历史任务，混入历史或已终止记录时不得写入 | `submission:review` |
+| POST ⚡ | `/submissions/{submissionId}/submit` | 提交非历史任务审核；STAFF 进入 UNIT_REVIEW，UNIT_OWNER 或管理员代填进入 LEADER_REVIEW；历史任务禁止 | `submission:submit` |
+| POST ⚡ | `/submissions/{submissionId}/withdraw` | 撤回非历史任务的待审核填报，UNIT_REVIEW / LEADER_REVIEW 均可；重提按填报身份从头审核；历史任务禁止 | `submission:submit` |
+| GET | `/plans/{planId}/submissions/uploads?year=` | 当年已上传指标清单：返回指标、学院、上传人、时间、状态及当前审核节点；历史 A+ 归一到所属 A 展示 | 按数据范围 |
+| GET | `/reviews/pending` | 当前用户可处理的待审核列表，支持 `reviewNode` 过滤；LEADER 仅校审，UNIT_OWNER 仅本人任务且归属干事的院审，ADMIN 可看两级，多角色取并集；不包含历史及已终止记录 | `submission:review` |
+| POST ⚡ | `/submissions/{submissionId}/review` | 按数据库当前节点审核：`{ result, comment, approvedValue? }`；院审通过转校审且不计完成值，校审通过才 APPROVED 并重算；两级均可核减，校审默认继承院审认定值且不能调高；历史任务禁止 | `submission:review` |
+| POST ⚡ | `/submissions/batch-review` | 按各记录当前节点批量通过，校审沿用院审认定值；仅接受非历史任务，混入历史或已终止记录时不得写入 | `submission:review` |
 
+> 填报列表和详情返回 `submitterRole`、`currentReviewNode`，审核记录返回 `reviewNode`。`PENDING_REVIEW + UNIT_REVIEW` 表示待学院负责人审核，`PENDING_REVIEW + LEADER_REVIEW` 表示待校级负责人审核；非待审状态的 `currentReviewNode=null`。初审暂存 `approvedValue` 但不计完成值，终审继承并可继续核减。历史单级审核记录的 `reviewNode=null`。
+>
+> 终审通过但未达到年度目标时，任务年度恢复为 `IN_PROGRESS`，可再次新建独立填报；达到或超过目标后为 `ACHIEVED`，新建草稿及提交达标前遗留草稿均返回 `409 + 60001`。提交和审核允许完成值超过年度目标，完成率可大于 100%，不再进行 60007 上限校验；审核仍使用 task_year 行锁保证并发重算一致。
+>
 > 迁移历史任务时，其草稿、待审核等在途填报必须逐笔终止并记录“任务层级与命名体系调整”原因和审计轨迹，不得自动审核通过；终止记录不再进入待办、审核或提醒。历史任务的填报、审核、材料和审计查询仍按原数据范围开放。
 
 ### 15.6 指标调整（M6）
@@ -965,9 +980,14 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | PATCH | `/org-units/{unitId}` | 修改、停用或配置“可承接新 B”（`isBAssignable`）；既有历史任务不受影响 | `system:manage` |
 | GET / POST | `/major-groups` | 专业群列表 / 新增 | 已登录 / `system:manage` |
 | PATCH | `/major-groups/{majorGroupId}` | 修改专业群 | `system:manage` |
-| GET / POST | `/users` | 用户列表 / 新增 | `system:manage` |
+| GET | `/users` | 用户列表 | `system:manage` |
+| POST | `/users` | 分级新增用户。创建矩阵：ADMIN → ADMIN/LEADER/SCHOOL_OWNER/UNIT_OWNER；LEADER → LEADER/SCHOOL_OWNER/UNIT_OWNER；SCHOOL_OWNER → SCHOOL_OWNER/UNIT_OWNER；UNIT_OWNER → UNIT_OWNER/STAFF。创建 STAFF 时请求角色只能为 STAFF，服务端强制 `owner_user_id=当前创建人`，单元只能来自创建人；UNIT_OWNER 创建 UNIT_OWNER 时目标单元必须非空且为本人单元子集。新干事不生成任务分配 | `user:create` |
+| GET | `/users/staff` | UNIT_OWNER 查询本学院全部纯 STAFF 账号（含其他创建人），支持 unitId / keyword / isEnabled / 分页；多角色、外院及无学院关系账号排除 | `user:create` + UNIT_OWNER |
+| PATCH | `/users/staff/{userId}` | 编辑本学院纯干事的 name / phone / unitId / isEnabled，必须带 version；unitId 仅限负责人当前学院，保留负责人范围外学院关系，角色、创建人及 owner_user_id 不变；停用吊销 refreshToken | `user:create` + UNIT_OWNER |
+| POST | `/users/staff/{userId}/password-reset` | 重置本学院纯干事密码，必须带 password / version，清除登录锁定并吊销全部 refreshToken | `user:create` + UNIT_OWNER |
 | GET | `/users/options` | 用户选项（负责人选择等轻量场景，返回启用用户的 id/name/username） | 已登录 |
 | PATCH | `/users/{userId}` | 修改或停用用户 | `system:manage` |
+| DELETE | `/users/{userId}` | 逻辑删除用户，请求体 `{ version, reason }`；禁止删除本人和最后一名启用 ADMIN，有效负责人引用、未删除下属干事、草稿/待审填报及在途调整须先处理。清理当前角色、学院、任务分配并吊销 refreshToken，保留历史业务字段及姓名 | `system:manage` |
 | PUT | `/users/{userId}/roles` | 设置用户角色（必须带 `reason`） | `system:manage` |
 | GET | `/role-permissions` | 查询四类固定角色的功能权限矩阵、权限目录和各角色 `version`；`configurableRoles` 为可配置组合，`lockedRoles` 为锁定组合 | `system:manage`（仅 ADMIN） |
 | PUT | `/role-permissions/{role}` | 整体设置指定角色的功能权限 `{ permissions, reason, version }`；核心权限不可移除、未开放组合不可授予，冲突返回 `10005`，前后快照写入 `PERMISSION_CHANGE` 审计 | `system:manage`（仅 ADMIN） |

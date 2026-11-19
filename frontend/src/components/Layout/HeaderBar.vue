@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowDown, Bell, Menu, School } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -7,7 +7,8 @@ import { useUserStore } from '@/stores/user'
 import { getUnreadNotificationCount } from '@/api/todo'
 import { changePassword as changePasswordApi } from '@/api/auth'
 import { detectClientEnv } from '@/utils/feishu'
-import { passwordChangeError } from '@/utils/password'
+import { INITIAL_PASSWORD, passwordChangeError } from '@/utils/password'
+import { acknowledgeInitialPasswordReminder, shouldShowInitialPasswordReminder } from '@/utils/initialPasswordReminder'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -47,8 +48,23 @@ onBeforeUnmount(() => {
 const passwordDialogVisible = ref(false)
 const passwordSaving = ref(false)
 const passwordForm = reactive({ password: '', confirmPassword: '' })
+const initialPasswordReminderVisible = ref(false)
+watch(
+  () => [userStore.userInfo?.id, userStore.passwordChangeRequired] as const,
+  ([userId, required]) => {
+    initialPasswordReminderVisible.value = shouldShowInitialPasswordReminder(userId, required)
+  },
+  { immediate: true },
+)
+
+function closeInitialPasswordReminder(): void {
+  acknowledgeInitialPasswordReminder(userStore.userInfo?.id)
+  initialPasswordReminderVisible.value = false
+}
+
 const passwordLengthError = computed(() => {
   if (!passwordForm.password) return ''
+  if (passwordForm.password === INITIAL_PASSWORD) return '新密码不能仍为初始密码'
   return passwordForm.password.length < 8 || passwordForm.password.length > 64
     ? '密码长度必须为 8–64 位'
     : ''
@@ -58,7 +74,7 @@ const confirmPasswordError = computed(() => {
   return passwordForm.password !== passwordForm.confirmPassword ? '两次输入的密码不一致' : ''
 })
 const canSubmitPassword = computed(() =>
-  passwordChangeError(passwordForm.password, passwordForm.confirmPassword) === '',
+  passwordChangeError(passwordForm.password, passwordForm.confirmPassword, true) === '',
 )
 
 function resetPasswordForm(): void {
@@ -146,6 +162,7 @@ async function handleCommand(command: string): Promise<void> {
         title="修改密码"
         width="420px"
         :close-on-click-modal="!passwordSaving"
+        :close-on-press-escape="!passwordSaving"
         :show-close="!passwordSaving"
         @closed="resetPasswordForm"
       >
@@ -189,6 +206,20 @@ async function handleCommand(command: string): Promise<void> {
           </el-button>
         </template>
       </el-dialog>
+      <el-dialog
+        v-model="initialPasswordReminderVisible"
+        title="初始密码安全提醒"
+        width="420px"
+        @close="closeInitialPasswordReminder"
+      >
+        <el-alert type="warning" :closable="false" show-icon class="password-tip">
+          检测到当前账号仍使用初始密码，为保障账号安全，建议尽快通过右上角账号菜单修改密码。
+        </el-alert>
+        <p class="reminder-tip">此提醒仅出现一次，不影响继续使用系统。</p>
+        <template #footer>
+          <el-button type="primary" @click="closeInitialPasswordReminder">我已知悉</el-button>
+        </template>
+      </el-dialog>
     </div>
   </div>
 </template>
@@ -196,6 +227,13 @@ async function handleCommand(command: string): Promise<void> {
 <style scoped>
 .password-tip {
   margin-bottom: var(--space-4);
+}
+
+.reminder-tip {
+  margin: 0;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  line-height: 22px;
 }
 
 .header-bar {

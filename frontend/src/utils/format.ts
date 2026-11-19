@@ -2,6 +2,13 @@
 
 export const EMPTY_DISPLAY = '—'
 
+export function maskPhone(value: string | null | undefined): string {
+  const phone = value?.trim()
+  if (!phone) return EMPTY_DISPLAY
+  if (phone.includes('*')) return phone
+  return phone.replace(/^(\d{3})\d+(\d{4})$/, '$1****$2')
+}
+
 const countFormatter = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 })
 const moneyFormatter = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const ratioFormatter = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 1, maximumFractionDigits: 1 })

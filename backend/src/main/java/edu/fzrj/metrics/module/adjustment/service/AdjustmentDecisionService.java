@@ -530,6 +530,16 @@ public class AdjustmentDecisionService {
 
     /** 当前环节处理人判定（70005）：初审=指标有效负责人（空则管理员）；接收确认=接收单元负责人；终审=校级负责人 */
     private void requireHandler(ApprovalStep step, LoginUser user) {
+        boolean roleAllowed = switch (step.getNode()) {
+            case AdjustmentRules.OWNER_REVIEW -> user.getRoles().contains("SCHOOL_OWNER")
+                    || user.getRoles().contains("ADMIN");
+            case AdjustmentRules.RECEIVER_CONFIRM -> user.getRoles().contains("UNIT_OWNER");
+            case AdjustmentRules.LEADER_APPROVAL -> user.getRoles().contains("LEADER");
+            default -> false;
+        };
+        if (!roleAllowed) {
+            throw new BizException(ErrorCode.NOT_CURRENT_APPROVER);
+        }
         if (!AdjustmentRules.canDecideUnits(step.getNode(), step.getExpectedApproverId(),
                 step.getExpectedUnitId(), user.getUserId(), Set.copyOf(user.getUnitIds()), user.getRoles())) {
             throw new BizException(ErrorCode.NOT_CURRENT_APPROVER);

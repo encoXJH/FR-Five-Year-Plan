@@ -2,10 +2,12 @@
 import { computed } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { enumLabel } from '@/utils/enumLabels'
+import type { ReviewNode } from '@/types/enums'
 
 const props = defineProps<{
   kind: string
   value?: string | null
+  reviewNode?: ReviewNode | null
   plain?: boolean
 }>()
 
@@ -28,6 +30,10 @@ const TYPE: Record<string, Record<string, string>> = {
     APPROVED: 'success',
     REJECTED: 'danger',
     WITHDRAWN: 'gray',
+  },
+  ReviewNode: {
+    UNIT_REVIEW: 'warning',
+    LEADER_REVIEW: 'brand',
   },
   AdjustmentStatus: {
     PENDING_OWNER_REVIEW: 'warning',
@@ -82,9 +88,17 @@ const TYPE: Record<string, Record<string, string>> = {
   },
 }
 
-const tone = computed(() => (props.value ? (TYPE[props.kind]?.[props.value] ?? 'gray') : 'gray'))
+const tone = computed(() => {
+  if (props.kind === 'SubmissionStatus' && props.value === 'PENDING_REVIEW' && props.reviewNode) {
+    return TYPE.ReviewNode[props.reviewNode] ?? 'warning'
+  }
+  return props.value ? (TYPE[props.kind]?.[props.value] ?? 'gray') : 'gray'
+})
 const label = computed(() => {
   if (!props.value) return '—'
+  if (props.kind === 'SubmissionStatus' && props.value === 'PENDING_REVIEW' && props.reviewNode) {
+    return `待${userStore.enums.ReviewNode?.[props.reviewNode] ?? enumLabel('ReviewNode', props.reviewNode)}`
+  }
   return userStore.enums[props.kind]?.[props.value] ?? enumLabel(props.kind, props.value)
 })
 </script>

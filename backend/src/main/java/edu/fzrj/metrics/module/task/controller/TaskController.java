@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -43,6 +44,15 @@ public class TaskController {
     @GetMapping("/{taskId}")
     public TaskDtos.TaskDetail detail(@PathVariable Long taskId) {
         return taskService.detail(taskId);
+    }
+
+    @Operation(summary = "整体替换任务干事", description = "仅任务负责学院的 UNIT_OWNER 且为 task.owner 本人；空数组全部移除；需带 version")
+    @PutMapping("/{taskId}/staff")
+    @AuditLog(action = "UPDATE", resourceType = "task", resourceId = "#taskId",
+            before = "staffAuditSnapshot(#taskId)", after = "staffAuditSnapshot(#taskId)")
+    public TaskDtos.TaskDetail putStaff(@PathVariable Long taskId,
+                                        @Valid @RequestBody TaskDtos.StaffPutRequest request) {
+        return taskService.assignStaff(taskId, request);
     }
 
     @Operation(summary = "学院确认接收（DISTRIBUTED → IN_PROGRESS；重复接收幂等）",

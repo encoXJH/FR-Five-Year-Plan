@@ -164,8 +164,7 @@ public class MajorGroupService {
             return Map.of();
         }
         return sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
-                        .in(SysUser::getId, ownerIds)
-                        .eq(SysUser::getDeleted, 0L))
+                        .in(SysUser::getId, ownerIds))
                 .stream().collect(Collectors.toMap(SysUser::getId, Function.identity()));
     }
 }

@@ -14,7 +14,11 @@ const hideNav = computed(() => route.meta.hideNav === true)
 const hideTabbar = computed(() => route.meta.hideTabbar === true)
 const showBack = computed(() => !rootPages.has(String(route.name ?? '')))
 
-const title = computed(() => (typeof route.meta.title === 'string' ? route.meta.title : ''))
+const title = computed(() => {
+  if (userStore.isStaffOnly && route.name === 'Workbench') return '我的任务'
+  if (userStore.isStaffOnly && route.name === 'Adjustments') return '调整记录'
+  return typeof route.meta.title === 'string' ? route.meta.title : ''
+})
 
 function goBack(): void {
   if (window.history.length > 1) router.back()
@@ -67,7 +71,7 @@ onBeforeUnmount(() => {
       class="main-tabbar"
     >
       <van-tabbar-item
-        v-if="!userStore.isUnitOwnerOnly"
+        v-if="!userStore.isTaskExecutorOnly"
         replace
         to="/plans"
         icon="wap-home-o"

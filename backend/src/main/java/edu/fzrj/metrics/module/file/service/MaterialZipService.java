@@ -46,7 +46,7 @@ public class MaterialZipService {
 
     public byte[] buildZip(List<Long> fileIds) throws IOException {
         List<MaterialRow> rows = materialQueryMapper.selectMaterials(new MaterialQuery(
-                null, null, null, null, null, null, null, null, null, fileIds, 0, 0));
+                null, null, null, null, null, null, null, null, null, null, fileIds, 0, 0));
         Map<Long, MaterialRow> metadata = new HashMap<>();
         rows.forEach(row -> metadata.putIfAbsent(row.getFileId(), row));
 

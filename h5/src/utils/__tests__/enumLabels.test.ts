@@ -11,6 +11,9 @@ describe('enumLabel', () => {
   it('字典缺失时用兜底表', () => {
     expect(enumLabel('StatCaliber', 'INCREMENT')).toBe('增量累计型')
     expect(enumLabel('PlanStatus', 'ARCHIVED', {})).toBe('已归档')
+    expect(enumLabel('Role', 'STAFF')).toBe('干事')
+    expect(enumLabel('ReviewNode', 'UNIT_REVIEW')).toBe('学院负责人审核')
+    expect(enumLabel('ReviewNode', 'LEADER_REVIEW')).toBe('校级负责人审核')
   })
 
   it('未知枚举值返回原值，不报错', () => {

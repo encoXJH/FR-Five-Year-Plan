@@ -15,6 +15,7 @@ import { useUserStore } from '@/stores/user'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { ApiError } from '@/utils/request'
 import { enumLabel } from '@/utils/enumLabels'
+import { canPerformOwnerOnlyActions } from '@/utils/role'
 import { formatDateTime, formatNumber } from '@/utils/format'
 import {
   buildConservationLines,
@@ -36,17 +37,21 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
+const canUseOwnerActions = computed(() => canPerformOwnerOnlyActions(userStore.roles))
 const scope = ref<'TODO' | 'MINE' | 'ALL'>(
-  userStore.can('adjustment:decide') ? 'TODO' : 'MINE',
+  !canUseOwnerActions.value ? 'ALL' : userStore.can('adjustment:decide') ? 'TODO' : 'MINE',
 )
 const loading = ref(false)
 const page = ref<PageResult<AdjustmentListItem>>({ items: [], total: 0, page: 1, pageSize: 10 })
 
-const scopeTabs = [
-  { key: 'TODO', label: '待我处理' },
-  { key: 'MINE', label: '我发起的' },
-  { key: 'ALL', label: '全部' },
-] as const
+const scopeTabs = computed(() => {
+  if (!canUseOwnerActions.value) return [{ key: 'ALL', label: '调整记录' } as const]
+  return [
+    { key: 'TODO', label: '待我处理' },
+    { key: 'MINE', label: '我发起的' },
+    { key: 'ALL', label: '全部' },
+  ] as const
+})
 
 async function loadList(): Promise<void> {
   loading.value = true
@@ -130,7 +135,7 @@ const detailHistorical = computed(() => detail.value?.task?.isHistorical === tru
 const canDecide = computed(() => {
   const current = detail.value
   const user = userStore.userInfo
-  if (!current || !user || detailHistorical.value || !isPendingStatus(current.status)
+  if (!current || !user || !canUseOwnerActions.value || detailHistorical.value || !isPendingStatus(current.status)
     || !userStore.can('adjustment:decide')) return false
   const step = current.steps?.find((item) => item.node === currentNode.value && !item.decision)
   if (!step) return false
@@ -145,7 +150,7 @@ const canDecide = computed(() => {
 
 const showWithdraw = computed(() => {
   const current = detail.value
-  if (!current || detailHistorical.value) return false
+  if (!current || !canUseOwnerActions.value || detailHistorical.value) return false
   return canWithdraw(current.status, current.applicant?.id, userStore.userInfo?.id)
 })
 
@@ -265,6 +270,7 @@ const approvalSteps = computed(() => {
 })
 
 function goApply(): void {
+  if (!canUseOwnerActions.value) return
   router.push('/adjustments/apply')
 }
 
@@ -279,10 +285,10 @@ onMounted(async () => {
   <div class="page">
     <div class="page-head">
       <div>
-        <h1>调整申请与审批</h1>
-        <p class="muted small">延期 / 转移 / 目标调整；审批链：建设方向负责人初审 → 接收方确认 → 校级负责人审批</p>
+        <h1>{{ canUseOwnerActions ? '调整申请与审批' : '调整记录' }}</h1>
+        <p class="muted small">{{ canUseOwnerActions ? '延期 / 转移 / 目标调整；审批链：建设方向负责人初审 → 接收方确认 → 校级负责人审批' : '查看分配任务相关的调整历史' }}</p>
       </div>
-      <van-button v-if="userStore.can('adjustment:apply')" size="small" type="primary" @click="goApply">
+      <van-button v-if="canUseOwnerActions && userStore.can('adjustment:apply')" size="small" type="primary" @click="goApply">
         发起调整
       </van-button>
     </div>

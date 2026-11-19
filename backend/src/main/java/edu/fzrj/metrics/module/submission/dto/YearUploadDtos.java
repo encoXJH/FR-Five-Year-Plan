@@ -20,7 +20,9 @@ public final class YearUploadDtos {
             String unitName,
             LocalDateTime submittedAt,
             String submittedByName,
-            String status
+            String status,
+            String currentReviewNode,
+            String submitterRole
     ) {
     }
 }

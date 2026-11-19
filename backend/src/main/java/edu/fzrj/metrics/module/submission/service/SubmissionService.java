@@ -38,6 +38,7 @@ import edu.fzrj.metrics.module.system.service.UserRefResolver;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.module.task.service.TaskService;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
@@ -88,6 +89,7 @@ public class SubmissionService {
     private final UserRefResolver userRefResolver;
     private final ObjectMapper objectMapper;
     private final AnnualTargetGuard annualTargetGuard;
+    private final TaskReadScopeService taskReadScopeService;
 
     public SubmissionService(SubmissionMapper submissionMapper, SubmissionHistoryMapper historyMapper,
                              ReviewMapper reviewMapper, TaskYearMapper taskYearMapper,
@@ -96,7 +98,7 @@ public class SubmissionService {
                              OrgUnitMapper orgUnitMapper, TaskService taskService, IndicatorService indicatorService,
                              PlanService planService, DataScopeService dataScopeService,
                              UserRefResolver userRefResolver, ObjectMapper objectMapper,
-                             AnnualTargetGuard annualTargetGuard) {
+                             AnnualTargetGuard annualTargetGuard, TaskReadScopeService taskReadScopeService) {
         this.submissionMapper = submissionMapper;
         this.historyMapper = historyMapper;
         this.reviewMapper = reviewMapper;
@@ -113,6 +115,7 @@ public class SubmissionService {
         this.userRefResolver = userRefResolver;
         this.objectMapper = objectMapper;
         this.annualTargetGuard = annualTargetGuard;
+        this.taskReadScopeService = taskReadScopeService;
     }
 
     // ---------------- 查询 ----------------
@@ -162,7 +165,7 @@ public class SubmissionService {
     public SubmissionDtos.Detail create(Long taskId, SubmissionDtos.CreateRequest request) {
         Task task = taskService.requireTask(taskId);
         String proxyReason = request.getProxyReason() == null ? null : request.getProxyReason().trim();
-        boolean proxy = requireSubmitter(task.getUnitId(), proxyReason);
+        boolean proxy = requireTaskSubmitter(task, proxyReason);
         if (proxy && !StringUtils.hasText(proxyReason)) {
             throw new BizException(ErrorCode.PARAM_INVALID, "管理员代填必须填写代填原因（proxyReason）");
         }
@@ -177,8 +180,10 @@ public class SubmissionService {
         String caliber = indicator.getStatCaliber();
         requireCaliberValue(caliber, request.getValue());
         TaskYear taskYear = requireTaskYear(taskId, request.getYear());
+        requireYearNotAchieved(taskYear);
 
-        Long userId = SecurityUtils.getUserId();
+        LoginUser loginUser = SecurityUtils.getLoginUser();
+        Long userId = loginUser.getUserId();
         Submission submission = new Submission();
         submission.setTaskId(task.getId());
         submission.setTaskYearId(taskYear.getId());
@@ -191,6 +196,8 @@ public class SubmissionService {
         submission.setRemark(request.getRemark());
         submission.setSourceNote(request.getSourceNote());
         submission.setStatus("DRAFT");
+        submission.setSubmitterRole(resolveSubmitterRole(loginUser));
+        submission.setCurrentReviewNode(null);
         submission.setRevisionNo(0);
         submission.setIsProxy(proxy);
         submission.setProxyReason(proxy ? proxyReason : null);
@@ -206,8 +213,8 @@ public class SubmissionService {
     @Transactional
     public SubmissionDtos.Detail patch(Long submissionId, PatchHelper patch) {
         Submission submission = requireSubmission(submissionId);
-        requireSubmitter(submission.getUnitId(), null);
-        taskService.requireCurrentTask(submission.getTaskId());
+        Task task = taskService.requireCurrentTask(submission.getTaskId());
+        requireTaskSubmitter(task, null);
         requireFillableYear(submission.getPlanId(), submission.getYear());
         if (!EDITABLE_STATUSES.contains(submission.getStatus())) {
             throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "只有草稿 / 已驳回 / 已撤回的填报可以修改");
@@ -243,9 +250,9 @@ public class SubmissionService {
     @Transactional
     public void delete(Long submissionId) {
         Submission submission = requireSubmission(submissionId);
-        requireSubmitter(submission.getUnitId(), null);
+        Task task = taskService.requireCurrentTask(submission.getTaskId());
+        requireTaskSubmitter(task, null);
         planService.requireNotArchived(planService.requirePlan(submission.getPlanId()));
-        taskService.requireCurrentTask(submission.getTaskId());
         if (!"DRAFT".equals(submission.getStatus())) {
             throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "只有草稿可以删除");
         }
@@ -266,12 +273,12 @@ public class SubmissionService {
     @Transactional
     public SubmissionDtos.Detail submit(Long submissionId, Integer version) {
         Submission submission = requireSubmission(submissionId);
-        requireSubmitter(submission.getUnitId(), null);
         requireVersion(submission, version);
         if (!EDITABLE_STATUSES.contains(submission.getStatus())) {
             throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "当前状态不允许提交");
         }
         Task task = taskService.requireTask(submission.getTaskId());
+        requireTaskSubmitter(task, null);
         taskService.requireCurrentTask(task);
         requireTaskFillable(task);
         // 年度校验以 plan_year 激活状态为准（下发晚于激活的任务 task_year 仍 NOT_ACTIVATED，见决策记录）
@@ -286,18 +293,24 @@ public class SubmissionService {
         if (attachmentError != null) {
             throw new BizException(ErrorCode.ATTACHMENT_REQUIRED, attachmentError);
         }
-        TaskYear taskYear = requireTaskYear(submission.getTaskId(), submission.getYear());
+        TaskYear taskYear = requireTaskYearForUpdate(submission.getTaskId(), submission.getYear());
+        requireYearNotAchieved(taskYear);
         if ("ADJUSTING".equals(taskYear.getYearStatus())) {
             throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "该年度正在调整审批中，不能提交");
         }
         annualTargetGuard.checkSubmit(submission, indicator, taskYear);
 
-        Long userId = SecurityUtils.getUserId();
+        LoginUser loginUser = SecurityUtils.getLoginUser();
+        Long userId = loginUser.getUserId();
         LocalDateTime now = LocalDateTime.now();
+        String submitterRole = resolveSubmitterRole(loginUser);
         submission.setStatus("PENDING_REVIEW");
+        submission.setSubmitterRole(submitterRole);
+        submission.setCurrentReviewNode("STAFF".equals(submitterRole) ? "UNIT_REVIEW" : "LEADER_REVIEW");
         submission.setRevisionNo(submission.getRevisionNo() + 1);
         submission.setSubmittedAt(now);
         submission.setSubmittedBy(userId);
+        clearReviewProgress(submission);
         submission.setUpdatedBy(userId);
         if (submissionMapper.updateById(submission) == 0) {
             throw new BizException(ErrorCode.VERSION_CONFLICT,
@@ -323,14 +336,15 @@ public class SubmissionService {
     @Transactional
     public SubmissionDtos.Detail withdraw(Long submissionId, Integer version) {
         Submission submission = requireSubmission(submissionId);
-        requireSubmitter(submission.getUnitId(), null);
-        taskService.requireCurrentTask(submission.getTaskId());
+        Task task = taskService.requireCurrentTask(submission.getTaskId());
+        requireTaskSubmitter(task, null);
         requireVersion(submission, version);
         if (!"PENDING_REVIEW".equals(submission.getStatus())) {
             throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "只有待审核的填报可以撤回");
         }
         Long userId = SecurityUtils.getUserId();
         submission.setStatus("WITHDRAWN");
+        submission.setCurrentReviewNode(null);
         submission.setUpdatedBy(userId);
         if (submissionMapper.updateById(submission) == 0) {
             throw new BizException(ErrorCode.VERSION_CONFLICT,
@@ -353,11 +367,46 @@ public class SubmissionService {
 
     // ---------------- 填报人数据范围 / 前置校验 ----------------
 
+    private String resolveSubmitterRole(LoginUser user) {
+        boolean staffOnly = user.getRoles().contains("STAFF")
+                && !user.getRoles().contains("UNIT_OWNER")
+                && !user.getRoles().contains("ADMIN");
+        return staffOnly ? "STAFF" : "UNIT_OWNER";
+    }
+
+    private void clearReviewProgress(Submission submission) {
+        submission.setApprovedAmount(null);
+        submission.setApprovedTotal(null);
+        submission.setApprovedNumerator(null);
+        submission.setApprovedDenominator(null);
+        submission.setApprovedPercent(null);
+        submission.setApprovedAchieved(null);
+        submission.setReviewedAt(null);
+        submission.setReviewerId(null);
+    }
+
     /**
      * 填报人校验：本单元负责人正常填报；平台管理员代填（敏感操作，必须填写原因）。
      *
      * @return true 表示管理员代填
      */
+    private boolean requireTaskSubmitter(Task task, String proxyReason) {
+        LoginUser user = SecurityUtils.getLoginUser();
+        if (user.getRoles().contains("ADMIN")) {
+            if (proxyReason != null && !StringUtils.hasText(proxyReason)) {
+                throw new BizException(ErrorCode.PARAM_INVALID, "管理员代填必须填写代填原因（proxyReason）");
+            }
+            return true;
+        }
+        boolean unitScope = dataScopeService.isUnitScope(user);
+        if (unitScope && task != null && task.getUnitId() != null
+                && user.getUnitIds().contains(task.getUnitId())) {
+            return false;
+        }
+        taskReadScopeService.requireSubmitter(task);
+        return false;
+    }
+
     public boolean requireSubmitter(Long unitId, String proxyReason) {
         LoginUser user = SecurityUtils.getLoginUser();
         if (dataScopeService.isUnitScope(user) && unitId != null && user.getUnitIds().contains(unitId)) {
@@ -418,6 +467,20 @@ public class SubmissionService {
             throw new BizException(ErrorCode.NOT_FOUND, "任务年度不存在");
         }
         return taskYear;
+    }
+
+    private TaskYear requireTaskYearForUpdate(Long taskId, Integer year) {
+        TaskYear taskYear = taskYearMapper.selectByTaskIdAndYearForUpdate(taskId, year);
+        if (taskYear == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "任务年度不存在");
+        }
+        return taskYear;
+    }
+
+    private void requireYearNotAchieved(TaskYear taskYear) {
+        if ("ACHIEVED".equals(taskYear.getYearStatus())) {
+            throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "该年度已达标，不能再次填报");
+        }
     }
 
     private void requireVersion(Submission submission, Integer version) {
@@ -514,7 +577,8 @@ public class SubmissionService {
                 taskRef(refs.tasks().get(s.getTaskId())),
                 indicatorRef(refs.indicators().get(s.getIndicatorId())),
                 unitRef(refs.units().get(s.getUnitId())),
-                s.getYear(), s.getStatCaliber(), valueViewOf(s), s.getStatus(), s.getRevisionNo(),
+                s.getYear(), s.getStatCaliber(), valueViewOf(s), s.getStatus(),
+                s.getSubmitterRole(), s.getCurrentReviewNode(), s.getRevisionNo(),
                 s.getSubmittedAt(), userRefResolver.refOf(s.getSubmittedBy(), refs.users()),
                 s.getReviewedAt(), userRefResolver.refOf(s.getReviewerId(), refs.users()),
                 s.getVersion(), s.getCreatedAt(),
@@ -540,7 +604,7 @@ public class SubmissionService {
         Map<Long, SysUser> reviewUsers = userRefResolver.mapOf(
                 reviews.stream().map(Review::getReviewerId).toList());
         List<SubmissionDtos.ReviewView> reviewViews = reviews.stream()
-                .map(r -> new SubmissionDtos.ReviewView(r.getId(), r.getRevisionNo(),
+                .map(r -> new SubmissionDtos.ReviewView(r.getId(), r.getRevisionNo(), r.getReviewNode(),
                         userRefResolver.refOf(r.getReviewerId(), reviewUsers),
                         r.getResult(), r.getComment(), readValue(r.getApprovedValueJson()),
                         r.getIsProxy(), r.getCreatedAt()))
@@ -560,7 +624,8 @@ public class SubmissionService {
                 indicatorRef(refs.indicators().get(s.getIndicatorId())),
                 unitRef(refs.units().get(s.getUnitId())),
                 s.getYear(), s.getStatCaliber(), valueViewOf(s), approvedValueViewOf(s),
-                s.getRemark(), s.getSourceNote(), s.getStatus(), s.getRevisionNo(), s.getIsProxy(),
+                s.getRemark(), s.getSourceNote(), s.getStatus(),
+                s.getSubmitterRole(), s.getCurrentReviewNode(), s.getRevisionNo(), s.getIsProxy(),
                 files, reviewViews, historyViews,
                 s.getSubmittedAt(), userRefResolver.refOf(s.getSubmittedBy(), refs.users()),
                 s.getReviewedAt(), userRefResolver.refOf(s.getReviewerId(), refs.users()),

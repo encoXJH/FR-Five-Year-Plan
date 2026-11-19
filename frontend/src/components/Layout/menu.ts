@@ -1,5 +1,6 @@
 import type { Component } from 'vue'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
+import type { Role } from '@/types/enums'
 import { getCurrentPlan } from '@/utils/currentPlan'
 import {
   Bell,
@@ -14,15 +15,19 @@ import {
   Setting,
   Switch,
   Tickets,
+  UserFilled,
 } from '@element-plus/icons-vue'
 
 export interface MenuItem {
   /** 静态路径或唯一 key（配合 resolvePath 使用时仅作 key） */
   path: string
   title: string
+  titleForStaff?: string
   icon?: Component
   /** 任一权限码命中即显示；缺省表示登录即可见 */
   permissions?: string[]
+  /** 任一角色命中即显示，多角色用户按并集判断 */
+  requiredRoles?: Role[]
   /** 用户角色全部落在该列表内时隐藏（如纯学院负责人不显示统计报表） */
   hideForRolesOnly?: string[]
   /** 按当前路由控制显示（如无计划上下文时隐藏计划概览） */
@@ -43,7 +48,7 @@ export const menuGroups: MenuGroup[] = [
     key: 'workbench',
     title: '工作台',
     items: [
-      { path: '/plans', title: '首页', icon: HomeFilled, hideForRolesOnly: ['UNIT_OWNER'] },
+      { path: '/plans', title: '首页', icon: HomeFilled, hideForRolesOnly: ['UNIT_OWNER', 'STAFF'] },
       {
         path: 'plan-overview',
         title: '计划概览',
@@ -86,13 +91,14 @@ export const menuGroups: MenuGroup[] = [
       {
         path: '/workbench',
         title: '学院工作台',
+        titleForStaff: '我的任务',
         icon: Tickets,
         permissions: ['submission:submit'],
         hideForRolesOnly: ['ADMIN'],
       },
       { path: '/materials', title: '材料库', icon: FolderOpened, permissions: ['material:view'] },
       // 任务填报（P08）为隐藏菜单，从学院工作台任务行进入（UI 规范 6.1）
-      { path: '/reviews', title: '审核中心', icon: Checked, permissions: ['submission:review'] },
+      { path: '/reviews', title: '审核中心', icon: Checked, permissions: ['submission:review'], hideForRolesOnly: ['STAFF'] },
       {
         path: '/adjustments',
         title: '调整申请与审批',
@@ -113,6 +119,14 @@ export const menuGroups: MenuGroup[] = [
     key: 'system',
     title: '系统',
     items: [
+      { path: '/users/create', title: '用户添加', icon: UserFilled, permissions: ['user:create'] },
+      {
+        path: '/users',
+        title: '用户管理',
+        icon: UserFilled,
+        permissions: ['user:create'],
+        requiredRoles: ['UNIT_OWNER'],
+      },
       { path: '/logs', title: '操作日志', icon: Document, permissions: ['audit-log:view'] },
       { path: '/system', title: '系统管理', icon: Setting, permissions: ['system:manage'] },
     ],

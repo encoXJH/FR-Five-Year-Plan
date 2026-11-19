@@ -45,6 +45,10 @@ export const FALLBACK_ENUM_LABELS: Record<string, Record<string, string>> = {
     RECEIVER_CONFIRM: '接收方确认',
     LEADER_APPROVAL: '校级负责人审批',
   },
+  ReviewNode: {
+    UNIT_REVIEW: '学院负责人审核',
+    LEADER_REVIEW: '校级负责人审核',
+  },
   Decision: { APPROVE: '同意', REJECT: '驳回' },
   MilestoneStatus: {
     NOT_STARTED: '未开始',
@@ -58,6 +62,7 @@ export const FALLBACK_ENUM_LABELS: Record<string, Record<string, string>> = {
     LEADER: '校级负责人',
     SCHOOL_OWNER: '建设方向负责人',
     UNIT_OWNER: '学院项目负责人',
+    STAFF: '干事',
   },
   OrgUnitType: {
     COLLEGE: '产业学院',

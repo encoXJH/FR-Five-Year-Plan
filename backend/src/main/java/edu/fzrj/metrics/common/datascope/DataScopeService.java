@@ -8,7 +8,8 @@ import org.springframework.stereotype.Service;
 
 /**
  * 数据范围校验（API 约定 4.3）：
- * ADMIN / LEADER → 全校；SCHOOL_OWNER → 本人负责的指标；UNIT_OWNER → 本单元。
+ * ADMIN / LEADER → 全校；SCHOOL_OWNER → 本人负责的指标；UNIT_OWNER → 本单元；
+ * STAFF → 仅实时分配给本人的任务（ASSIGNED），不并入 UNIT。
  * 越权抛 20005。
  */
 @Service
@@ -24,6 +25,10 @@ public class DataScopeService {
 
     public boolean isUnitScope(LoginUser user) {
         return user.getRoles().contains("UNIT_OWNER");
+    }
+
+    public boolean isAssignedScope(LoginUser user) {
+        return user.getRoles().contains("STAFF");
     }
 
     /** 要求全校数据范围（如平台配置、跨单元统计），否则 20005 */

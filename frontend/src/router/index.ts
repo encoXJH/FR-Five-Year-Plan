@@ -29,7 +29,7 @@ const routes: RouteRecordRaw[] = [
         path: 'plans',
         name: 'Plans',
         component: () => import('@/views/plans/index.vue'),
-        meta: { title: '首页', hideForRolesOnly: ['UNIT_OWNER'] },
+        meta: { title: '首页', hideForRolesOnly: ['UNIT_OWNER', 'STAFF'] },
       },
       {
         // P03 计划概览
@@ -43,7 +43,7 @@ const routes: RouteRecordRaw[] = [
         path: 'plans/:planId/indicators',
         name: 'PlanIndicators',
         component: () => import('@/views/indicators/index.vue'),
-        meta: { title: '指标总表', hideForRolesOnly: ['UNIT_OWNER'] },
+        meta: { title: '指标总表', hideForRolesOnly: ['UNIT_OWNER', 'STAFF'] },
       },
       {
         path: 'plans/:planId/gantt',
@@ -54,14 +54,14 @@ const routes: RouteRecordRaw[] = [
         path: 'plans/:planId/indicator-progress',
         name: 'IndicatorProgress',
         component: () => import('@/views/indicators/progress.vue'),
-        meta: { title: '指标进度可视化', hideForRolesOnly: ['UNIT_OWNER'] },
+        meta: { title: '指标进度可视化', hideForRolesOnly: ['UNIT_OWNER', 'STAFF'] },
       },
       {
         // P04 指标总表（无计划上下文时提示先选计划）
         path: 'indicators',
         name: 'Indicators',
         component: () => import('@/views/indicators/index.vue'),
-        meta: { title: '指标总表', hideForRolesOnly: ['UNIT_OWNER'] },
+        meta: { title: '指标总表', hideForRolesOnly: ['UNIT_OWNER', 'STAFF'] },
       },
       {
         // P05 指标详情
@@ -117,7 +117,7 @@ const routes: RouteRecordRaw[] = [
         path: 'reviews',
         name: 'Reviews',
         component: () => import('@/views/review/index.vue'),
-        meta: { title: '审核中心', permissions: ['submission:review'] },
+        meta: { title: '审核中心', permissions: ['submission:review'], hideForRolesOnly: ['STAFF'] },
       },
       {
         // P10 调整申请 / 审批列表
@@ -153,6 +153,18 @@ const routes: RouteRecordRaw[] = [
         name: 'Todos',
         component: () => import('@/views/todos/index.vue'),
         meta: { title: '待办与消息' },
+      },
+      {
+        path: 'users',
+        name: 'UserManagement',
+        component: () => import('@/views/users/index.vue'),
+        meta: { title: '用户管理', permissions: ['user:create'], requiredRoles: ['UNIT_OWNER'] },
+      },
+      {
+        path: 'users/create',
+        name: 'UserCreate',
+        component: () => import('@/views/users/create.vue'),
+        meta: { title: '用户添加', permissions: ['user:create'] },
       },
       {
         // P15 系统管理
@@ -219,6 +231,14 @@ router.beforeEach(async (to) => {
     hiddenFor.length > 0 &&
     userStore.roles.length > 0 &&
     userStore.roles.every((role) => hiddenFor.includes(role))
+  ) {
+    return '/403'
+  }
+  const requiredRoles = to.meta.requiredRoles
+  if (
+    Array.isArray(requiredRoles) &&
+    requiredRoles.length > 0 &&
+    !requiredRoles.some((role) => userStore.roles.includes(role))
   ) {
     return '/403'
   }

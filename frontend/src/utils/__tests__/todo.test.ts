@@ -83,6 +83,15 @@ describe('resolveNotificationLink', () => {
     ).toBe('/tasks/42/submit?year=2027')
   })
 
+  it('院审通过通知保留后端填报页链接，不回跳审核中心', () => {
+    expect(resolveNotificationLink(notification({
+      title: '院审通过，待校级负责人审核',
+      link: '/tasks/42/submit?year=2026',
+      bizType: 'submission',
+      bizId: '7',
+    }))).toBe('/tasks/42/submit?year=2026')
+  })
+
   it('空 link 按 bizType / bizId 回退到对应业务页', () => {
     expect(resolveNotificationLink(notification({ bizType: 'submission', bizId: '7' }))).toBe(
       '/reviews?submissionId=7',

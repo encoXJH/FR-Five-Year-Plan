@@ -94,6 +94,7 @@ app:
   login:
     max-fail-count: 5
     lock-minutes: 15
+    initial-password: ${INITIAL_PASSWORD:fzrj@12345678}
   screen:
     cache-seconds: ${SCREEN_CACHE_SECONDS:120}
   cors:

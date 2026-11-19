@@ -26,6 +26,7 @@ import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
@@ -61,14 +62,18 @@ public class StatsService {
      * 数据范围过滤：all=全校；unitId=本单元；indicatorIds=本人负责指标（A 显式负责 + A+ 显式负责；
      * A+ 未设负责人时经 task.topIndicatorId 命中所属 A）。
      */
-    public record ScopeFilter(boolean all, Set<Long> unitIds, Set<Long> indicatorIds) {
+    public record ScopeFilter(boolean all, Set<Long> unitIds, Set<Long> indicatorIds, Set<Long> taskIds) {
+
+        public ScopeFilter(boolean all, Set<Long> unitIds, Set<Long> indicatorIds) {
+            this(all, unitIds, indicatorIds, Set.of());
+        }
 
         public ScopeFilter(boolean all, Long unitId, Set<Long> indicatorIds) {
             this(all, unitId == null ? Set.of() : Set.of(unitId), indicatorIds);
         }
 
         public static ScopeFilter allData() {
-            return new ScopeFilter(true, Set.of(), Set.of());
+            return new ScopeFilter(true, Set.of(), Set.of(), Set.of());
         }
 
         public Long unitId() {
@@ -79,11 +84,17 @@ public class StatsService {
             if (all) {
                 return true;
             }
-            if (unitIds.contains(task.getUnitId())) {
+            if (unitIds.contains(task.getUnitId()) || taskIds.contains(task.getId())) {
                 return true;
             }
             return indicatorIds.contains(task.getIndicatorId())
                     || indicatorIds.contains(task.getTopIndicatorId());
+        }
+
+        /** 仅 ALL 或显式 OWNER 范围可读取指标级缓存；UNIT / ASSIGNED 必须按可见 B 重算。 */
+        public boolean hasGlobalIndicatorAccess(Indicator indicator) {
+            return all || indicatorIds.contains(indicator.getId())
+                    || indicator.getParentId() != null && indicatorIds.contains(indicator.getParentId());
         }
     }
 
@@ -97,12 +108,14 @@ public class StatsService {
     private final OrgUnitMapper orgUnitMapper;
     private final SysSettingMapper sysSettingMapper;
     private final DataScopeService dataScopeService;
+    private final TaskReadScopeService taskReadScopeService;
 
     public StatsService(PlanService planService, PlanYearMapper planYearMapper,
                         IndicatorMapper indicatorMapper, IndicatorYearTargetMapper yearTargetMapper,
                         DirectionMapper directionMapper, TaskMapper taskMapper,
                         TaskYearMapper taskYearMapper, OrgUnitMapper orgUnitMapper,
-                        SysSettingMapper sysSettingMapper, DataScopeService dataScopeService) {
+                        SysSettingMapper sysSettingMapper, DataScopeService dataScopeService,
+                        TaskReadScopeService taskReadScopeService) {
         this.planService = planService;
         this.planYearMapper = planYearMapper;
         this.indicatorMapper = indicatorMapper;
@@ -113,15 +126,10 @@ public class StatsService {
         this.orgUnitMapper = orgUnitMapper;
         this.sysSettingMapper = sysSettingMapper;
         this.dataScopeService = dataScopeService;
+        this.taskReadScopeService = taskReadScopeService;
     }
 
     // ---------------- 数据范围 ----------------
-
-    private boolean isPureUnitOwner(LoginUser user) {
-        return dataScopeService.isUnitScope(user)
-                && !dataScopeService.isAllData(user)
-                && !dataScopeService.isOwnerScope(user);
-    }
 
     /** 当前登录人的可见范围（单元 ∪ 本人负责指标，多角色取并集） */
     public ScopeFilter currentScope() {
@@ -132,7 +140,9 @@ public class StatsService {
         Set<Long> unitIds = dataScopeService.isUnitScope(user) ? Set.copyOf(user.getUnitIds()) : Set.of();
         Set<Long> indicatorIds = dataScopeService.isOwnerScope(user)
                 ? ownedIndicatorIds(user.getUserId()) : Set.of();
-        return new ScopeFilter(false, unitIds, indicatorIds);
+        Set<Long> taskIds = dataScopeService.isAssignedScope(user)
+                ? taskReadScopeService.staffTaskIds(user) : Set.of();
+        return new ScopeFilter(false, unitIds, indicatorIds, taskIds);
     }
 
     /** 当前用户作为建设方向负责人显式负责的指标 id 集合 */
@@ -354,7 +364,8 @@ public class StatsService {
                                     cumulativeOfIndicator(a, ctx, scope).rate(), BigDecimal.ZERO)
                             : null;
                     long aPlusCount = ctx.indicators().values().stream()
-                            .filter(i -> a.getId().equals(i.getParentId())).count();
+                            .filter(i -> a.getId().equals(i.getParentId()))
+                            .filter(i -> indicatorVisible(i, scope, ctx)).count();
                     return new StatsDtos.IndicatorStat(a.getId(), a.getCode(), a.getName(), aPlusCount,
                             currentRows.size(), achieved, StatsAggregator.rate(achieved, currentRows.size()),
                             cumulativeRate);
@@ -387,7 +398,7 @@ public class StatsService {
                     .filter(i -> a.getId().equals(i.getParentId()))
                     .filter(i -> indicatorVisible(i, scope, ctx))
                     .sorted(Comparator.comparing(Indicator::getSort).thenComparing(Indicator::getCode))
-                    .map(ap -> nodeResult(ap, resolvedYear, plan, ctx,
+                    .map(ap -> nodeResult(ap, resolvedYear, plan, ctx, scope,
                             taskYearsByIndicator.getOrDefault(ap.getId(), List.of())))
                     .toList();
             List<TaskYear> allTaskYears = ctx.taskYears().stream()
@@ -435,7 +446,7 @@ public class StatsService {
         BigDecimal actualTotal;
         BigDecimal completionRate;
         String achieveStatus;
-        if ("MANUAL".equals(a.getRollupMode())) {
+        if ("MANUAL".equals(a.getRollupMode()) && scope.hasGlobalIndicatorAccess(a)) {
             IndicatorYearTarget row = yearTargetRow(ctx, a.getId(), year);
             actualValue = row == null ? null : row.getManualActualValue();
             actualTotal = row == null ? null : row.getActualTotal();
@@ -448,7 +459,7 @@ public class StatsService {
             List<MetricCalculator.YearResult> sources = new ArrayList<>(toYearResults(ownTaskYears));
             sources.addAll(aPlusResults);
             MetricCalculator.YearResult result = MetricCalculator.rollup(a.getStatCaliber(), sources,
-                    prevIndicatorTotal(ctx, a, year, plan));
+                    previousTotal(ctx, a, year, plan, scope));
             actualValue = result.actualValue();
             actualTotal = result.total();
             completionRate = MetricCalculator.completionRate(a.getStatCaliber(), result, target);
@@ -461,9 +472,9 @@ public class StatsService {
     }
 
     private MetricCalculator.YearResult nodeResult(Indicator indicator, int year, Plan plan,
-                                                   PlanContext ctx, List<TaskYear> taskYears) {
+                                                   PlanContext ctx, ScopeFilter scope, List<TaskYear> taskYears) {
         return MetricCalculator.rollup(indicator.getStatCaliber(), toYearResults(taskYears),
-                prevIndicatorTotal(ctx, indicator, year, plan));
+                previousTotal(ctx, indicator, year, plan, scope));
     }
 
     private List<MetricCalculator.YearResult> toYearResults(List<TaskYear> taskYears) {
@@ -501,10 +512,6 @@ public class StatsService {
         }
         LoginUser user = SecurityUtils.getLoginUser();
         Plan plan = planService.requirePlan(indicator.getPlanId());
-        if (isPureUnitOwner(user)) {
-            return unitTrend(indicator, plan, user.getUnitIds());
-        }
-        // 数据范围：全校 / 指标有效负责人；其他角色越权返回 20005。
         if (!dataScopeService.isAllData(user)) {
             Long effectiveOwner = indicator.getOwnerId();
             if (effectiveOwner == null && indicator.getParentId() != null) {
@@ -515,7 +522,7 @@ public class StatsService {
             }
             if (!dataScopeService.isOwnerScope(user) || effectiveOwner == null
                     || !effectiveOwner.equals(user.getUserId())) {
-                throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
+                return scopedTrend(indicator, plan, currentScope());
             }
         }
         Map<Integer, IndicatorYearTarget> byYear = yearTargetMapper.selectList(
@@ -551,9 +558,8 @@ public class StatsService {
                 indicator.getTotalTarget(), cumulative.actual(), cumulative.rate(), years);
     }
 
-    /** 学院趋势按本单元 B 重新归集，不能读取包含全校完成值的 indicator_year_target 缓存。 */
-    private StatsDtos.TrendView unitTrend(Indicator indicator, Plan plan, List<Long> unitIds) {
-        ScopeFilter scope = new ScopeFilter(false, Set.copyOf(unitIds), Set.of());
+    /** UNIT / ASSIGNED 趋势按可见 B 重新归集，不能读取全校缓存或 MANUAL 全局认定值。 */
+    private StatsDtos.TrendView scopedTrend(Indicator indicator, Plan plan, ScopeFilter scope) {
         PlanContext ctx = loadContext(plan, plan.getStartYear(), scope);
         boolean visible = ctx.tasks().values().stream().anyMatch(task ->
                 indicator.getId().equals(task.getIndicatorId())
@@ -697,7 +703,7 @@ public class StatsService {
                                                                   ScopeFilter scope) {
         boolean manual = "MANUAL".equals(indicator.getRollupMode());
         Plan plan = ctx.plan();
-        if (!manual) {
+        if (!manual || !scope.hasGlobalIndicatorAccess(indicator)) {
             List<TaskYear> visibleYears = ctx.taskYearsByTask().values().stream()
                     .flatMap(List::stream)
                     .filter(ty -> {
@@ -748,6 +754,27 @@ public class StatsService {
 
     private IndicatorYearTarget yearTargetRow(PlanContext ctx, Long indicatorId, int year) {
         return ctx.yearTargets().get(indicatorId + ":" + year);
+    }
+
+    private BigDecimal previousTotal(PlanContext ctx, Indicator indicator, int year, Plan plan,
+                                     ScopeFilter scope) {
+        if (scope.hasGlobalIndicatorAccess(indicator)) {
+            return prevIndicatorTotal(ctx, indicator, year, plan);
+        }
+        if (year <= plan.getStartYear()) {
+            return indicator.getBaselineValue();
+        }
+        int previousYear = year - 1;
+        List<TaskYear> visibleYears = ctx.taskYearsByTask().values().stream()
+                .flatMap(List::stream)
+                .filter(ty -> ty.getYear() == previousYear)
+                .filter(ty -> {
+                    Task task = ctx.tasks().get(ty.getTaskId());
+                    return indicator.getId().equals(ty.getIndicatorId())
+                            || task != null && indicator.getId().equals(task.getTopIndicatorId());
+                })
+                .toList();
+        return MetricCalculator.rollup(indicator.getStatCaliber(), toYearResults(visibleYears), null).total();
     }
 
     /** 指标级上年完成总量（STOCK / GROWTH 汇总用；第一年用基线值） */

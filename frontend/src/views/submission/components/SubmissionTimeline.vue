@@ -46,20 +46,29 @@ function timelineIcon(status: string) {
     >
       <div class="line">
         <span class="value">{{ formatMetricValue(item.value, caliber, unitLabel) }}</span>
-        <StatusTag kind="SubmissionStatus" :value="item.status" />
+        <StatusTag kind="SubmissionStatus" :value="item.status" :review-node="item.currentReviewNode" />
         <el-tooltip v-if="item.isProxy" :content="item.proxyReason ?? '管理员代填'" placement="top">
           <el-tag type="warning" effect="plain" size="small">代</el-tag>
         </el-tooltip>
       </div>
-      <div v-if="item.status === 'APPROVED' && item.approvedValue" class="sub-line">
-        认定 {{ formatMetricValue(item.approvedValue, caliber, unitLabel) }}
+      <div
+        v-if="item.approvedValue && (item.status === 'APPROVED' || item.currentReviewNode === 'LEADER_REVIEW')"
+        class="sub-line"
+      >
+        {{ item.status === 'APPROVED' ? '认定' : '院审暂存认定' }}
+        {{ formatMetricValue(item.approvedValue, caliber, unitLabel) }}
       </div>
       <div v-for="review in item.reviews ?? []" :key="review.id" class="review-comment">
+        <StatusTag v-if="review.reviewNode" kind="ReviewNode" :value="review.reviewNode" />
         <span class="reviewer">{{ review.reviewer?.name ?? '审核人' }}</span>
+        <span class="review-time">{{ formatDateTime(review.createdAt) }}</span>
         <el-tag size="small" :type="review.result === 'APPROVED' ? 'success' : 'danger'" effect="plain">
           {{ review.result === 'APPROVED' ? '通过' : '驳回' }}
         </el-tag>
         <el-tag v-if="review.isProxy" type="warning" effect="plain" size="small">代</el-tag>
+        <span v-if="review.approvedValue" class="approved-value">
+          认定 {{ formatMetricValue(review.approvedValue, caliber, unitLabel) }}
+        </span>
         <span v-if="review.comment" class="comment">“{{ review.comment }}”</span>
       </div>
     </el-timeline-item>
@@ -75,6 +84,7 @@ function timelineIcon(status: string) {
 .line {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
@@ -100,8 +110,13 @@ function timelineIcon(status: string) {
   flex-wrap: wrap;
 }
 
-.reviewer {
+.reviewer,
+.review-time {
   color: var(--el-text-color-secondary);
+}
+
+.approved-value {
+  font-variant-numeric: tabular-nums;
 }
 
 .comment {

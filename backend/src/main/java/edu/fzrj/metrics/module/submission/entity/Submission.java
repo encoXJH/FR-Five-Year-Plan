@@ -1,6 +1,8 @@
 package edu.fzrj.metrics.module.submission.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
@@ -68,21 +70,27 @@ public class Submission {
     private Boolean achieved;
 
     /** 认定值：审核认定的增量（核减后） */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal approvedAmount;
 
     /** 认定值：审核认定的总量 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal approvedTotal;
 
     /** 认定值：审核认定的分子 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal approvedNumerator;
 
     /** 认定值：审核认定的分母 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal approvedDenominator;
 
     /** 认定值：审核认定的百分比 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal approvedPercent;
 
     /** 认定值：审核认定的是否完成 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Boolean approvedAchieved;
 
     /** 完成情况说明 */
@@ -93,6 +101,13 @@ public class Submission {
 
     /** 填报状态：DRAFT 草稿 / PENDING_REVIEW 待审核 / APPROVED 已通过 / REJECTED 已驳回 / WITHDRAWN 已撤回 */
     private String status;
+
+    /** 本次提交来源：STAFF 干事 / UNIT_OWNER 学院项目负责人 */
+    private String submitterRole;
+
+    /** 当前审核节点：UNIT_REVIEW / LEADER_REVIEW；非待审为空 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String currentReviewNode;
 
     /** 提交次数（每次提交 +1，对应 submission_history / review） */
     private Integer revisionNo;
@@ -105,9 +120,11 @@ public class Submission {
     private Long submittedBy;
 
     /** 最近审核时间 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDateTime reviewedAt;
 
     /** 最近审核人，引用 sys_user.id */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     @JsonSerialize(using = ToStringSerializer.class)
     private Long reviewerId;
 

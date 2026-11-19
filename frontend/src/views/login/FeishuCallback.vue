@@ -23,7 +23,7 @@ const bindingChallenge = ref<FeishuBindingChallenge | null>(null)
 const clientEnv = detectClientEnv(window.navigator.userAgent)
 
 function redirectTarget(): string {
-  if (userStore.isUnitOwnerOnly) return userStore.homePath
+  if (userStore.isTaskExecutorOnly) return userStore.homePath
   if (userStore.roles.includes('ADMIN')) return '/plans'
   return typeof route.query.redirect === 'string' ? route.query.redirect : '/'
 }

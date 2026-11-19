@@ -58,6 +58,17 @@ public class UserUnitService {
                 .stream().map(UserUnit::getUserId).distinct().toList();
     }
 
+    public List<Long> userIdsOfUnits(Collection<Long> unitIds) {
+        List<Long> ids = unitIds == null ? List.of() : unitIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return userUnitMapper.selectList(new LambdaQueryWrapper<UserUnit>()
+                        .in(UserUnit::getUnitId, ids)
+                        .select(UserUnit::getUserId))
+                .stream().map(UserUnit::getUserId).distinct().toList();
+    }
+
     @Transactional
     public void replaceUnits(Long userId, Long primaryUnitId, Collection<Long> unitIds, Long operatorId) {
         LinkedHashSet<Long> normalized = new LinkedHashSet<>();

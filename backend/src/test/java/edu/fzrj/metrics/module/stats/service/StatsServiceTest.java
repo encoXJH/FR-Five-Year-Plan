@@ -22,6 +22,7 @@ import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
@@ -38,6 +39,8 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -65,6 +68,8 @@ class StatsServiceTest {
     private SysSettingMapper sysSettingMapper;
     @Mock
     private DataScopeService dataScopeService;
+    @Mock
+    private TaskReadScopeService taskReadScopeService;
 
     @InjectMocks
     private StatsService statsService;
@@ -443,6 +448,74 @@ class StatsServiceTest {
         assertEquals(0, new BigDecimal("100").compareTo(year.actualDenominator()));
         assertEquals(0, new BigDecimal("0.9").compareTo(year.actualValue()));
         assertEquals(0, new BigDecimal("0.9").compareTo(result.cumulativeActual()));
+    }
+
+    @Test
+    void 纯干事无任务时各类统计为空且不读取全校指标值() {
+        login(new LoginUser(201L, "staff", "干事", 31L, List.of("STAFF"), List.of()));
+        when(dataScopeService.isAssignedScope(any())).thenReturn(true);
+        when(taskReadScopeService.staffTaskIds(any())).thenReturn(java.util.Set.of());
+        Plan plan = new Plan();
+        plan.setId(11L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2026);
+        Indicator a = indicator(1L, null, "A01", "INCREMENT");
+        a.setRollupMode("MANUAL");
+        a.setTotalTarget(BigDecimal.TEN);
+        IndicatorYearTarget global = target(501L, 1L, "INCREMENT", "99", "0", "1");
+        global.setManualActualValue(new BigDecimal("99"));
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(a));
+        when(yearTargetMapper.selectList(any())).thenReturn(List.of(global));
+        when(taskMapper.selectList(any())).thenReturn(List.of());
+
+        StatsDtos.Overview overview = statsService.overview(11L, 2026);
+
+        assertEquals(0, overview.taskCount());
+        assertEquals(0, overview.warningCount());
+        assertNull(overview.cumulativeCompletionRate());
+        assertTrue(statsService.tree(11L, 2026).isEmpty());
+        assertTrue(statsService.byUnit(11L, 2026).isEmpty());
+        assertTrue(statsService.byIndicator(11L, 2026).isEmpty());
+    }
+
+    @Test
+    void 干事统计按分配任务重算而不泄露MANUAL全校缓存() {
+        Plan plan = new Plan();
+        plan.setId(11L);
+        plan.setStartYear(2026);
+        plan.setEndYear(2026);
+        Indicator a = indicator(1L, null, "A01", "INCREMENT");
+        a.setRollupMode("MANUAL");
+        a.setTotalTarget(BigDecimal.TEN);
+        Task assigned = task(101L, 1L, 31L, "A01-01");
+        Task other = task(102L, 1L, 32L, "A01-02");
+        TaskYear assignedYear = taskYear(1001L, 101L, 1L, 31L, "INCREMENT", "2", "0", "1");
+        IndicatorYearTarget global = target(501L, 1L, "INCREMENT", "99", "0", "1");
+        global.setManualActualValue(new BigDecimal("99"));
+        when(planService.requirePlan(11L)).thenReturn(plan);
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(a));
+        when(taskMapper.selectList(any())).thenReturn(List.of(assigned, other));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(assignedYear), List.of(assignedYear));
+        when(yearTargetMapper.selectList(any())).thenReturn(List.of(global));
+        StatsService.ScopeFilter scope = new StatsService.ScopeFilter(
+                false, java.util.Set.of(), java.util.Set.of(), java.util.Set.of(101L));
+
+        StatsDtos.TreeNode result = statsService.tree(11L, 2026, scope).get(0);
+
+        assertEquals(1, result.children().size());
+        assertEquals(0, new BigDecimal("2").compareTo(result.actualValue()));
+        assertEquals(0, new BigDecimal("2").compareTo(result.cumulativeActual()));
+    }
+
+    @Test
+    void 统计范围按本单元与分配任务取并集() {
+        StatsService.ScopeFilter scope = new StatsService.ScopeFilter(
+                false, java.util.Set.of(31L), java.util.Set.of(), java.util.Set.of(101L));
+
+        assertTrue(scope.test(task(1L, 1L, 31L, "UNIT")));
+        assertTrue(scope.test(task(101L, 1L, 32L, "ASSIGNED")));
+        assertFalse(scope.test(task(102L, 1L, 32L, "OTHER")));
     }
 
     private void login(LoginUser user) {

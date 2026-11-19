@@ -151,7 +151,7 @@ useAutoRefresh(() => load(true), { skip: () => dirty.value || saving.value })
 <template>
   <div v-loading="loading" class="role-permission-panel">
     <el-alert type="info" :closable="false" show-icon class="panel-alert">
-      每次仅编辑一个角色。核心锁定权限不可取消；未列入当前角色可配置范围的权限不可授权。
+      每次仅编辑一个角色。核心锁定权限不可取消；未列入当前角色可配置范围的权限不可授权。干事动态继承学院项目负责人当前业务权限，不包含用户创建和填报审核，任务分配仅限负责人本人。
     </el-alert>
 
     <div class="role-toolbar">

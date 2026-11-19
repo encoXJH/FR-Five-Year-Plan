@@ -1,5 +1,6 @@
 import { http } from '@/utils/request'
 import type { PageResult } from '@/types/api'
+import type { ReviewNode } from '@/types/enums'
 import type {
   CreateSubmissionRequest,
   SubmissionDetail,
@@ -30,6 +31,7 @@ export interface YearUploadItem {
   submittedAt: string | null
   submittedByName: string | null
   status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED'
+  currentReviewNode?: ReviewNode | null
 }
 
 /** GET /plans/{planId}/submissions/uploads?year= 当年已上传指标清单 */

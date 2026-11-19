@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { enumLabel, enumOptions, FALLBACK_ENUM_LABELS } from '../enumLabels'
+import { enumLabel, enumOptions, FALLBACK_ENUM_LABELS, submissionStatusLabel } from '../enumLabels'
 import type { EnumDict } from '@/types/enums'
 
 describe('enumLabel', () => {
@@ -16,6 +16,25 @@ describe('enumLabel', () => {
   it('未知枚举值返回原值，不报错', () => {
     expect(enumLabel('PlanStatus', 'SOME_NEW_VALUE')).toBe('SOME_NEW_VALUE')
     expect(enumLabel('UnknownKind', 'X')).toBe('X')
+  })
+})
+
+describe('两级审核状态标签', () => {
+  it('ReviewNode 提供学院负责人审核和校级负责人审核中文名', () => {
+    expect(enumLabel('ReviewNode', 'UNIT_REVIEW')).toBe('学院负责人审核')
+    expect(enumLabel('ReviewNode', 'LEADER_REVIEW')).toBe('校级负责人审核')
+  })
+
+  it('PENDING_REVIEW 与节点组合展示，不发明新的 SubmissionStatus', () => {
+    expect(submissionStatusLabel('PENDING_REVIEW', 'UNIT_REVIEW')).toBe('待学院负责人审核')
+    expect(submissionStatusLabel('PENDING_REVIEW', 'LEADER_REVIEW')).toBe('待校级负责人审核')
+    expect(submissionStatusLabel('PENDING_REVIEW', null)).toBe('待审核')
+    expect(submissionStatusLabel('APPROVED', 'LEADER_REVIEW')).toBe('已通过')
+  })
+
+  it('组合标签优先使用服务端字典', () => {
+    const dict: EnumDict = { ReviewNode: { UNIT_REVIEW: '学院初审' } }
+    expect(submissionStatusLabel('PENDING_REVIEW', 'UNIT_REVIEW', dict)).toBe('待学院初审')
   })
 })
 

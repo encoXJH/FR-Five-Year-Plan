@@ -15,21 +15,27 @@ import { newIdempotencyKey } from '@/utils/idempotency'
 import { getCurrentPlan } from '@/utils/currentPlan'
 import { ApiError } from '@/utils/request'
 import { formatDateTime, formatPercent, formatRelativeTime } from '@/utils/format'
+import { enumOptions } from '@/utils/enumLabels'
 import { FILE_CATEGORY_COLORS, formatFileSize } from '@/utils/file'
 import { percentToDisplay, percentToStore } from '@/utils/allocation'
 import { shouldApplyRefreshResponse, useAutoRefresh } from '@/utils/autoRefresh'
 import {
   approvedReduction,
   buildMetricValue,
+  canReviewNode,
+  canReviewSubmission,
   formatMetricValue,
+  getBatchReviewNode,
   isApprovedValueValid,
   parseSubmissionRemark,
+  reviewInitialValue,
 } from '@/utils/submission'
 import type { PageResult } from '@/types/api'
 import type { FileInfo } from '@/types/file'
 import type { StatCaliber } from '@/types/enums'
 import type {
   PendingReviewItem,
+  ReviewNode,
   SubmissionDetail,
   SubmissionListItem,
 } from '@/types/submission'
@@ -37,19 +43,46 @@ import type {
 const route = useRoute()
 const userStore = useUserStore()
 
-/** 管理员代审（非建设方向负责人）：代审原因选填，填写后写入审计日志 */
-const isDelegateReview = computed(
-  () => userStore.roles.includes('ADMIN') && !userStore.roles.includes('SCHOOL_OWNER'),
-)
+function allowedReviewNodes(): ReviewNode[] {
+  return (['UNIT_REVIEW', 'LEADER_REVIEW'] as const).filter((node) =>
+    canReviewNode(node, userStore.roles, userStore.permissions),
+  )
+}
+
+function defaultReviewNode(): ReviewNode | '' {
+  const allowed = allowedReviewNodes()
+  return allowed.length === 1 ? allowed[0] : ''
+}
+
+function isProxyReviewNode(node: ReviewNode | null): boolean {
+  if (!node || !userStore.roles.includes('ADMIN')) return false
+  return node === 'UNIT_REVIEW'
+    ? !userStore.roles.includes('UNIT_OWNER')
+    : !userStore.roles.includes('LEADER')
+}
+
+const requestedReviewNode = route.query.reviewNode === 'UNIT_REVIEW' || route.query.reviewNode === 'LEADER_REVIEW'
+  ? route.query.reviewNode
+  : null
+const initialReviewNode = requestedReviewNode && allowedReviewNodes().includes(requestedReviewNode)
+  ? requestedReviewNode
+  : defaultReviewNode()
 
 // ---------- 筛选 ----------
 const filters = reactive({
+  reviewNode: initialReviewNode as ReviewNode | '',
   planId: (typeof route.query.planId === 'string' ? route.query.planId : '') || getCurrentPlan()?.id || '',
   indicatorId: '',
   unitId: '',
   keyword: '',
   dateRange: null as [string, string] | null,
 })
+
+const reviewNodeOptions = computed(() =>
+  enumOptions('ReviewNode', userStore.enums).filter((option) =>
+    allowedReviewNodes().includes(option.value as ReviewNode),
+  ),
+)
 
 const unitOptions = ref<OrgUnit[]>([])
 const indicatorOptions = ref<{ id: string; code: string; name: string; directionCode: string | null; directionName: string | null }[]>([])
@@ -99,6 +132,7 @@ const selectedId = ref<string | null>(null)
 function currentQuery() {
   const [from, to] = filters.dateRange ?? [undefined, undefined]
   return {
+    reviewNode: filters.reviewNode || undefined,
     planId: filters.planId || undefined,
     indicatorId: filters.indicatorId || undefined,
     unitId: filters.unitId || undefined,
@@ -148,6 +182,7 @@ function applyFilters(): void {
 }
 
 function resetFilters(): void {
+  filters.reviewNode = defaultReviewNode()
   filters.indicatorId = ''
   filters.unitId = ''
   filters.keyword = ''
@@ -171,6 +206,13 @@ const detail = ref<SubmissionDetail | null>(null)
 const detailLoading = ref(false)
 const detailLoadError = ref<{ message: string; requestId: string } | null>(null)
 const history = ref<SubmissionListItem[]>([])
+
+const isDelegateReview = computed(() => isProxyReviewNode(detail.value?.currentReviewNode ?? null))
+const canOperateCurrent = computed(() =>
+  detail.value
+    ? canReviewSubmission(detail.value, userStore.roles, userStore.permissions)
+    : false,
+)
 
 const caliber = computed<StatCaliber>(() => detail.value?.statCaliber ?? 'INCREMENT')
 
@@ -240,7 +282,7 @@ const reviewForm = reactive({
 })
 
 function initReviewForm(data: SubmissionDetail): void {
-  const value = data.value ?? {}
+  const value = reviewInitialValue(data)
   reviewForm.amount = value.amount ?? undefined
   reviewForm.total = value.total ?? undefined
   reviewForm.numerator = value.numerator ?? undefined
@@ -252,7 +294,7 @@ function initReviewForm(data: SubmissionDetail): void {
 
 /** 审核表单已改动：自动刷新时跳过，避免覆盖认定值或审核意见 */
 const reviewFormDirty = computed(() => {
-  const value = detail.value?.value
+  const value = detail.value ? reviewInitialValue(detail.value) : null
   if (!value) return false
   return (reviewForm.amount ?? null) !== (value.amount ?? null)
     || (reviewForm.total ?? null) !== (value.total ?? null)
@@ -263,6 +305,13 @@ const reviewFormDirty = computed(() => {
     || reviewForm.reason.trim() !== ''
 })
 
+const initialReviewValue = computed(() =>
+  detail.value ? reviewInitialValue(detail.value) : null,
+)
+const initialReviewValueText = computed(() =>
+  formatMetricValue(initialReviewValue.value, caliber.value),
+)
+
 const approvedValue = computed(() =>
   buildMetricValue(caliber.value, {
     amount: reviewForm.amount ?? null,
@@ -270,12 +319,14 @@ const approvedValue = computed(() =>
     numerator: reviewForm.numerator ?? null,
     denominator: reviewForm.denominator ?? null,
     percent: percentToStore(reviewForm.percent),
-    achieved: detail.value?.value.achieved ?? null,
+    achieved: initialReviewValue.value?.achieved ?? null,
   }),
 )
 
 const reduction = computed(() =>
-  detail.value ? approvedReduction(caliber.value, detail.value.value, approvedValue.value) : null,
+  initialReviewValue.value
+    ? approvedReduction(caliber.value, initialReviewValue.value, approvedValue.value)
+    : null,
 )
 
 const approving = ref(false)
@@ -284,13 +335,20 @@ const rejecting = ref(false)
 function validateApproved(): string[] {
   const errors: string[] = []
   if (!detail.value) return errors
-  if (!isApprovedValueValid(caliber.value, detail.value.value, approvedValue.value)) {
-    errors.push('认定值不能大于填报值（60005）')
+  if (!initialReviewValue.value
+    || !isApprovedValueValid(caliber.value, initialReviewValue.value, approvedValue.value)) {
+    errors.push('认定值不能大于本级认定值（60005）')
   }
   if (reduction.value !== null && !reviewForm.comment.trim()) {
     errors.push('核减认定值时必须填写审核意见')
   }
   return errors
+}
+
+function ensureCurrentReviewable(): boolean {
+  if (canOperateCurrent.value) return true
+  ElMessage.warning('该填报已流转或当前账号无权处理此审核节点，请刷新待审列表')
+  return false
 }
 
 async function afterReviewed(message: string): Promise<void> {
@@ -300,7 +358,9 @@ async function afterReviewed(message: string): Promise<void> {
 
 async function handleApprove(): Promise<void> {
   const target = detail.value
-  if (!target) return
+  if (!target || !ensureCurrentReviewable()) return
+  const reviewNode = target.currentReviewNode
+  const currentReduction = reduction.value
   const errors = validateApproved()
   if (errors.length > 0) {
     ElMessage.error(errors[0])
@@ -324,8 +384,11 @@ async function handleApprove(): Promise<void> {
         ? { result: 'APPROVED' as const, comment: reviewForm.comment || undefined, version: target.version, reason: reviewForm.reason || undefined }
         : { result: 'APPROVED' as const, comment: reviewForm.comment || undefined, approvedValue: approvedValue.value, version: target.version, reason: reviewForm.reason || undefined }
     await reviewSubmission(target.id, body, newIdempotencyKey())
+    const reductionText = currentReduction !== null ? `（本级核减 ${currentReduction}）` : ''
     await afterReviewed(
-      reduction.value !== null ? `已通过（核减 ${reduction.value}）` : '已通过',
+      reviewNode === 'UNIT_REVIEW'
+        ? `院审已通过${reductionText}，已转校级负责人审核`
+        : `终审已通过${reductionText}`,
     )
   } catch (error) {
     if (error instanceof ApiError) ElMessage.error(`${error.message}（${error.code}）`)
@@ -336,7 +399,7 @@ async function handleApprove(): Promise<void> {
 
 async function handleReject(): Promise<void> {
   const target = detail.value
-  if (!target) return
+  if (!target || !ensureCurrentReviewable()) return
   if (!reviewForm.comment.trim()) {
     ElMessage.error('驳回时必须填写审核意见（60004）')
     return
@@ -375,17 +438,39 @@ const batchVisible = ref(false)
 const batchComment = ref('')
 const batchReason = ref('')
 const batchLoading = ref(false)
-
-const selectableItems = computed(() => page.value.items)
+const batchNode = ref<ReviewNode | null>(null)
+const batchIsDelegateReview = computed(() => isProxyReviewNode(batchNode.value))
 
 const checkedItems = computed(() =>
-  selectableItems.value.filter((item) => checkedIds.value.includes(item.id)),
+  page.value.items.filter((item) => checkedIds.value.includes(item.id)),
 )
 
-function toggleCheck(id: string, checked: boolean): void {
+const activeSelectionNode = computed<ReviewNode | null>(() =>
+  checkedItems.value[0]?.currentReviewNode
+  || filters.reviewNode
+  || detail.value?.currentReviewNode
+  || null,
+)
+
+function canToggleItem(item: PendingReviewItem): boolean {
+  return canReviewSubmission(item, userStore.roles, userStore.permissions)
+    && (!activeSelectionNode.value || item.currentReviewNode === activeSelectionNode.value)
+}
+
+const selectableItems = computed(() => page.value.items.filter(canToggleItem))
+const allSelectableChecked = computed(() =>
+  selectableItems.value.length > 0
+  && selectableItems.value.every((item) => checkedIds.value.includes(item.id)),
+)
+
+function toggleCheck(item: PendingReviewItem, checked: boolean): void {
+  if (checked && !canToggleItem(item)) {
+    ElMessage.warning('批量通过只能选择当前账号可处理且审核节点相同的填报')
+    return
+  }
   checkedIds.value = checked
-    ? [...checkedIds.value, id]
-    : checkedIds.value.filter((item) => item !== id)
+    ? [...checkedIds.value, item.id]
+    : checkedIds.value.filter((id) => id !== item.id)
 }
 
 function toggleCheckAll(checked: boolean): void {
@@ -393,19 +478,30 @@ function toggleCheckAll(checked: boolean): void {
 }
 
 function openBatch(): void {
+  const node = getBatchReviewNode(checkedItems.value, userStore.roles, userStore.permissions)
   if (checkedItems.value.length === 0) {
     ElMessage.warning('请先勾选要批量通过的填报')
     return
   }
+  if (!node) {
+    ElMessage.warning('批量通过仅限同一审核节点且当前账号可处理的填报')
+    return
+  }
+  batchNode.value = node
   batchComment.value = ''
   batchReason.value = ''
   batchVisible.value = true
 }
 
 async function confirmBatch(): Promise<void> {
+  const node = getBatchReviewNode(checkedItems.value, userStore.roles, userStore.permissions)
   const submissionIds = checkedItems.value.map((item) => item.id)
   if (submissionIds.length === 0) {
     ElMessage.warning('请先勾选要批量通过的填报')
+    return
+  }
+  if (!node || node !== batchNode.value) {
+    ElMessage.warning('所选填报的审核节点已变化，请刷新后重新选择')
     return
   }
   batchLoading.value = true
@@ -428,7 +524,11 @@ async function confirmBatch(): Promise<void> {
         { confirmButtonText: '我知道了' },
       )
     } else {
-      ElMessage.success(`已批量通过 ${results.length} 条`)
+      ElMessage.success(
+        node === 'UNIT_REVIEW'
+          ? `已批量完成院审 ${results.length} 条，并转校级负责人审核`
+          : `已批量终审通过 ${results.length} 条`,
+      )
     }
     await loadList()
   } finally {
@@ -498,6 +598,11 @@ async function locateDeepLinkedSubmission(id: string): Promise<void> {
     if (linked.status !== 'PENDING_REVIEW') {
       deepLinkMessage.value = { type: 'warning', text: '该填报当前不在待审核状态，无需继续审核' }
       return
+    }
+    if (linked.currentReviewNode && filters.reviewNode && filters.reviewNode !== linked.currentReviewNode) {
+      filters.reviewNode = linked.currentReviewNode
+      page.value.page = 1
+      page.value = await listPendingReviews(currentQuery())
     }
     const pageSize = page.value.pageSize
     let result = page.value
@@ -575,6 +680,22 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
 
     <el-card shadow="never" class="filter-card">
       <el-form inline @submit.prevent>
+        <el-form-item label="审核节点">
+          <el-select
+            v-model="filters.reviewNode"
+            clearable
+            placeholder="全部可处理节点"
+            style="width: 190px"
+            @change="applyFilters"
+          >
+            <el-option
+              v-for="option in reviewNodeOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="指标">
           <el-select
             v-model="filters.indicatorId"
@@ -656,7 +777,7 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
       <el-card shadow="never" class="list-card" v-loading="listLoading">
         <div v-if="selectableItems.length > 0" class="list-head">
           <el-checkbox
-            :model-value="checkedIds.length === selectableItems.length"
+            :model-value="allSelectableChecked"
             :indeterminate="checkedIds.length > 0 && checkedIds.length < selectableItems.length"
             @change="(checked: boolean) => toggleCheckAll(checked)"
           >
@@ -674,13 +795,14 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
           >
             <el-checkbox
               :model-value="checkedIds.includes(item.id)"
+              :disabled="!canToggleItem(item) && !checkedIds.includes(item.id)"
               @click.stop
-              @change="(checked: boolean) => toggleCheck(item.id, checked)"
+              @change="(checked: boolean) => toggleCheck(item, checked)"
             />
             <div class="pending-main">
               <div class="pending-line">
                 <span class="mono pending-code">{{ item.task?.code ?? '—' }}</span>
-                <el-tag size="small" type="warning" effect="light">待审核</el-tag>
+                <StatusTag kind="SubmissionStatus" :value="item.status" :review-node="item.currentReviewNode" />
               </div>
               <div class="pending-sub">{{ item.unit?.name ?? '—' }}</div>
               <div class="pending-sub">
@@ -714,6 +836,11 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
                 <span class="mono">{{ detail.task?.code ?? '' }}</span>
                 {{ (detail.topIndicator ?? detail.indicator)?.name ?? '' }}
                 <StatusTag kind="StatCaliber" :value="detail.statCaliber" />
+                <StatusTag
+                  kind="SubmissionStatus"
+                  :value="detail.status"
+                  :review-node="detail.currentReviewNode"
+                />
               </div>
               <div class="detail-meta">
                 {{ detail.unit?.name ?? '—' }}
@@ -758,34 +885,55 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
           <el-divider />
 
           <h3 class="section-title">审核操作</h3>
-            <el-form label-width="110px" class="review-form" @submit.prevent>
+          <el-alert
+            v-if="!canOperateCurrent"
+            type="warning"
+            :closable="false"
+            title="该填报已流转或当前账号无权处理此审核节点，请刷新待审列表"
+            class="review-node-alert"
+          />
+          <el-alert
+            v-else-if="detail.currentReviewNode === 'LEADER_REVIEW' && detail.approvedValue"
+            type="info"
+            :closable="false"
+            :title="`已继承院审认定值 ${initialReviewValueText}；本级核减以该值为基准，最终认定值不得超过填报值`"
+            class="review-node-alert"
+          />
+          <el-alert
+            v-else-if="detail.currentReviewNode === 'UNIT_REVIEW'"
+            type="info"
+            :closable="false"
+            title="院审通过后将转校级负责人终审，暂不计入完成值"
+            class="review-node-alert"
+          />
+            <el-form label-width="110px" class="review-form" :disabled="!canOperateCurrent" @submit.prevent>
             <template v-if="caliber === 'INCREMENT'">
               <el-form-item label="认定值">
                 <el-input-number v-model="reviewForm.amount" :min="0" :precision="4" controls-position="right" />
-                <span class="field-hint">≤ 填报值 {{ detail.value.amount ?? '—' }}</span>
+                <span class="field-hint">≤ 本级认定值 {{ initialReviewValue?.amount ?? '—' }}</span>
               </el-form-item>
             </template>
             <template v-else-if="caliber === 'STOCK' || caliber === 'GROWTH'">
               <el-form-item label="认定总量">
                 <el-input-number v-model="reviewForm.total" :min="0" :precision="4" controls-position="right" />
-                <span class="field-hint">≤ 填报值 {{ detail.value.total ?? '—' }}</span>
+                <span class="field-hint">≤ 本级认定值 {{ initialReviewValue?.total ?? '—' }}</span>
               </el-form-item>
             </template>
             <template v-else-if="caliber === 'RATIO'">
               <el-form-item label="认定分子">
                 <el-input-number v-model="reviewForm.numerator" :min="0" :precision="4" controls-position="right" />
-                <span class="field-hint">≤ {{ detail.value.numerator ?? '—' }}</span>
+                <span class="field-hint">≤ 本级认定值 {{ initialReviewValue?.numerator ?? '—' }}</span>
               </el-form-item>
               <el-form-item label="认定分母">
                 <el-input-number v-model="reviewForm.denominator" :min="0" :precision="4" controls-position="right" />
-                <span class="field-hint">≤ {{ detail.value.denominator ?? '—' }}</span>
+                <span class="field-hint">≤ 本级认定值 {{ initialReviewValue?.denominator ?? '—' }}</span>
               </el-form-item>
             </template>
             <template v-else-if="caliber === 'DIRECT_PERCENT'">
               <el-form-item label="认定百分比">
                 <el-input-number v-model="reviewForm.percent" :min="0" :max="100" :precision="4" controls-position="right" />
                 <span class="field-unit">%</span>
-                <span class="field-hint">≤ 填报值 {{ detail.value.percent === null || detail.value.percent === undefined ? '—' : formatPercent(detail.value.percent) }}</span>
+                <span class="field-hint">≤ 本级认定值 {{ initialReviewValue?.percent === null || initialReviewValue?.percent === undefined ? '—' : formatPercent(initialReviewValue.percent) }}</span>
               </el-form-item>
             </template>
 
@@ -817,10 +965,10 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
 
             </el-form>
             <div class="app-action-row review-actions">
-              <el-button type="primary" :loading="approving" :disabled="rejecting" @click="handleApprove">
-                通过
+              <el-button type="primary" :loading="approving" :disabled="rejecting || !canOperateCurrent" @click="handleApprove">
+                {{ detail.currentReviewNode === 'UNIT_REVIEW' ? '院审通过' : '终审通过' }}
               </el-button>
-              <el-button type="danger" plain :loading="rejecting" :disabled="approving" @click="handleReject">
+              <el-button type="danger" plain :loading="rejecting" :disabled="approving || !canOperateCurrent" @click="handleReject">
                 驳回
               </el-button>
             </div>
@@ -852,9 +1000,18 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
     </div>
 
     <!-- 批量通过 -->
-    <el-dialog v-model="batchVisible" title="批量通过" width="480px">
+    <el-dialog
+      v-model="batchVisible"
+      :title="batchNode === 'UNIT_REVIEW' ? '批量院审通过' : '批量终审通过'"
+      width="480px"
+    >
       <p class="batch-tip">
-        将对勾选的 {{ checkedItems.length }} 条填报执行「通过」（不核减，认定值 = 填报值）：
+        <template v-if="batchNode === 'UNIT_REVIEW'">
+          将对勾选的 {{ checkedItems.length }} 条填报执行院审通过，认定值取填报值，通过后转校级负责人审核，暂不计入完成值：
+        </template>
+        <template v-else>
+          将对勾选的 {{ checkedItems.length }} 条填报执行终审通过，沿用院审暂存认定值；负责人直接送审的记录沿用填报值：
+        </template>
       </p>
       <ul class="batch-list">
         <li v-for="item in checkedItems" :key="item.id" class="mono">{{ item.task?.code ?? item.id }}</li>
@@ -870,7 +1027,7 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
             placeholder="选填"
           />
         </el-form-item>
-        <el-form-item v-if="isDelegateReview" label="代审原因（选填）">
+        <el-form-item v-if="batchIsDelegateReview" label="代审原因（选填）">
           <el-input
             v-model="batchReason"
             type="textarea"
@@ -1078,6 +1235,7 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
   font-weight: 600;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
@@ -1140,6 +1298,10 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
   font-size: 12px;
   color: var(--el-text-color-secondary);
   font-variant-numeric: tabular-nums;
+}
+
+.review-node-alert {
+  margin-bottom: var(--space-3);
 }
 
 .review-form {

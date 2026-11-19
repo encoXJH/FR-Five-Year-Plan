@@ -50,8 +50,24 @@ describe('飞书首次绑定登录状态', () => {
       roles: ['ADMIN'],
       permissions: [],
       dataScope: { type: 'ALL', unitId: null, indicatorIds: [] },
+      passwordChangeRequired: false,
     })
     mocks.fetchEnums.mockResolvedValue({})
+  })
+
+  it('保存首次使用初始密码的改密标记', async () => {
+    mocks.fetchMe.mockResolvedValue({
+      user,
+      roles: ['ADMIN'],
+      permissions: [],
+      dataScope: { type: 'ALL', unitId: null, indicatorIds: [] },
+      passwordChangeRequired: true,
+    })
+    const store = useUserStore()
+
+    await store.fetchMe()
+
+    expect(store.passwordChangeRequired).toBe(true)
   })
 
   it('待绑定分支不写 Token，也不加载用户信息', async () => {
@@ -98,5 +114,22 @@ describe('飞书首次绑定登录状态', () => {
     expect(mocks.feishuBind).toHaveBeenCalledWith(request, 'WEB')
     expect(mocks.saveTokens).toHaveBeenCalledWith('access', 'refresh')
     expect(mocks.fetchMe).toHaveBeenCalledTimes(1)
+  })
+
+  it('纯学院负责人/干事进入工作台，纯干事使用独立识别', () => {
+    const store = useUserStore()
+
+    store.roles = ['UNIT_OWNER', 'STAFF']
+    expect(store.homePath).toBe('/workbench')
+    expect(store.isTaskExecutorOnly).toBe(true)
+    expect(store.isStaffOnly).toBe(false)
+
+    store.roles = ['STAFF']
+    expect(store.homePath).toBe('/workbench')
+    expect(store.isStaffOnly).toBe(true)
+
+    store.roles = ['STAFF', 'LEADER']
+    expect(store.homePath).toBe('/plans')
+    expect(store.isTaskExecutorOnly).toBe(false)
   })
 })

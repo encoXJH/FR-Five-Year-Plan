@@ -2,13 +2,14 @@
 import { computed, ref, watch } from 'vue'
 import StatusTag from '@/components/StatusTag.vue'
 import FilePreviewDrawer from '@/components/FilePreviewDrawer.vue'
+import TaskStaffEditor from './TaskStaffEditor.vue'
 import { getTask } from '@/api/task'
 import { listTaskAdjustments } from '@/api/adjustment'
 import { getSubmission, listSubmissions } from '@/api/submission'
 import { useUserStore } from '@/stores/user'
 import { formatDateTime, formatPercent } from '@/utils/format'
 import { formatTargetValue } from '@/utils/indicator'
-import { primaryTaskIndicator, progressPercentage } from '@/utils/task'
+import { formatDeadline, primaryTaskIndicator, progressPercentage } from '@/utils/task'
 import { summarizeItems } from '@/utils/adjustment'
 import { enumLabel } from '@/utils/enumLabels'
 import type { TaskDetail } from '@/types/task'
@@ -22,7 +23,7 @@ const props = defineProps<{
   taskId: string | null
   initialYear?: number | null
   initialSubmissionId?: string | null
-  initialTab?: 'info' | 'submissions' | 'adjustments'
+  initialTab?: 'info' | 'submissions' | 'adjustments' | 'staff'
 }>()
 
 const emit = defineEmits<{
@@ -130,6 +131,11 @@ async function load(sequence: number): Promise<void> {
   }
 }
 
+async function handleStaffSaved(): Promise<void> {
+  activeTab.value = 'staff'
+  await load(++loadSequence)
+}
+
 watch(visible, (value) => {
   loadSequence += 1
   submissionRequestSequence += 1
@@ -191,6 +197,17 @@ watch(visible, (value) => {
               <el-descriptions-item label="五年目标">
                 {{ formatTargetValue(task.totalTarget ?? null, caliber) }}{{ primaryIndicator?.unitLabel ? ` ${primaryIndicator.unitLabel}` : '' }}
               </el-descriptions-item>
+              <el-descriptions-item label="截止时间" :span="2">
+                <span
+                  :class="{
+                    'deadline-overdue': formatDeadline(task.deadline).overdue,
+                    'deadline-urgent': formatDeadline(task.deadline).urgent && !formatDeadline(task.deadline).overdue,
+                    'empty-text': !task.deadline,
+                  }"
+                >
+                  {{ formatDeadline(task.deadline).text }}
+                </span>
+              </el-descriptions-item>
             </el-descriptions>
 
             <h3 class="section-title">年度目标与完成</h3>
@@ -224,6 +241,10 @@ watch(visible, (value) => {
             </el-table>
           </el-tab-pane>
 
+          <el-tab-pane label="干事协作" name="staff">
+            <TaskStaffEditor :task="task" @saved="handleStaffSaved" />
+          </el-tab-pane>
+
           <el-tab-pane label="提交记录" name="submissions">
             <div v-if="visibleSubmissions.length > 0" class="submission-list">
               <button
@@ -235,7 +256,7 @@ watch(visible, (value) => {
                 @click="openSubmission(item)"
               >
                 <span>{{ item.year }} 年 · {{ submissionRoundLabel(item.revisionNo) }}</span>
-                <StatusTag kind="SubmissionStatus" :value="item.status" />
+                <StatusTag kind="SubmissionStatus" :value="item.status" :review-node="item.currentReviewNode" />
                 <small>{{ formatDateTime(item.submittedAt ?? item.createdAt) }} · 材料 {{ item.fileCount ?? 0 }} 份</small>
               </button>
             </div>
@@ -359,6 +380,16 @@ watch(visible, (value) => {
 
 .empty-text {
   color: var(--el-text-color-placeholder);
+}
+
+.deadline-urgent {
+  color: var(--el-color-warning);
+  font-weight: 600;
+}
+
+.deadline-overdue {
+  color: var(--el-color-danger);
+  font-weight: 600;
 }
 
 .submission-list {

@@ -3,13 +3,20 @@ import {
   approvedReduction,
   buildMetricValue,
   CALIBER_INPUT_FIELDS,
+  canReviewNode,
+  canReviewSubmission,
   computeRatio,
   formatMetricValue,
+  getBatchReviewNode,
+  initialReviewNodeForRoles,
   isApprovedValueValid,
   parseSubmissionRemark,
   projectAnnualCompletionRate,
+  reviewInitialValue,
   serializeSubmissionRemark,
+  submitterRoleForRoles,
 } from '../submission'
+import type { ReviewGuardSubmission } from '../submission'
 import type { StatCaliber } from '@/types/enums'
 
 const ALL_CALIBERS: StatCaliber[] = [
@@ -20,6 +27,91 @@ const ALL_CALIBERS: StatCaliber[] = [
   'DIRECT_PERCENT',
   'BOOLEAN',
 ]
+
+const REVIEW_PERMISSION = ['submission:review']
+
+function reviewState(partial: Partial<ReviewGuardSubmission> = {}): ReviewGuardSubmission {
+  return {
+    status: 'PENDING_REVIEW',
+    currentReviewNode: 'UNIT_REVIEW',
+    submitterRole: 'STAFF',
+    ...partial,
+  }
+}
+
+describe('两级审核节点与权限守卫', () => {
+  it('学院负责人仅院审、校级负责人仅校审，管理员两级可代审，多角色取并集', () => {
+    expect(canReviewNode('UNIT_REVIEW', ['UNIT_OWNER'], REVIEW_PERMISSION)).toBe(true)
+    expect(canReviewNode('LEADER_REVIEW', ['UNIT_OWNER'], REVIEW_PERMISSION)).toBe(false)
+    expect(canReviewNode('LEADER_REVIEW', ['LEADER'], REVIEW_PERMISSION)).toBe(true)
+    expect(canReviewNode('UNIT_REVIEW', ['LEADER'], REVIEW_PERMISSION)).toBe(false)
+    expect(canReviewNode('UNIT_REVIEW', ['ADMIN'], REVIEW_PERMISSION)).toBe(true)
+    expect(canReviewNode('LEADER_REVIEW', ['ADMIN'], REVIEW_PERMISSION)).toBe(true)
+    expect(canReviewNode('LEADER_REVIEW', ['UNIT_OWNER', 'LEADER'], REVIEW_PERMISSION)).toBe(true)
+  })
+
+  it('纯干事和建设方向负责人即使带有异常权限码也不能进入新审核链', () => {
+    expect(canReviewNode('UNIT_REVIEW', ['STAFF'], REVIEW_PERMISSION)).toBe(false)
+    expect(canReviewNode('LEADER_REVIEW', ['SCHOOL_OWNER'], REVIEW_PERMISSION)).toBe(false)
+    expect(canReviewNode('UNIT_REVIEW', ['UNIT_OWNER'], [])).toBe(false)
+  })
+
+  it('单笔守卫同时校验待审状态、当前节点和干事院审来源', () => {
+    expect(canReviewSubmission(reviewState(), ['UNIT_OWNER'], REVIEW_PERMISSION)).toBe(true)
+    expect(canReviewSubmission(reviewState({ submitterRole: 'UNIT_OWNER' }), ['UNIT_OWNER'], REVIEW_PERMISSION)).toBe(false)
+    expect(canReviewSubmission(reviewState({ currentReviewNode: 'LEADER_REVIEW' }), ['LEADER'], REVIEW_PERMISSION)).toBe(true)
+    expect(canReviewSubmission(reviewState({ currentReviewNode: null }), ['ADMIN'], REVIEW_PERMISSION)).toBe(false)
+    expect(canReviewSubmission(reviewState({ status: 'APPROVED' }), ['ADMIN'], REVIEW_PERMISSION)).toBe(false)
+  })
+
+  it('批量与单笔共用守卫，只返回同一可处理节点，混合节点拒绝', () => {
+    const unitItems = [reviewState(), reviewState()]
+    expect(getBatchReviewNode(unitItems, ['UNIT_OWNER'], REVIEW_PERMISSION)).toBe('UNIT_REVIEW')
+    expect(getBatchReviewNode([
+      reviewState(),
+      reviewState({ currentReviewNode: 'LEADER_REVIEW' }),
+    ], ['ADMIN'], REVIEW_PERMISSION)).toBeNull()
+    expect(getBatchReviewNode(unitItems, ['LEADER'], REVIEW_PERMISSION)).toBeNull()
+    expect(getBatchReviewNode([], ['ADMIN'], REVIEW_PERMISSION)).toBeNull()
+  })
+})
+
+describe('填报身份与校审认定值继承', () => {
+  it('干事走两级，兼任负责人或管理员代填直送校审', () => {
+    expect(submitterRoleForRoles(['STAFF'])).toBe('STAFF')
+    expect(submitterRoleForRoles(['STAFF', 'LEADER'])).toBe('STAFF')
+    expect(submitterRoleForRoles(['STAFF', 'UNIT_OWNER'])).toBe('UNIT_OWNER')
+    expect(submitterRoleForRoles(['STAFF', 'ADMIN'])).toBe('UNIT_OWNER')
+    expect(initialReviewNodeForRoles(['STAFF'])).toBe('UNIT_REVIEW')
+    expect(initialReviewNodeForRoles(['UNIT_OWNER'])).toBe('LEADER_REVIEW')
+    expect(initialReviewNodeForRoles(['LEADER'])).toBeNull()
+  })
+
+  it('院审以填报值初始化，校审继承院审暂存值，缺失时回退填报值', () => {
+    const submission = {
+      value: { amount: 10 },
+      approvedValue: { amount: 8 },
+      currentReviewNode: 'UNIT_REVIEW' as const,
+    }
+    expect(reviewInitialValue(submission)).toEqual({ amount: 10 })
+    expect(reviewInitialValue({ ...submission, currentReviewNode: 'LEADER_REVIEW' })).toEqual({ amount: 8 })
+    expect(reviewInitialValue({
+      ...submission,
+      currentReviewNode: 'LEADER_REVIEW',
+      approvedValue: null,
+    })).toEqual({ amount: 10 })
+  })
+
+  it('校审核减以继承的院审认定值为基准，而不是重新对比原始填报值', () => {
+    const initial = reviewInitialValue({
+      value: { amount: 10 },
+      approvedValue: { amount: 8 },
+      currentReviewNode: 'LEADER_REVIEW',
+    })
+    expect(approvedReduction('INCREMENT', initial, { amount: 7 })).toBe(1)
+    expect(approvedReduction('INCREMENT', initial, { amount: 8 })).toBeNull()
+  })
+})
 
 describe('CALIBER_INPUT_FIELDS 口径→输入项映射（API 3.5）', () => {
   it('六种口径各有对应采集字段', () => {

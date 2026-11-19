@@ -71,7 +71,7 @@ const canEdit = computed(() =>
     : false,
 )
 const canApplyAdjustment = computed(() =>
-  quantitative.value && userStore.can('adjustment:apply') && !isArchived.value,
+  quantitative.value && !userStore.isStaffOnly && userStore.can('adjustment:apply') && !isArchived.value,
 )
 const primaryAction = computed<'edit' | 'adjust' | null>(() => {
   if (!indicator.value || isArchived.value) return null

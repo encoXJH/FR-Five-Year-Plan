@@ -15,6 +15,7 @@ import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
@@ -45,11 +46,12 @@ public class TodoService {
     private final ReviewService reviewService;
     private final AdjustmentService adjustmentService;
     private final SettingService settingService;
+    private final TaskReadScopeService taskReadScopeService;
 
     public TodoService(TaskMapper taskMapper, TaskYearMapper taskYearMapper,
                        PlanYearMapper planYearMapper, SubmissionMapper submissionMapper,
                        ReviewService reviewService, AdjustmentService adjustmentService,
-                       SettingService settingService) {
+                       SettingService settingService, TaskReadScopeService taskReadScopeService) {
         this.taskMapper = taskMapper;
         this.taskYearMapper = taskYearMapper;
         this.planYearMapper = planYearMapper;
@@ -57,6 +59,7 @@ public class TodoService {
         this.reviewService = reviewService;
         this.adjustmentService = adjustmentService;
         this.settingService = settingService;
+        this.taskReadScopeService = taskReadScopeService;
     }
 
     /** 填报截止日（YYYY-MM-DD）：年度 + 系统参数 plan.fillDeadline（默认 12-31，界面设计规范 A8） */
@@ -99,14 +102,27 @@ public class TodoService {
      * 年度已激活但 task_year 尚未惰性激活（NOT_ACTIVATED）的也可填报，一并列出。
      */
     private List<NotifyDtos.TodoItem> fillTodos(LoginUser user) {
-        if (!user.getRoles().contains("UNIT_OWNER") || user.getUnitIds().isEmpty()) {
+        boolean unitScope = user.getRoles().contains("UNIT_OWNER") && !user.getUnitIds().isEmpty();
+        Set<Long> assignedTaskIds = user.getRoles().contains("STAFF")
+                ? taskReadScopeService.staffTaskIds(user) : Set.of();
+        if (!unitScope && assignedTaskIds.isEmpty()) {
             return List.of();
         }
-        List<Task> tasks = taskMapper.selectList(new LambdaQueryWrapper<Task>()
-                .in(Task::getUnitId, user.getUnitIds())
+        LambdaQueryWrapper<Task> query = new LambdaQueryWrapper<Task>()
                 .eq(Task::getIsHistorical, false)
                 .eq(Task::getDeleted, 0L)
-                .in(Task::getStatus, List.of("DISTRIBUTED", "IN_PROGRESS")));
+                .in(Task::getStatus, List.of("DISTRIBUTED", "IN_PROGRESS"));
+        query.and(scope -> {
+            if (unitScope) {
+                scope.in(Task::getUnitId, user.getUnitIds());
+                if (!assignedTaskIds.isEmpty()) {
+                    scope.or().in(Task::getId, assignedTaskIds);
+                }
+            } else {
+                scope.in(Task::getId, assignedTaskIds);
+            }
+        });
+        List<Task> tasks = taskMapper.selectList(query);
         if (tasks.isEmpty()) {
             return List.of();
         }
@@ -135,26 +151,18 @@ public class TodoService {
                 .toList();
     }
 
-    /** 待审核：与 /reviews/pending 同口径（全校角色全部；建设方向负责人 = 本人负责指标含下级 A+） */
+    /** 待审核：与 /reviews/pending 共用当前节点可处理范围，多角色取并集。 */
     private List<NotifyDtos.TodoItem> reviewTodos(LoginUser user) {
-        if (!user.getPermissions().contains("submission:review")) {
+        boolean actionableRole = user.getRoles().stream().anyMatch(role ->
+                role.equals("ADMIN") || role.equals("LEADER") || role.equals("UNIT_OWNER"));
+        if (!user.getPermissions().contains("submission:review") || !actionableRole) {
             return List.of();
         }
         LambdaQueryWrapper<Submission> wrapper = new LambdaQueryWrapper<Submission>()
                 .eq(Submission::getStatus, "PENDING_REVIEW")
                 .eq(Submission::getDeleted, 0L)
                 .orderByAsc(Submission::getSubmittedAt);
-        boolean allData = user.getRoles().contains("ADMIN") || user.getRoles().contains("LEADER");
-        if (!allData) {
-            if (!user.getRoles().contains("SCHOOL_OWNER")) {
-                return List.of();
-            }
-            List<Long> visible = reviewService.ownedIndicatorIdsWithChildren(user.getUserId());
-            if (visible.isEmpty()) {
-                return List.of();
-            }
-            wrapper.in(Submission::getIndicatorId, visible);
-        }
+        reviewService.applyActionableScope(wrapper, user);
         List<Submission> submissions = submissionMapper.selectList(wrapper);
         if (submissions.isEmpty()) {
             return List.of();
@@ -168,10 +176,13 @@ public class TodoService {
                 .filter(s -> taskMap.containsKey(s.getTaskId()))
                 .map(s -> {
                     Task task = taskMap.get(s.getTaskId());
+                    String detail = switch (s.getCurrentReviewNode() == null ? "" : s.getCurrentReviewNode()) {
+                        case "UNIT_REVIEW" -> s.getYear() + " 年填报待学院负责人审核";
+                        case "LEADER_REVIEW" -> s.getYear() + " 年填报待校级负责人审核";
+                        default -> s.getYear() + " 年填报待审核";
+                    };
                     return new NotifyDtos.TodoItem("REVIEW", s.getId(), s.getPlanId(), s.getYear(),
-                            task.getCode(),
-                            s.getYear() + " 年填报待审核", s.getSubmittedAt(),
-                            fillDeadlineOfYear(s.getYear()));
+                            task.getCode(), detail, s.getSubmittedAt(), fillDeadlineOfYear(s.getYear()));
                 })
                 .toList();
     }

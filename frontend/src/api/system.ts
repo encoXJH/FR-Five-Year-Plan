@@ -12,6 +12,11 @@ import type {
   RolePermissionSaveRequest,
   SetUserRolesRequest,
   SettingPatchItem,
+  StaffPasswordResetRequest,
+  StaffUser,
+  StaffUserQuery,
+  StaffUserUpdateRequest,
+  SystemUserDeleteRequest,
   SystemSettings,
   SystemUser,
   SystemUserSaveRequest,
@@ -69,6 +74,11 @@ export function listUsers(params: SystemUserQuery): Promise<PageResult<SystemUse
   return http.get('/users', params)
 }
 
+/** GET /users/staff（user:create + UNIT_OWNER；本学院全部纯干事） */
+export function listStaffUsers(params: StaffUserQuery): Promise<PageResult<StaffUser>> {
+  return http.get('/users/staff', params)
+}
+
 export function createUser(data: SystemUserSaveRequest): Promise<SystemUser> {
   return http.post('/users', data)
 }
@@ -76,6 +86,11 @@ export function createUser(data: SystemUserSaveRequest): Promise<SystemUser> {
 /** PATCH /users/{userId}（修改 / 停用，带 version） */
 export function updateUser(userId: string, data: SystemUserSaveRequest): Promise<SystemUser> {
   return http.patch(`/users/${userId}`, data)
+}
+
+/** PATCH /users/staff/{userId}（姓名、手机号、主学院或启停，带 version） */
+export function updateStaffUser(userId: string, data: StaffUserUpdateRequest): Promise<StaffUser> {
+  return http.patch(`/users/staff/${userId}`, data)
 }
 
 /** PUT /users/{userId}/roles（敏感操作，必须带 reason，API 第 10 章；响应为 { user }） */
@@ -89,6 +104,16 @@ export function setUserRoles(
 /** POST /users/{userId}/password-reset（API 15.10；重置后吊销该用户全部 refreshToken） */
 export function resetUserPassword(userId: string, password: string): Promise<void> {
   return http.post(`/users/${userId}/password-reset`, { password })
+}
+
+/** DELETE /users/{userId}（system:manage；逻辑删除，必须带 version 和删除原因） */
+export function deleteUser(userId: string, data: SystemUserDeleteRequest): Promise<void> {
+  return http.delete(`/users/${userId}`, { data })
+}
+
+/** POST /users/staff/{userId}/password-reset（带 version，重置后吊销该用户全部 refreshToken） */
+export function resetStaffUserPassword(userId: string, data: StaffPasswordResetRequest): Promise<void> {
+  return http.post(`/users/staff/${userId}/password-reset`, data)
 }
 
 /** GET /dicts/{dictType}（已登录；只返回启用项） */

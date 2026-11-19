@@ -13,6 +13,9 @@ const userStore = useUserStore()
 function isVisible(item: MenuItem): boolean {
   if (item.visibleWhen && !item.visibleWhen(route)) return false
   if (item.permissions && !userStore.can(...item.permissions)) return false
+  if (item.requiredRoles && !item.requiredRoles.some((role) => userStore.roles.includes(role))) {
+    return false
+  }
   if (
     item.hideForRolesOnly &&
     userStore.roles.length > 0 &&
@@ -35,6 +38,10 @@ const visibleGroups = computed<MenuGroup[]>(() =>
 function resolveIndex(item: MenuItem): string {
   return item.resolvePath ? item.resolvePath(route) : item.path
 }
+
+function displayTitle(item: MenuItem): string {
+  return userStore.isStaffOnly && item.titleForStaff ? item.titleForStaff : item.title
+}
 </script>
 
 <template>
@@ -50,7 +57,7 @@ function resolveIndex(item: MenuItem): string {
       <template #title>{{ group.title }}</template>
       <el-menu-item v-for="item in group.items" :key="item.path" :index="resolveIndex(item)">
         <el-icon v-if="item.icon" :size="16"><component :is="item.icon" /></el-icon>
-        <template #title>{{ item.title }}</template>
+        <template #title>{{ displayTitle(item) }}</template>
       </el-menu-item>
     </el-menu-item-group>
   </el-menu>

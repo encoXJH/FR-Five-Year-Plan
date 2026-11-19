@@ -41,6 +41,10 @@ public class SysUser {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long unitId;
 
+    /** 干事归属的学院负责人，仅 STAFF 使用 */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long ownerUserId;
+
     /** 飞书 open_id，绑定后唯一 */
     private String feishuOpenId;
 

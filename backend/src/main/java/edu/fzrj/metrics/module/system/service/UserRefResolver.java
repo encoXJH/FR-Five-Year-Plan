@@ -26,8 +26,17 @@ public class UserRefResolver {
     }
 
     public Map<Long, SysUser> mapOf(Collection<Long> ids) {
-        List<Long> distinct = ids == null ? List.of() : ids.stream()
-                .filter(Objects::nonNull).distinct().toList();
+        List<Long> distinct = distinctIds(ids);
+        if (distinct.isEmpty()) {
+            return Map.of();
+        }
+        return sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                        .in(SysUser::getId, distinct))
+                .stream().collect(Collectors.toMap(SysUser::getId, Function.identity()));
+    }
+
+    public Map<Long, SysUser> mapActiveOf(Collection<Long> ids) {
+        List<Long> distinct = distinctIds(ids);
         if (distinct.isEmpty()) {
             return Map.of();
         }
@@ -35,6 +44,11 @@ public class UserRefResolver {
                         .in(SysUser::getId, distinct)
                         .eq(SysUser::getDeleted, 0L))
                 .stream().collect(Collectors.toMap(SysUser::getId, Function.identity()));
+    }
+
+    private List<Long> distinctIds(Collection<Long> ids) {
+        return ids == null ? List.of() : ids.stream()
+                .filter(Objects::nonNull).distinct().toList();
     }
 
     public UserRef refOf(Long id, Map<Long, SysUser> userMap) {

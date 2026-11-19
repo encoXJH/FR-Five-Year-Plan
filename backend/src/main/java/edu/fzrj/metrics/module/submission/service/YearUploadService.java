@@ -12,6 +12,7 @@ import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.entity.OrgUnit;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -32,16 +34,19 @@ public class YearUploadService {
     private final SysUserMapper sysUserMapper;
     private final OrgUnitMapper orgUnitMapper;
     private final ReviewService reviewService;
+    private final TaskReadScopeService taskReadScopeService;
 
     public YearUploadService(SubmissionMapper submissionMapper, IndicatorMapper indicatorMapper,
                              TaskMapper taskMapper, SysUserMapper sysUserMapper,
-                             OrgUnitMapper orgUnitMapper, ReviewService reviewService) {
+                             OrgUnitMapper orgUnitMapper, ReviewService reviewService,
+                             TaskReadScopeService taskReadScopeService) {
         this.submissionMapper = submissionMapper;
         this.indicatorMapper = indicatorMapper;
         this.taskMapper = taskMapper;
         this.sysUserMapper = sysUserMapper;
         this.orgUnitMapper = orgUnitMapper;
         this.reviewService = reviewService;
+        this.taskReadScopeService = taskReadScopeService;
     }
 
     public List<YearUploadDtos.UploadItem> list(Long planId, Integer year) {
@@ -58,18 +63,29 @@ public class YearUploadService {
                     ? reviewService.ownedIndicatorIdsWithChildren(user.getUserId()) : List.of();
             boolean ownerScope = !visible.isEmpty();
             boolean unitScope = user.getRoles().contains("UNIT_OWNER") && !user.getUnitIds().isEmpty();
-            if (!ownerScope && !unitScope) {
+            Set<Long> assignedTaskIds = user.getRoles().contains("STAFF")
+                    ? taskReadScopeService.staffTaskIds(user) : Set.of();
+            if (!ownerScope && !unitScope && assignedTaskIds.isEmpty()) {
                 return List.of();
             }
             wrapper.and(scope -> {
+                boolean hasCondition = false;
                 if (ownerScope) {
                     scope.in(Submission::getIndicatorId, visible);
+                    hasCondition = true;
                 }
                 if (unitScope) {
-                    if (ownerScope) {
+                    if (hasCondition) {
                         scope.or();
                     }
                     scope.in(Submission::getUnitId, user.getUnitIds());
+                    hasCondition = true;
+                }
+                if (!assignedTaskIds.isEmpty()) {
+                    if (hasCondition) {
+                        scope.or();
+                    }
+                    scope.in(Submission::getTaskId, assignedTaskIds);
                 }
             });
         }
@@ -113,7 +129,7 @@ public class YearUploadService {
                     unit == null ? null : unit.getName(),
                     s.getSubmittedAt(),
                     submitter == null ? null : submitter.getName(),
-                    s.getStatus());
+                    s.getStatus(), s.getCurrentReviewNode(), s.getSubmitterRole());
         }).toList();
     }
 }

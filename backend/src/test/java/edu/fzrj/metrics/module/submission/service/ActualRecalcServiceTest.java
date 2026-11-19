@@ -384,6 +384,36 @@ class ActualRecalcServiceTest {
     }
 
     @Test
+    void 多笔已通过累计未达到目标时仍可再次填报() {
+        LinkedFixture fixture = linkedFixture("INCREMENT");
+        TaskYear sourceYear = fixture.sourceYear();
+        stubRecalcSource(sourceYear);
+        stubSubmissions(Map.of(101L, List.of(approvedAmount("4"), approvedAmount("5")), 102L, List.of()));
+
+        actualRecalcService.recalcTaskYear(101L);
+
+        assertDecimalEquals("9", sourceYear.getActualValue());
+        assertDecimalEquals("0.9", sourceYear.getCompletionRate());
+        assertEquals(false, sourceYear.getIsAchieved());
+        assertEquals("IN_PROGRESS", sourceYear.getYearStatus());
+    }
+
+    @Test
+    void 多笔已通过累计超过目标时保留超额完成值和完成率() {
+        LinkedFixture fixture = linkedFixture("INCREMENT");
+        TaskYear sourceYear = fixture.sourceYear();
+        stubRecalcSource(sourceYear);
+        stubSubmissions(Map.of(101L, List.of(approvedAmount("6"), approvedAmount("6")), 102L, List.of()));
+
+        actualRecalcService.recalcTaskYear(101L);
+
+        assertDecimalEquals("12", sourceYear.getActualValue());
+        assertDecimalEquals("1.2", sourceYear.getCompletionRate());
+        assertEquals(true, sourceYear.getIsAchieved());
+        assertEquals("ACHIEVED", sourceYear.getYearStatus());
+    }
+
+    @Test
     void 待审核填报不增加关联进度且来源缺失时回退自身() {
         LinkedFixture fixture = linkedFixture("INCREMENT");
         TaskYear sourceYear = fixture.sourceYear();

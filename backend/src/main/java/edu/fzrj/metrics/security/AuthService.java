@@ -56,6 +56,8 @@ public class AuthService {
     private int lockMinutes;
     @Value("${app.jwt.refresh-expire-days}")
     private int refreshExpireDays;
+    @Value("${app.login.initial-password:}")
+    private String initialPassword;
 
     public AuthService(SysUserMapper sysUserMapper, UserRoleMapper userRoleMapper,
                        OrgUnitMapper orgUnitMapper, RefreshTokenMapper refreshTokenMapper,
@@ -209,6 +211,9 @@ public class AuthService {
         if (!java.util.Objects.equals(password, confirmPassword)) {
             throw new BizException(ErrorCode.PARAM_INVALID, "两次输入的密码不一致");
         }
+        if (StringUtils.hasText(initialPassword) && initialPassword.equals(password)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "新密码不能仍为初始密码");
+        }
         SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
                 .eq(SysUser::getId, userId)
                 .eq(SysUser::getDeleted, 0L));
@@ -241,10 +246,15 @@ public class AuthService {
                 user.getId(), user.getUsername(), user.getName(), maskPhone(user.getPhone()), user.getEmail(),
                 user.getUnitId(), unitName, units, unitIds);
         return new MeResponse(userInfo, loginUser.getRoles(), loginUser.getPermissions(),
-                dataScopeOf(loginUser));
+                dataScopeOf(loginUser), requiresPasswordChange(user));
     }
 
-    /** 数据范围：ALL 全校 / OWNER 本人负责 / UNIT 本单元（多角色取最大范围） */
+    private boolean requiresPasswordChange(SysUser user) {
+        return StringUtils.hasText(initialPassword)
+                && passwordEncoder.matches(initialPassword, user.getPasswordHash());
+    }
+
+    /** 数据范围：ALL / OWNER / UNIT / ASSIGNED（多角色取并集，响应展示较宽范围类型） */
     private MeResponse.DataScope dataScopeOf(LoginUser loginUser) {
         List<String> roles = loginUser.getRoles();
         if (roles.contains("ADMIN") || roles.contains("LEADER")) {
@@ -252,6 +262,12 @@ public class AuthService {
         }
         if (roles.contains("SCHOOL_OWNER")) {
             return new MeResponse.DataScope("OWNER", loginUser.getUnitId(), loginUser.getUnitIds());
+        }
+        if (roles.contains("UNIT_OWNER")) {
+            return new MeResponse.DataScope("UNIT", loginUser.getUnitId(), loginUser.getUnitIds());
+        }
+        if (roles.contains("STAFF")) {
+            return new MeResponse.DataScope("ASSIGNED", loginUser.getUnitId(), loginUser.getUnitIds());
         }
         return new MeResponse.DataScope("UNIT", loginUser.getUnitId(), loginUser.getUnitIds());
     }

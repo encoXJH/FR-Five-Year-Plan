@@ -195,6 +195,7 @@ const detailFiles = computed<FileInfo[]>(() => submissionDetail.value?.files ?? 
                 <div class="kv"><span class="kv__label">所属指标</span><span class="kv__value">{{ primaryIndicator ? `${primaryIndicator.code} ${primaryIndicator.name}` : '—' }}</span></div>
                 <div class="kv"><span class="kv__label">执行单元</span><span class="kv__value">{{ task.unit ? `${task.unit.code} ${task.unit.name}` : '—' }}</span></div>
                 <div class="kv"><span class="kv__label">学院负责人</span><span class="kv__value">{{ task.owner?.name ?? '—' }}</span></div>
+                <div class="kv"><span class="kv__label">当前干事</span><span class="kv__value">{{ task.staff?.length ? task.staff.map((person) => person.name).join('、') : '未分配干事' }}</span></div>
                 <div class="kv"><span class="kv__label">统计口径</span><span class="kv__value"><StatusTag v-if="primaryIndicator?.statCaliber" kind="StatCaliber" :value="primaryIndicator.statCaliber" /><template v-else>—</template></span></div>
                 <div class="kv"><span class="kv__label">五年目标</span><span class="kv__value">{{ formatTargetValue(task.totalTarget ?? null, caliber) }}{{ primaryIndicator?.unitLabel ? ` ${primaryIndicator.unitLabel}` : '' }}</span></div>
               </div>
@@ -236,7 +237,7 @@ const detailFiles = computed<FileInfo[]>(() => submissionDetail.value?.files ?? 
                 >
                   <div class="row--between">
                     <span>{{ item.year }} 年 · {{ submissionRoundLabel(item.revisionNo) }}</span>
-                    <StatusTag kind="SubmissionStatus" :value="item.status" />
+                    <StatusTag kind="SubmissionStatus" :value="item.status" :review-node="item.currentReviewNode" />
                   </div>
                   <small class="muted">{{ formatDateTime(item.submittedAt ?? item.createdAt) }} · 材料 {{ item.fileCount ?? 0 }} 份</small>
                 </button>

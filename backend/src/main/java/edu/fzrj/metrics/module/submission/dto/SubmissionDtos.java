@@ -120,6 +120,7 @@ public final class SubmissionDtos {
         @JsonSerialize(using = ToStringSerializer.class)
         private Long indicatorId;
         private Integer year;
+        private String reviewNode;
         /** 任务编号 / 指标编号或名称模糊检索 */
         private String keyword;
         @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
@@ -140,6 +141,7 @@ public final class SubmissionDtos {
     public record ReviewView(
             @JsonSerialize(using = ToStringSerializer.class) Long id,
             Integer revisionNo,
+            String reviewNode,
             UserRef reviewer,
             String result,
             String comment,
@@ -185,6 +187,8 @@ public final class SubmissionDtos {
             String statCaliber,
             MetricValue value,
             String status,
+            String submitterRole,
+            String currentReviewNode,
             Integer revisionNo,
             LocalDateTime submittedAt,
             UserRef submittedBy,
@@ -209,6 +213,8 @@ public final class SubmissionDtos {
             String remark,
             String sourceNote,
             String status,
+            String submitterRole,
+            String currentReviewNode,
             Integer revisionNo,
             Boolean isProxy,
             List<FileView> files,

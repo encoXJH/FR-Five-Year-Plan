@@ -31,6 +31,7 @@ import edu.fzrj.metrics.module.system.service.UserRefResolver;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.module.task.service.TaskService;
 import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -44,6 +45,7 @@ import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -54,10 +56,13 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -81,7 +86,8 @@ class SubmissionServiceTest {
     @Mock private UserRefResolver userRefResolver;
     @Mock private ObjectMapper objectMapper;
     @Mock private AnnualTargetGuard annualTargetGuard;
-    @InjectMocks private SubmissionService submissionService;
+    @Mock private TaskReadScopeService taskReadScopeService;
+    @Spy @InjectMocks private SubmissionService submissionService;
 
     @BeforeAll
     static void initMybatisLambdaCache() {
@@ -148,6 +154,7 @@ class SubmissionServiceTest {
         when(planYearMapper.selectOne(any())).thenReturn(planYear);
         TaskYear taskYear = new TaskYear();
         taskYear.setId(3L);
+        taskYear.setYearStatus("IN_PROGRESS");
         when(taskYearMapper.selectOne(any())).thenReturn(taskYear);
         when(orgUnitMapper.selectList(any())).thenReturn(List.of());
         when(fileRefMapper.selectList(any())).thenReturn(List.of());
@@ -177,52 +184,59 @@ class SubmissionServiceTest {
     }
 
     @Test
-    void 提交前年度上限守卫失败时不写填报和历史() {
-        Submission submission = new Submission();
-        submission.setId(1L);
-        submission.setTaskId(2L);
-        submission.setTaskYearId(3L);
-        submission.setPlanId(4L);
-        submission.setIndicatorId(5L);
-        submission.setUnitId(10L);
-        submission.setYear(2026);
-        submission.setStatCaliber("INCREMENT");
-        submission.setAmount(new BigDecimal("5"));
-        submission.setStatus("DRAFT");
-        submission.setRevisionNo(0);
-        submission.setVersion(1);
-        when(submissionMapper.selectOne(any())).thenReturn(submission);
+    void 已达标年度不能再次创建填报草稿() {
         when(dataScopeService.isUnitScope(any())).thenReturn(true);
-
         Task task = new Task();
         task.setId(2L);
+        task.setUnitId(10L);
+        task.setIndicatorId(5L);
+        task.setPlanId(4L);
         task.setStatus("IN_PROGRESS");
         when(taskService.requireTask(2L)).thenReturn(task);
-
+        Indicator indicator = new Indicator();
+        indicator.setId(5L);
+        indicator.setStatCaliber("INCREMENT");
+        when(indicatorService.requireIndicator(5L)).thenReturn(indicator);
+        Plan plan = new Plan();
+        plan.setStartYear(2026);
+        plan.setEndYear(2030);
+        when(planService.requirePlan(4L)).thenReturn(plan);
         PlanYear planYear = new PlanYear();
         planYear.setStatus("ACTIVE");
         when(planYearMapper.selectOne(any())).thenReturn(planYear);
-
-        Indicator indicator = new Indicator();
-        indicator.setStatCaliber("INCREMENT");
-        indicator.setMinFileCount(0);
-        indicator.setTargetDirection("HIGHER_BETTER");
-        when(indicatorService.requireIndicator(5L)).thenReturn(indicator);
-        when(fileRefMapper.selectList(any())).thenReturn(List.of());
-
         TaskYear taskYear = new TaskYear();
         taskYear.setId(3L);
-        taskYear.setTarget(BigDecimal.TEN);
-        taskYear.setYearStatus("IN_PROGRESS");
+        taskYear.setYearStatus("ACHIEVED");
         when(taskYearMapper.selectOne(any())).thenReturn(taskYear);
-        doThrow(new BizException(ErrorCode.ANNUAL_TARGET_EXCEEDED))
-                .when(annualTargetGuard).checkSubmit(submission, indicator, taskYear);
+        SubmissionDtos.CreateRequest request = new SubmissionDtos.CreateRequest();
+        request.setYear(java.time.Year.now().getValue());
+        SubmissionDtos.MetricValue value = new SubmissionDtos.MetricValue();
+        value.setAmount(BigDecimal.ONE);
+        request.setValue(value);
+
+        BizException error = assertThrows(BizException.class, () -> submissionService.create(2L, request));
+
+        assertEquals(60001, error.getErrorCode().getCode());
+        verify(submissionMapper, never()).insert(any(Submission.class));
+    }
+
+    @Test
+    void 已达标后达标前遗留草稿也不能提交() {
+        when(dataScopeService.isUnitScope(any())).thenReturn(true);
+        prepareSuccessfulSubmit();
+        TaskYear achievedYear = new TaskYear();
+        achievedYear.setId(3L);
+        achievedYear.setTarget(BigDecimal.TEN);
+        achievedYear.setYearStatus("ACHIEVED");
+        when(taskYearMapper.selectByTaskIdAndYearForUpdate(2L, java.time.Year.now().getValue()))
+                .thenReturn(achievedYear);
 
         BizException error = assertThrows(BizException.class, () -> submissionService.submit(1L, 1));
 
-        assertEquals(60007, error.getErrorCode().getCode());
+        assertEquals(60001, error.getErrorCode().getCode());
         verify(submissionMapper, never()).updateById(any(Submission.class));
         verify(historyMapper, never()).insert(any(SubmissionHistory.class));
+        verify(annualTargetGuard, never()).checkSubmit(any(), any(), any());
     }
 
     @ParameterizedTest
@@ -268,6 +282,7 @@ class SubmissionServiceTest {
         when(planYearMapper.selectOne(any())).thenReturn(planYear);
         TaskYear taskYear = new TaskYear();
         taskYear.setId(3L);
+        taskYear.setYearStatus("IN_PROGRESS");
         when(taskYearMapper.selectOne(any())).thenReturn(taskYear);
         when(orgUnitMapper.selectList(any())).thenReturn(List.of());
         when(fileRefMapper.selectList(any())).thenReturn(List.of());
@@ -372,6 +387,157 @@ class SubmissionServiceTest {
 
         assertEquals(30002, error.getErrorCode().getCode());
         verify(fileRefMapper, never()).delete(any());
+    }
+
+    @Test
+    void 干事重提从院审开始并清理上一轮审核暂存() {
+        login(40L, "STAFF");
+        Submission submission = prepareSuccessfulSubmit();
+        submission.setStatus("REJECTED");
+        submission.setRevisionNo(1);
+        submission.setApprovedAmount(BigDecimal.ONE);
+        submission.setApprovedTotal(BigDecimal.TEN);
+        submission.setApprovedNumerator(BigDecimal.ONE);
+        submission.setApprovedDenominator(BigDecimal.TEN);
+        submission.setApprovedPercent(BigDecimal.ONE);
+        submission.setApprovedAchieved(true);
+        submission.setReviewedAt(java.time.LocalDateTime.now());
+        submission.setReviewerId(20L);
+
+        submissionService.submit(1L, 1);
+
+        assertEquals("PENDING_REVIEW", submission.getStatus());
+        assertEquals("STAFF", submission.getSubmitterRole());
+        assertEquals("UNIT_REVIEW", submission.getCurrentReviewNode());
+        assertEquals(2, submission.getRevisionNo());
+        assertEquals(40L, submission.getSubmittedBy());
+        assertNull(submission.getApprovedAmount());
+        assertNull(submission.getApprovedTotal());
+        assertNull(submission.getApprovedNumerator());
+        assertNull(submission.getApprovedDenominator());
+        assertNull(submission.getApprovedPercent());
+        assertNull(submission.getApprovedAchieved());
+        assertNull(submission.getReviewedAt());
+        assertNull(submission.getReviewerId());
+        verify(historyMapper).insert(any(SubmissionHistory.class));
+    }
+
+    @Test
+    void 学院负责人提交直接送校审() {
+        when(dataScopeService.isUnitScope(any())).thenReturn(true);
+        Submission submission = prepareSuccessfulSubmit();
+
+        submissionService.submit(1L, 1);
+
+        assertEquals("UNIT_OWNER", submission.getSubmitterRole());
+        assertEquals("LEADER_REVIEW", submission.getCurrentReviewNode());
+        assertEquals(20L, submission.getSubmittedBy());
+    }
+
+    @Test
+    void 干事兼任学院负责人时按负责人直送校审() {
+        login(20L, "STAFF", "UNIT_OWNER");
+        when(dataScopeService.isUnitScope(any())).thenReturn(true);
+        Submission submission = prepareSuccessfulSubmit();
+
+        submissionService.submit(1L, 1);
+
+        assertEquals("UNIT_OWNER", submission.getSubmitterRole());
+        assertEquals("LEADER_REVIEW", submission.getCurrentReviewNode());
+    }
+
+    @Test
+    void 管理员代填提交直接送校审() {
+        loginAdmin();
+        Submission submission = prepareSuccessfulSubmit();
+
+        submissionService.submit(1L, 1);
+
+        assertEquals("UNIT_OWNER", submission.getSubmitterRole());
+        assertEquals("LEADER_REVIEW", submission.getCurrentReviewNode());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"UNIT_REVIEW", "LEADER_REVIEW"})
+    void 两种待审节点均可撤回并清空节点(String node) {
+        Submission submission = new Submission();
+        submission.setId(1L);
+        submission.setTaskId(2L);
+        submission.setTaskYearId(3L);
+        submission.setStatus("PENDING_REVIEW");
+        submission.setSubmitterRole("STAFF");
+        submission.setCurrentReviewNode(node);
+        submission.setVersion(1);
+        when(submissionMapper.selectOne(any())).thenReturn(submission);
+        when(submissionMapper.updateById(any(Submission.class))).thenReturn(1);
+        when(submissionMapper.selectCount(any())).thenReturn(0L);
+        when(dataScopeService.isUnitScope(any())).thenReturn(true);
+        Task task = new Task();
+        task.setId(2L);
+        task.setUnitId(10L);
+        when(taskService.requireCurrentTask(2L)).thenReturn(task);
+        TaskYear taskYear = new TaskYear();
+        taskYear.setId(3L);
+        taskYear.setYearStatus("PENDING_REVIEW");
+        when(taskYearMapper.selectById(3L)).thenReturn(taskYear);
+        doReturn(null).when(submissionService).detail(1L);
+
+        submissionService.withdraw(1L, 1);
+
+        assertEquals("WITHDRAWN", submission.getStatus());
+        assertNull(submission.getCurrentReviewNode());
+        assertEquals("IN_PROGRESS", taskYear.getYearStatus());
+    }
+
+    private Submission prepareSuccessfulSubmit() {
+        Submission submission = new Submission();
+        submission.setId(1L);
+        submission.setTaskId(2L);
+        submission.setTaskYearId(3L);
+        submission.setPlanId(4L);
+        submission.setIndicatorId(5L);
+        submission.setUnitId(10L);
+        submission.setYear(java.time.Year.now().getValue());
+        submission.setStatCaliber("INCREMENT");
+        submission.setAmount(new BigDecimal("5"));
+        submission.setStatus("DRAFT");
+        submission.setSubmitterRole("UNIT_OWNER");
+        submission.setRevisionNo(0);
+        submission.setVersion(1);
+        when(submissionMapper.selectOne(any())).thenReturn(submission);
+        lenient().when(submissionMapper.updateById(any(Submission.class))).thenReturn(1);
+
+        Task task = new Task();
+        task.setId(2L);
+        task.setUnitId(10L);
+        task.setStatus("IN_PROGRESS");
+        when(taskService.requireTask(2L)).thenReturn(task);
+
+        PlanYear planYear = new PlanYear();
+        planYear.setStatus("ACTIVE");
+        when(planYearMapper.selectOne(any())).thenReturn(planYear);
+
+        Indicator indicator = new Indicator();
+        indicator.setStatCaliber("INCREMENT");
+        indicator.setMinFileCount(0);
+        indicator.setTargetDirection("HIGHER_BETTER");
+        when(indicatorService.requireIndicator(5L)).thenReturn(indicator);
+        when(fileRefMapper.selectList(any())).thenReturn(List.of());
+
+        TaskYear taskYear = new TaskYear();
+        taskYear.setId(3L);
+        taskYear.setTarget(BigDecimal.TEN);
+        taskYear.setYearStatus("IN_PROGRESS");
+        when(taskYearMapper.selectByTaskIdAndYearForUpdate(2L, java.time.Year.now().getValue()))
+                .thenReturn(taskYear);
+        lenient().doReturn(null).when(submissionService).detail(1L);
+        return submission;
+    }
+
+    private static void login(Long userId, String... roles) {
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new LoginUser(userId, "user" + userId, "测试用户", 10L,
+                        List.of(roles), List.of()), null, List.of()));
     }
 
     private void loginAdmin() {

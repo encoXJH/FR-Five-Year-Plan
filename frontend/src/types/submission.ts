@@ -2,6 +2,9 @@ import type { UnitRef, UserRef } from './api'
 import type { ReviewResult, StatCaliber, SubmissionStatus } from './enums'
 import type { FileInfo } from './file'
 
+export type ReviewNode = 'UNIT_REVIEW' | 'LEADER_REVIEW'
+export type SubmitterRole = 'STAFF' | 'UNIT_OWNER'
+
 /**
  * 指标值对象 MetricValue（API 约定 3.5）
  * 由统计口径决定采集哪个字段，其他字段为 null；rate / growthRate / increment 为服务端只读计算字段
@@ -26,6 +29,7 @@ export interface ReviewRecord {
   id: string
   reviewer: UserRef | null
   result: ReviewResult
+  reviewNode: ReviewNode | null
   comment: string | null
   approvedValue: MetricValue | null
   /** 是否管理员代审（API 第 10 章敏感操作标识） */
@@ -65,6 +69,8 @@ export interface SubmissionListItem {
   year: number
   statCaliber: StatCaliber
   status: SubmissionStatus
+  currentReviewNode: ReviewNode | null
+  submitterRole: SubmitterRole
   value: MetricValue
   revisionNo: number
   version: number
@@ -120,6 +126,7 @@ export interface UpdateSubmissionRequest {
 
 /** GET /reviews/pending 查询参数 */
 export interface PendingReviewQuery {
+  reviewNode?: ReviewNode
   planId?: string
   indicatorId?: string
   unitId?: string
@@ -137,7 +144,7 @@ export type PendingReviewItem = SubmissionListItem
 export interface ReviewRequest {
   result: ReviewResult
   comment?: string | null
-  /** 核减认定值（不能大于填报值，60005） */
+  /** 核减认定值（不能大于本级认定值，60005） */
   approvedValue?: MetricValue | null
   /** 当前填报版本，审核乐观锁必传 */
   version: number

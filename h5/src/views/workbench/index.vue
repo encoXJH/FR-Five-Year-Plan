@@ -31,6 +31,7 @@ const router = useRouter()
 const currentYear = new Date().getFullYear()
 
 const isUnitOwner = computed(() => userStore.roles.includes('UNIT_OWNER'))
+const isStaffOnly = computed(() => userStore.isStaffOnly)
 const isAdminView = computed(() => !isUnitOwner.value && userStore.roles.includes('ADMIN'))
 const unitOptions = ref<OrgUnit[]>([])
 const unitPickerVisible = ref(false)
@@ -213,6 +214,7 @@ function goSubmit(row: TaskListItem): void {
 
 function canApplyRow(row: TaskListItem): boolean {
   return canWriteTask(row)
+    && !isStaffOnly.value
     && userStore.can('adjustment:apply')
     && canApplyForTask(row.status, primaryTaskIndicator(row)?.statCaliber, row.isHistorical)
 }
@@ -252,7 +254,7 @@ onMounted(() => {
   <div class="page page--tabbar">
     <div class="workbench-head">
       <p class="muted small">{{ isAdminView ? '管理视角' : '任务执行' }}</p>
-      <h1>{{ isAdminView ? '任务代填' : `${unitName} · 学院工作台` }}</h1>
+      <h1>{{ isAdminView ? '任务代填' : isStaffOnly ? '我的任务' : `${unitName} · 学院工作台` }}</h1>
       <p class="muted small">{{ filters.year ? `${filters.year} 年` : '全部年度' }} · 填报、佐证材料与完成进度统一处理</p>
     </div>
 
@@ -290,7 +292,7 @@ onMounted(() => {
     <PageState
       :loading="loading && page.items.length === 0"
       :empty="page.items.length === 0"
-      empty-text="当前筛选下暂无任务"
+      :empty-text="isStaffOnly ? '暂无分配给你的任务，请联系学院负责人分配' : '当前筛选下暂无任务'"
     >
       <div class="task-list">
         <article v-for="row in page.items" :key="row.id" class="task-card">

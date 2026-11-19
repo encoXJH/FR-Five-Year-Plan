@@ -65,8 +65,8 @@ export type RefreshResponse = Omit<LoginResponse, 'user'>
 
 /** 数据范围（API 约定 4.3） */
 export interface DataScope {
-  /** ALL 全校 / INDICATOR 本人负责指标 / UNIT 本单元 */
-  type: 'ALL' | 'INDICATOR' | 'UNIT'
+  /** ALL 全校 / INDICATOR 本人负责指标 / UNIT 本单元 / ASSIGNED 已分配任务 */
+  type: 'ALL' | 'INDICATOR' | 'UNIT' | 'ASSIGNED'
   unitId: string | null
   indicatorIds: string[]
 }

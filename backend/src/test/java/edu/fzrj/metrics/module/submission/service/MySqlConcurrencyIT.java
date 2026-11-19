@@ -3,12 +3,10 @@ package edu.fzrj.metrics.module.submission.service;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.adjustment.dto.AdjustmentDtos;
 import edu.fzrj.metrics.module.adjustment.service.AdjustmentDecisionService;
 import edu.fzrj.metrics.module.adjustment.service.AdjustmentService;
 import edu.fzrj.metrics.module.submission.dto.SubmissionDtos;
-import edu.fzrj.metrics.module.submission.service.support.AnnualTargetGuard;
 import edu.fzrj.metrics.security.LoginUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -19,7 +17,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -31,11 +28,8 @@ import java.util.concurrent.Future;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
 
 @SpringBootTest(properties = {
         "app.feishu.push-enabled=false",
@@ -55,8 +49,6 @@ class MySqlConcurrencyIT {
     private JdbcTemplate jdbc;
     @Autowired
     private ObjectMapper objectMapper;
-    @MockitoSpyBean
-    private AnnualTargetGuard annualTargetGuard;
 
     private final List<Long> createdPlanIds = new ArrayList<>();
 
@@ -70,32 +62,21 @@ class MySqlConcurrencyIT {
     }
 
     @Test
-    void 并发六加六审核不能绕过年度目标十() throws Exception {
+    void 并发六加六审核允许超额且完成值一致() throws Exception {
         Fixture fixture = fixture("INCREMENT", "HIGHER_BETTER", "10");
         TaskFixture task = addTask(fixture, "C01", "10");
         long first = addSubmission(task, "6", null);
         long second = addSubmission(task, "6", null);
 
-        CountDownLatch bothBeforeLock = new CountDownLatch(2);
-        doAnswer(invocation -> {
-            bothBeforeLock.countDown();
-            assertTrue(bothBeforeLock.await(10, SECONDS));
-            return invocation.callRealMethod();
-        }).when(annualTargetGuard).checkReview(any(), any(), any());
-
         List<Throwable> results = reviewConcurrently(List.of(first, second));
 
-        long success = results.stream().filter(java.util.Objects::isNull).count();
-        assertEquals(1, success);
-        BizException rejected = results.stream().filter(java.util.Objects::nonNull)
-                .map(e -> assertInstanceOf(BizException.class, e)).findFirst().orElseThrow();
-        assertEquals(60007, rejected.getErrorCode().getCode());
-        assertDecimal("6", taskYearValue(task.taskYearId, "actual_value"));
-        assertEquals(1, taskYearValue(task.taskYearId, "version", Integer.class));
-        assertEquals(1, count("review", "submission_id in (?, ?)", first, second));
-        assertEquals(1, count("notification", "biz_type = 'submission' and biz_id in (?, ?)", first, second));
-        assertEquals(1, count("submission", "id in (?, ?) and status = 'APPROVED'", first, second));
-        assertEquals(1, count("submission", "id in (?, ?) and status = 'PENDING_REVIEW'", first, second));
+        results.forEach(e -> assertNull(e));
+        assertDecimal("12", taskYearValue(task.taskYearId, "actual_value"));
+        assertEquals(2, taskYearValue(task.taskYearId, "version", Integer.class));
+        assertEquals(2, count("review", "submission_id in (?, ?)", first, second));
+        assertEquals(2, count("notification", "biz_type = 'submission' and biz_id in (?, ?)", first, second));
+        assertEquals(2, count("submission", "id in (?, ?) and status = 'APPROVED'", first, second));
+        assertEquals(0, count("submission", "id in (?, ?) and status = 'PENDING_REVIEW'", first, second));
     }
 
     @Test
@@ -205,8 +186,8 @@ class MySqlConcurrencyIT {
                     IdWorker.getId(), planId, year);
         }
         long directionId = IdWorker.getId();
-        jdbc.update("insert into direction(id, plan_id, subject_type, name) values (?, ?, 'SCHOOL', ?)",
-                directionId, planId, "并发回归方向");
+        jdbc.update("insert into direction(id, plan_id, subject_type, code, name) values (?, ?, 'SCHOOL', ?, ?)",
+                directionId, planId, "IT" + Long.toUnsignedString(directionId).substring(12), "并发回归方向");
         long indicatorId = IdWorker.getId();
         String code = "IT" + Long.toUnsignedString(indicatorId).substring(12);
         jdbc.update("insert into indicator(id, plan_id, direction_id, level, code, name, nature, "
@@ -238,10 +219,11 @@ class MySqlConcurrencyIT {
     private long addSubmission(TaskFixture task, String amount, Boolean achieved) {
         long id = IdWorker.getId();
         jdbc.update("insert into submission(id, task_id, task_year_id, year, plan_id, indicator_id, unit_id, "
-                        + "stat_caliber, amount, achieved, status, revision_no, submitted_at, submitted_by, created_by) "
+                        + "stat_caliber, amount, achieved, status, submitter_role, current_review_node, revision_no, "
+                        + "submitted_at, submitted_by, created_by) "
                         + "select ?, task_id, id, year, plan_id, indicator_id, unit_id, "
                         + "(select stat_caliber from indicator where id = task_year.indicator_id), ?, ?, "
-                        + "'PENDING_REVIEW', 1, now(), 1, 1 from task_year where id = ?",
+                        + "'PENDING_REVIEW', 'UNIT_OWNER', 'LEADER_REVIEW', 1, now(), 1, 1 from task_year where id = ?",
                 id, amount, achieved, task.taskYearId);
         return id;
     }
@@ -340,7 +322,8 @@ class MySqlConcurrencyIT {
         }
 
         private Long unitId(String code) {
-            return jdbc.queryForObject("select id from org_unit where code = ? and deleted = 0", Long.class, code);
+            return jdbc.queryForObject("select id from org_unit where (code = ? or code = substring(?, 2)) and deleted = 0",
+                    Long.class, code, code);
         }
     }
 

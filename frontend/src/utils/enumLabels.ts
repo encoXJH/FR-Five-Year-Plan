@@ -1,4 +1,5 @@
 import type { EnumDict } from '@/types/enums'
+import type { ReviewNode } from '@/types/submission'
 
 /** 枚举中文名兜底表（线上以 GET /dicts/enums 为准，仅覆盖表单与展示用到的组） */
 export const FALLBACK_ENUM_LABELS: Record<string, Record<string, string>> = {
@@ -31,6 +32,17 @@ export const FALLBACK_ENUM_LABELS: Record<string, Record<string, string>> = {
   },
   TargetDirection: { HIGHER_BETTER: '越大越好', LOWER_BETTER: '越小越好' },
   RollupMode: { AUTO_SUM: '自动汇总', MANUAL: '手工认定' },
+  SubmissionStatus: {
+    DRAFT: '草稿',
+    PENDING_REVIEW: '待审核',
+    APPROVED: '已通过',
+    REJECTED: '已驳回',
+    WITHDRAWN: '已撤回',
+  },
+  ReviewNode: {
+    UNIT_REVIEW: '学院负责人审核',
+    LEADER_REVIEW: '校级负责人审核',
+  },
   IndicatorStatus: { DRAFT: '草稿', FINALIZED: '已定稿', DISTRIBUTED: '已下发' },
   TemplateStatus: { ENABLED: '启用', DISABLED: '停用' },
   JobStatus: { PENDING: '排队中', RUNNING: '执行中', SUCCEEDED: '成功', FAILED: '失败' },
@@ -58,6 +70,7 @@ export const FALLBACK_ENUM_LABELS: Record<string, Record<string, string>> = {
     LEADER: '校级负责人',
     SCHOOL_OWNER: '建设方向负责人',
     UNIT_OWNER: '学院项目负责人',
+    STAFF: '干事',
   },
   OrgUnitType: {
     COLLEGE: '产业学院',
@@ -116,6 +129,16 @@ export const FALLBACK_ENUM_LABELS: Record<string, Record<string, string>> = {
 /** 取枚举中文名：优先字典，其次兜底表，未知值返回原值 */
 export function enumLabel(kind: string, value: string, dict?: EnumDict): string {
   return dict?.[kind]?.[value] ?? FALLBACK_ENUM_LABELS[kind]?.[value] ?? value
+}
+
+/** 待审状态与持久化节点组合展示，不新增 SubmissionStatus。 */
+export function submissionStatusLabel(
+  status: string,
+  reviewNode: ReviewNode | null | undefined,
+  dict?: EnumDict,
+): string {
+  if (status !== 'PENDING_REVIEW' || !reviewNode) return enumLabel('SubmissionStatus', status, dict)
+  return `待${enumLabel('ReviewNode', reviewNode, dict)}`
 }
 
 export interface EnumOption {

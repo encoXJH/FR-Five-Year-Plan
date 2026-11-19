@@ -16,6 +16,7 @@ import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.mapper.RefreshTokenMapper;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.mapper.UserRoleMapper;
+import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -40,7 +41,13 @@ import java.util.stream.Collectors;
 @Service
 public class UserAdminService {
 
-    private static final Set<String> ROLES = Set.of("ADMIN", "LEADER", "SCHOOL_OWNER", "UNIT_OWNER");
+    private static final Set<String> ROLES = Set.of("ADMIN", "LEADER", "SCHOOL_OWNER", "UNIT_OWNER", "STAFF");
+    private static final Map<String, Set<String>> CREATABLE_ROLES = Map.of(
+            "ADMIN", Set.of("ADMIN", "LEADER", "SCHOOL_OWNER", "UNIT_OWNER"),
+            "LEADER", Set.of("LEADER", "SCHOOL_OWNER", "UNIT_OWNER"),
+            "SCHOOL_OWNER", Set.of("SCHOOL_OWNER", "UNIT_OWNER"),
+            "UNIT_OWNER", Set.of("UNIT_OWNER", "STAFF"),
+            "STAFF", Set.of());
     private static final Set<String> SORT_FIELDS = Set.of("id", "username", "name", "last_login_at");
 
     private final SysUserMapper sysUserMapper;
@@ -99,10 +106,51 @@ public class UserAdminService {
                 query.getPage(), query.getPageSize());
     }
 
+    public PageResult<SystemDtos.UserItem> staffPage(SystemDtos.StaffQuery query) {
+        LoginUser manager = requireUnitOwner();
+        if (query.getUnitId() != null && !manager.getUnitIds().contains(query.getUnitId())) {
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED, "筛选单元超出当前负责人的学院范围");
+        }
+        List<Long> candidateIds = query.getUnitId() == null
+                ? userUnitService.userIdsOfUnits(manager.getUnitIds())
+                : userUnitService.userIdsOfUnit(query.getUnitId());
+        if (candidateIds.isEmpty()) {
+            return new PageResult<>(List.of(), 0L, query.getPage(), query.getPageSize());
+        }
+        Map<Long, Set<String>> roleMap = userRoleMapper.selectList(new LambdaQueryWrapper<UserRole>()
+                        .in(UserRole::getUserId, candidateIds)
+                        .select(UserRole::getUserId, UserRole::getRole))
+                .stream().collect(Collectors.groupingBy(UserRole::getUserId,
+                        Collectors.mapping(UserRole::getRole, Collectors.toSet())));
+        List<Long> staffIds = candidateIds.stream()
+                .filter(id -> Set.of("STAFF").equals(roleMap.get(id)))
+                .toList();
+        if (staffIds.isEmpty()) {
+            return new PageResult<>(List.of(), 0L, query.getPage(), query.getPageSize());
+        }
+        LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getDeleted, 0L)
+                .eq(query.getIsEnabled() != null, SysUser::getIsEnabled, query.getIsEnabled())
+                .in(SysUser::getId, staffIds)
+                .and(StringUtils.hasText(query.getKeyword()), w -> w
+                        .like(SysUser::getUsername, query.getKeyword())
+                        .or().like(SysUser::getName, query.getKeyword()));
+        Page<SysUser> page = query.toPage(SORT_FIELDS);
+        if (!StringUtils.hasText(query.getSort())) {
+            page.addOrder(com.baomidou.mybatisplus.core.metadata.OrderItem.asc("id"));
+        }
+        Page<SysUser> result = sysUserMapper.selectPage(page, wrapper);
+        return new PageResult<>(toItems(result.getRecords()), result.getTotal(),
+                query.getPage(), query.getPageSize());
+    }
+
     // ---------------- 新增 ----------------
 
     @Transactional
     public SystemDtos.UserItem create(SystemDtos.UserCreateRequest request) {
+        LoginUser creator = SecurityUtils.getLoginUser();
+        List<String> roles = validateRoles(request.getRoles());
+        validateCreatableRoles(roles, creator.getRoles());
         String username = request.getUsername().trim();
         if (!username.matches("[A-Za-z0-9_.-]{1,64}")) {
             throw new BizException(ErrorCode.PARAM_INVALID, "登录名只允许字母、数字、下划线、点、短横线");
@@ -118,7 +166,7 @@ public class UserAdminService {
         requireUnitIfPresent(request.getUnitId());
         Long primaryUnitId = request.getUnitId() != null ? request.getUnitId()
                 : requestedUnitIds.stream().filter(Objects::nonNull).findFirst().orElse(null);
-        List<String> roles = validateRoles(request.getRoles());
+        validateCreatedUnits(roles, primaryUnitId, requestedUnitIds, creator);
 
         SysUser user = new SysUser();
         user.setUsername(username);
@@ -127,9 +175,10 @@ public class UserAdminService {
         user.setPhone(StringUtils.hasText(request.getPhone()) ? request.getPhone().trim() : null);
         user.setEmail(StringUtils.hasText(request.getEmail()) ? request.getEmail().trim() : null);
         user.setUnitId(primaryUnitId);
+        user.setOwnerUserId(roles.contains("STAFF") ? creator.getUserId() : null);
         user.setIsEnabled(true);
         user.setLoginFailCount(0);
-        user.setCreatedBy(SecurityUtils.getUserId());
+        user.setCreatedBy(creator.getUserId());
         user.setUpdatedBy(user.getCreatedBy());
         sysUserMapper.insert(user);
         replaceRoles(user.getId(), roles);
@@ -205,6 +254,62 @@ public class UserAdminService {
         return toItems(List.of(sysUserMapper.selectById(userId))).get(0);
     }
 
+    @Transactional
+    public SystemDtos.UserItem patchStaff(Long userId, JsonNode body) {
+        LoginUser manager = requireUnitOwner();
+        PatchHelper patch = new PatchHelper(body);
+        SysUser user = requireManagedStaff(userId, manager);
+        int version = patch.versionRequired();
+        if (!user.getVersion().equals(version)) {
+            throw new BizException(ErrorCode.VERSION_CONFLICT,
+                    "数据已被他人修改，当前最新版本号：" + user.getVersion());
+        }
+        if (patch.has("name")) {
+            String name = patch.text("name").trim();
+            if (name.isEmpty() || name.length() > 64) {
+                throw new BizException(ErrorCode.PARAM_INVALID, "姓名必填且不超过 64 字");
+            }
+            user.setName(name);
+        }
+        if (patch.has("phone")) {
+            String phone = patch.isNull("phone") ? null : patch.text("phone").trim();
+            if (phone != null && phone.length() > 32) {
+                throw new BizException(ErrorCode.PARAM_INVALID, "手机号不超过 32 字");
+            }
+            user.setPhone(phone);
+        }
+        boolean unitChanged = patch.has("unitId");
+        List<Long> retainedUnitIds = null;
+        if (unitChanged) {
+            if (patch.isNull("unitId")) {
+                throw new BizException(ErrorCode.PARAM_INVALID, "干事主学院不能为空");
+            }
+            Long unitId = patch.longId("unitId");
+            if (!manager.getUnitIds().contains(unitId)) {
+                throw new BizException(ErrorCode.DATA_SCOPE_DENIED, "目标单元超出当前负责人的学院范围");
+            }
+            requireUnitIfPresent(unitId);
+            retainedUnitIds = userUnitService.unitIdsOf(userId).stream()
+                    .filter(id -> !manager.getUnitIds().contains(id))
+                    .toList();
+            user.setUnitId(unitId);
+        }
+        if (patch.has("isEnabled")) {
+            user.setIsEnabled(patch.bool("isEnabled"));
+            if (Boolean.FALSE.equals(user.getIsEnabled())) {
+                revokeAllRefreshTokens(userId);
+            }
+        }
+        user.setUpdatedBy(manager.getUserId());
+        if (sysUserMapper.updateById(user) == 0) {
+            throw new BizException(ErrorCode.VERSION_CONFLICT, "用户已被他人修改，请刷新后重试");
+        }
+        if (unitChanged) {
+            userUnitService.replaceUnits(userId, user.getUnitId(), retainedUnitIds, manager.getUserId());
+        }
+        return toItems(List.of(sysUserMapper.selectById(userId))).get(0);
+    }
+
     // ---------------- 角色（敏感操作，必须 reason） ----------------
 
     @Transactional
@@ -216,6 +321,9 @@ public class UserAdminService {
         }
         List<String> newRoles = validateRoles(request.getRoles());
         List<String> before = rolesOf(userId);
+        if (newRoles.contains("STAFF") && (!before.contains("STAFF") || user.getOwnerUserId() == null)) {
+            throw new BizException(ErrorCode.FORBIDDEN, "只能通过学院负责人创建干事，不能为普通账号追加 STAFF");
+        }
         replaceRoles(userId, newRoles);
         // 推进用户版本号（乐观锁语义挂在 sys_user 上）
         user.setUpdatedBy(SecurityUtils.getUserId());
@@ -242,6 +350,24 @@ public class UserAdminService {
         revokeAllRefreshTokens(userId);
     }
 
+    @Transactional
+    public void resetStaffPassword(Long userId, SystemDtos.StaffPasswordResetRequest request) {
+        LoginUser manager = requireUnitOwner();
+        SysUser user = requireManagedStaff(userId, manager);
+        if (!user.getVersion().equals(request.getVersion())) {
+            throw new BizException(ErrorCode.VERSION_CONFLICT,
+                    "数据已被他人修改，当前最新版本号：" + user.getVersion());
+        }
+        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+        user.setLoginFailCount(0);
+        user.setLockedUntil(null);
+        user.setUpdatedBy(manager.getUserId());
+        if (sysUserMapper.updateById(user) == 0) {
+            throw new BizException(ErrorCode.VERSION_CONFLICT, "用户已被他人修改，请刷新后重试");
+        }
+        revokeAllRefreshTokens(userId);
+    }
+
     // ---------------- 内部 ----------------
 
     public SysUser requireUser(Long userId) {
@@ -254,6 +380,27 @@ public class UserAdminService {
         return user;
     }
 
+    private LoginUser requireUnitOwner() {
+        LoginUser manager = SecurityUtils.getLoginUser();
+        if (!manager.getRoles().contains("UNIT_OWNER")) {
+            throw new BizException(ErrorCode.FORBIDDEN, "仅学院项目负责人可以管理干事");
+        }
+        return manager;
+    }
+
+    private SysUser requireManagedStaff(Long userId, LoginUser manager) {
+        SysUser user = requireUser(userId);
+        if (!Set.of("STAFF").equals(new LinkedHashSet<>(rolesOf(userId)))) {
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED, "目标用户不是可管理的纯干事账号");
+        }
+        Set<Long> managerUnitIds = new LinkedHashSet<>(manager.getUnitIds());
+        boolean inScope = userUnitService.unitIdsOf(userId).stream().anyMatch(managerUnitIds::contains);
+        if (!inScope) {
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED, "目标用户超出当前负责人的学院范围");
+        }
+        return user;
+    }
+
     private List<String> validateRoles(List<String> roles) {
         List<String> distinct = new ArrayList<>(new LinkedHashSet<>(roles));
         for (String role : distinct) {
@@ -262,6 +409,38 @@ public class UserAdminService {
             }
         }
         return distinct;
+    }
+
+    private void validateCreatableRoles(List<String> roles, List<String> creatorRoles) {
+        for (String role : roles) {
+            boolean allowed = creatorRoles.stream()
+                    .anyMatch(creatorRole -> CREATABLE_ROLES.getOrDefault(creatorRole, Set.of()).contains(role));
+            if (!allowed) {
+                throw new BizException(ErrorCode.FORBIDDEN, "当前角色不能创建角色：" + role);
+            }
+        }
+        if (roles.contains("STAFF") && roles.size() != 1) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "创建干事时角色只能为 STAFF");
+        }
+    }
+
+    private void validateCreatedUnits(List<String> roles, Long primaryUnitId, List<Long> requestedUnitIds,
+                                      LoginUser creator) {
+        if (!creator.getRoles().contains("UNIT_OWNER")
+                || (!roles.contains("STAFF") && !roles.contains("UNIT_OWNER"))) {
+            return;
+        }
+        Set<Long> targetUnitIds = new LinkedHashSet<>();
+        if (primaryUnitId != null) {
+            targetUnitIds.add(primaryUnitId);
+        }
+        requestedUnitIds.stream().filter(Objects::nonNull).forEach(targetUnitIds::add);
+        if (roles.contains("UNIT_OWNER") && targetUnitIds.isEmpty()) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "学院负责人创建学院负责人时至少指定一个所属单元");
+        }
+        if (!new LinkedHashSet<>(creator.getUnitIds()).containsAll(targetUnitIds)) {
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED, "目标单元超出当前创建人的学院范围");
+        }
     }
 
     private List<String> rolesOf(Long userId) {
@@ -283,7 +462,7 @@ public class UserAdminService {
         }
     }
 
-    private void revokeAllRefreshTokens(Long userId) {
+    void revokeAllRefreshTokens(Long userId) {
         refreshTokenMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<RefreshToken>()
                 .eq(RefreshToken::getUserId, userId)
                 .isNull(RefreshToken::getRevokedAt)
@@ -324,7 +503,7 @@ public class UserAdminService {
         return List.copyOf(ids);
     }
 
-    private List<SystemDtos.UserItem> toItems(List<SysUser> users) {
+    List<SystemDtos.UserItem> toItems(List<SysUser> users) {
         if (users.isEmpty()) {
             return List.of();
         }
@@ -344,7 +523,7 @@ public class UserAdminService {
                                 ? null : unitMap.get(u.getUnitId()).getName(),
                         roleMap.getOrDefault(u.getId(), List.of()),
                         u.getIsEnabled(), u.getLastLoginAt(), u.getVersion(),
-                        unitIdsByUser.getOrDefault(u.getId(), List.of())))
+                        unitIdsByUser.getOrDefault(u.getId(), List.of()), u.getOwnerUserId()))
                 .toList();
     }
 

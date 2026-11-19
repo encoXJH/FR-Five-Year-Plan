@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getRolePermissions, updateRolePermissions } from '../system'
+import { deleteUser, getRolePermissions, updateRolePermissions } from '../system'
 import { http } from '@/utils/request'
 import type { RoleItem, RolePermissionResponse } from '@/types/system'
 
 vi.mock('@/utils/request', () => ({
-  http: { get: vi.fn(), put: vi.fn() },
+  http: { get: vi.fn(), put: vi.fn(), delete: vi.fn() },
 }))
 
 const getMock = http.get as unknown as ReturnType<typeof vi.fn>
 const putMock = http.put as unknown as ReturnType<typeof vi.fn>
+const deleteMock = http.delete as unknown as ReturnType<typeof vi.fn>
 
 const leaderRole: RoleItem = {
   role: 'LEADER',
@@ -43,6 +44,7 @@ describe('角色权限 API 契约', () => {
   beforeEach(() => {
     getMock.mockReset()
     putMock.mockReset()
+    deleteMock.mockReset()
   })
 
   it('从统一前缀下的 role-permissions 获取角色和权限定义', async () => {
@@ -63,5 +65,14 @@ describe('角色权限 API 契约', () => {
 
     await expect(updateRolePermissions('LEADER', request)).resolves.toBe(updated)
     expect(putMock).toHaveBeenCalledWith('/role-permissions/LEADER', request)
+  })
+
+  it('删除用户时通过请求体提交版本和原因', async () => {
+    deleteMock.mockResolvedValue(undefined)
+
+    await deleteUser('1', { version: 2, reason: '误建账号' })
+    expect(deleteMock).toHaveBeenCalledWith('/users/1', {
+      data: { version: 2, reason: '误建账号' },
+    })
   })
 })

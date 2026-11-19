@@ -9,6 +9,7 @@ import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
 import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
@@ -40,6 +41,8 @@ class PlanReadScopeServiceTest {
     private IndicatorMapper indicatorMapper;
     @Mock
     private TaskMapper taskMapper;
+    @Mock
+    private TaskReadScopeService taskReadScopeService;
 
     @InjectMocks
     private PlanReadScopeService planReadScopeService;
@@ -132,6 +135,31 @@ class PlanReadScopeServiceTest {
                 List.of(task(1L, 31L, 21L, 20L)));
 
         assertEquals(Set.of(10L, 11L, 20L, 21L), visible);
+    }
+
+    @Test
+    void 纯干事无分配时计划与任务均为空() {
+        login("STAFF", 31L);
+        when(dataScopeService.isAssignedScope(any())).thenReturn(true);
+        when(taskReadScopeService.staffTaskIds(any())).thenReturn(Set.of());
+
+        assertTrue(planReadScopeService.filterVisiblePlans(List.of(plan(1L))).isEmpty());
+        assertTrue(planReadScopeService.visibleTasks(1L).isEmpty());
+        verifyNoInteractions(taskMapper);
+    }
+
+    @Test
+    void 纯干事仅看到分配任务所在计划和任务本身() {
+        login("STAFF", 31L);
+        when(dataScopeService.isAssignedScope(any())).thenReturn(true);
+        when(taskReadScopeService.staffTaskIds(any())).thenReturn(Set.of(5L));
+        Task assigned = task(2L, 31L, 20L, 10L);
+        assigned.setId(5L);
+        when(taskMapper.selectList(any())).thenReturn(List.of(assigned));
+
+        assertEquals(List.of(2L), planReadScopeService.filterVisiblePlans(List.of(plan(1L), plan(2L)))
+                .stream().map(Plan::getId).toList());
+        assertEquals(List.of(5L), planReadScopeService.visibleTasks(2L).stream().map(Task::getId).toList());
     }
 
     private static void login(String role, Long unitId, String... additionalRoles) {

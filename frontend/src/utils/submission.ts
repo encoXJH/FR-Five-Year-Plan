@@ -1,5 +1,5 @@
-import type { StatCaliber } from '@/types/enums'
-import type { MetricValue } from '@/types/submission'
+import type { Role, StatCaliber, SubmissionStatus } from '@/types/enums'
+import type { MetricValue, ReviewNode, SubmitterRole } from '@/types/submission'
 import { EMPTY_DISPLAY, formatNumber, formatPercent } from './format'
 
 /** 采集字段名（rate / growthRate / increment 为服务端只读，不在其列） */
@@ -13,6 +13,75 @@ export const CALIBER_INPUT_FIELDS: Record<StatCaliber, MetricInputField[]> = {
   RATIO: ['numerator', 'denominator'],
   DIRECT_PERCENT: ['percent'],
   BOOLEAN: ['achieved'],
+}
+
+export interface ReviewGuardSubmission {
+  status: SubmissionStatus
+  currentReviewNode: ReviewNode | null
+  submitterRole: SubmitterRole
+}
+
+export interface ReviewValueSubmission {
+  currentReviewNode: ReviewNode | null
+  value: MetricValue
+  approvedValue?: MetricValue | null
+}
+
+/** 院审从填报值开始，校审继承院审暂存认定值；历史或缺失暂存值时回退填报值。 */
+export function reviewInitialValue(submission: ReviewValueSubmission): MetricValue {
+  return submission.currentReviewNode === 'LEADER_REVIEW' && submission.approvedValue
+    ? submission.approvedValue
+    : submission.value
+}
+
+/** 兼任学院负责人或管理员代填直送校审，其余干事提交走院审 → 校审。 */
+export function submitterRoleForRoles(roles: readonly Role[]): SubmitterRole | null {
+  if (roles.includes('ADMIN') || roles.includes('UNIT_OWNER')) return 'UNIT_OWNER'
+  return roles.includes('STAFF') ? 'STAFF' : null
+}
+
+export function initialReviewNodeForRoles(roles: readonly Role[]): ReviewNode | null {
+  const submitterRole = submitterRoleForRoles(roles)
+  if (submitterRole === 'STAFF') return 'UNIT_REVIEW'
+  if (submitterRole === 'UNIT_OWNER') return 'LEADER_REVIEW'
+  return null
+}
+
+/** 前端操作守卫；任务归属和提交人归属仍由服务端校验。 */
+export function canReviewNode(
+  node: ReviewNode,
+  roles: readonly Role[],
+  permissions: readonly string[],
+): boolean {
+  if (!permissions.includes('submission:review')) return false
+  if (roles.includes('ADMIN')) return true
+  if (node === 'UNIT_REVIEW') return roles.includes('UNIT_OWNER')
+  return roles.includes('LEADER')
+}
+
+export function canReviewSubmission(
+  submission: ReviewGuardSubmission,
+  roles: readonly Role[],
+  permissions: readonly string[],
+): boolean {
+  const node = submission.currentReviewNode
+  if (submission.status !== 'PENDING_REVIEW' || !node) return false
+  if (node === 'UNIT_REVIEW' && submission.submitterRole !== 'STAFF') return false
+  return canReviewNode(node, roles, permissions)
+}
+
+/** 批量通过只允许同一当前节点，且每条都通过单笔审核守卫。 */
+export function getBatchReviewNode(
+  submissions: readonly ReviewGuardSubmission[],
+  roles: readonly Role[],
+  permissions: readonly string[],
+): ReviewNode | null {
+  const first = submissions[0]
+  if (!first || !submissions.every((item) => canReviewSubmission(item, roles, permissions))) {
+    return null
+  }
+  const node = first.currentReviewNode
+  return submissions.every((item) => item.currentReviewNode === node) ? node : null
 }
 
 /** 组装提交值：只保留本口径的采集字段，其余一律置 null */

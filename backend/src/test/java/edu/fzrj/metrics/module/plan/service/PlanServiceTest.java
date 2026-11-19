@@ -579,6 +579,122 @@ class PlanServiceTest {
         verify(planMapper, never()).updateById(any(Plan.class));
     }
 
+    @Test
+    void UNIT和STAFF的计划完成率均按可见任务重算MANUAL() {
+        Plan plan = singleYearPlan();
+        Indicator indicator = manualIndicator(10L, 500L);
+        Task visible = task(101L);
+        visible.setIndicatorId(10L);
+        visible.setTopIndicatorId(10L);
+        TaskYear visibleYear = taskYear(101L, 2026, "20");
+        when(planMapper.selectList(any())).thenReturn(List.of(plan));
+        when(planReadScopeService.filterVisiblePlans(any())).thenReturn(List.of(plan));
+        when(planReadScopeService.visibleTasks(1L)).thenReturn(List.of(visible));
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(indicator));
+        when(planReadScopeService.visibleIndicatorIds(any(), any())).thenReturn(Set.of(10L));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(visibleYear));
+
+        for (String role : List.of("UNIT_OWNER", "STAFF")) {
+            SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                    new LoginUser(99L, role, role, 31L, List.of(role), List.of()), null, List.of()));
+            PlanDtos.ListItem item = planService.list(null).get(0);
+            assertEquals(0, new BigDecimal("0.2").compareTo(item.completionRate()));
+        }
+        verify(yearTargetMapper, never()).selectList(any());
+    }
+
+    @Test
+    void 纯STAFF无可见任务时计划完成率failClosed() {
+        Plan plan = singleYearPlan();
+        Indicator indicator = manualIndicator(10L, 500L);
+        when(planMapper.selectList(any())).thenReturn(List.of(plan));
+        when(planReadScopeService.filterVisiblePlans(any())).thenReturn(List.of(plan));
+        when(planReadScopeService.visibleTasks(1L)).thenReturn(List.of());
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(indicator));
+        when(planReadScopeService.visibleIndicatorIds(any(), any())).thenReturn(Set.of());
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new LoginUser(99L, "staff", "干事", 31L, List.of("STAFF"), List.of()), null, List.of()));
+
+        PlanDtos.ListItem item = planService.list(null).get(0);
+
+        assertNull(item.completionRate());
+        assertEquals(0L, item.taskCountB());
+        verify(yearTargetMapper, never()).selectList(any());
+        verify(taskYearMapper, never()).selectList(any());
+    }
+
+    @Test
+    void 多角色计划完成率分别使用本人OWNER认定值和分配任务进度() {
+        Plan plan = singleYearPlan();
+        Indicator owned = manualIndicator(10L, 99L);
+        Indicator assigned = manualIndicator(20L, 500L);
+        Task assignedTask = task(101L);
+        assignedTask.setIndicatorId(20L);
+        assignedTask.setTopIndicatorId(20L);
+        TaskYear assignedYear = taskYear(101L, 2026, "20");
+        IndicatorYearTarget ownedTarget = manualTarget(10L, "80");
+        IndicatorYearTarget assignedTarget = manualTarget(20L, "90");
+        when(planMapper.selectList(any())).thenReturn(List.of(plan));
+        when(planReadScopeService.filterVisiblePlans(any())).thenReturn(List.of(plan));
+        when(planReadScopeService.visibleTasks(1L)).thenReturn(List.of(assignedTask));
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(owned, assigned));
+        when(planReadScopeService.visibleIndicatorIds(any(), any())).thenReturn(Set.of(10L, 20L));
+        when(taskYearMapper.selectList(any())).thenReturn(List.of(assignedYear));
+        when(yearTargetMapper.selectList(any())).thenReturn(List.of(ownedTarget, assignedTarget));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new LoginUser(99L, "mixed", "兼任", 31L,
+                        List.of("SCHOOL_OWNER", "STAFF"), List.of()), null, List.of()));
+
+        PlanDtos.ListItem item = planService.list(null).get(0);
+
+        assertEquals(0, new BigDecimal("0.5").compareTo(item.completionRate()));
+    }
+
+    @Test
+    void 管理员计划完成率仍读取MANUAL全局认定值() {
+        Plan plan = singleYearPlan();
+        Indicator indicator = manualIndicator(10L, 500L);
+        when(planMapper.selectList(any())).thenReturn(List.of(plan));
+        when(planReadScopeService.filterVisiblePlans(any())).thenReturn(List.of(plan));
+        when(planReadScopeService.visibleTasks(1L)).thenReturn(List.of());
+        when(indicatorMapper.selectList(any())).thenReturn(List.of(indicator));
+        when(planReadScopeService.visibleIndicatorIds(any(), any())).thenReturn(Set.of(10L));
+        when(yearTargetMapper.selectList(any())).thenReturn(List.of(manualTarget(10L, "90")));
+
+        PlanDtos.ListItem item = planService.list(null).get(0);
+
+        assertEquals(0, new BigDecimal("0.9").compareTo(item.completionRate()));
+    }
+
+    private static Plan singleYearPlan() {
+        Plan plan = new Plan();
+        plan.setId(1L);
+        plan.setName("测试计划");
+        plan.setStartYear(2026);
+        plan.setEndYear(2026);
+        plan.setStatus("ACTIVE");
+        plan.setSource("BLANK");
+        return plan;
+    }
+
+    private static Indicator manualIndicator(Long id, Long ownerId) {
+        Indicator indicator = indicator(id, null, "A");
+        indicator.setOwnerId(ownerId);
+        indicator.setIsQuantifiable(true);
+        indicator.setStatCaliber("INCREMENT");
+        indicator.setRollupMode("MANUAL");
+        indicator.setTotalTarget(new BigDecimal("100"));
+        return indicator;
+    }
+
+    private static IndicatorYearTarget manualTarget(Long indicatorId, String value) {
+        IndicatorYearTarget target = new IndicatorYearTarget();
+        target.setIndicatorId(indicatorId);
+        target.setYear(2026);
+        target.setManualActualValue(new BigDecimal(value));
+        return target;
+    }
+
     private static Plan draftPlan() {
         Plan plan = new Plan();
         plan.setId(1L);

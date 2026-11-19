@@ -37,6 +37,7 @@ import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
+import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.module.task.service.TaskService;
 import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -54,6 +55,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -113,6 +115,8 @@ class AdjustmentServiceTest {
     private UserRefResolver userRefResolver;
     @Mock
     private ObjectMapper objectMapper;
+    @Mock
+    private TaskReadScopeService taskReadScopeService;
 
     @InjectMocks
     private AdjustmentService adjustmentService;
@@ -410,6 +414,28 @@ class AdjustmentServiceTest {
 
         assertTrue(result.containsKey(2026));
         assertEquals(null, result.get(2026));
+    }
+
+    @Test
+    void 干事调整详情按分配任务实时放行或拒绝() {
+        Adjustment adjustment = new Adjustment();
+        adjustment.setId(1L);
+        adjustment.setTaskId(7L);
+        adjustment.setApplicantId(999L);
+        adjustment.setFromUnitId(31L);
+        adjustment.setToUnitId(32L);
+        LoginUser staff = new LoginUser(88L, "staff", "干事", 31L, List.of("STAFF"), List.of());
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(staff, null, List.of()));
+        when(dataScopeService.isAssignedScope(staff)).thenReturn(true);
+        when(taskReadScopeService.staffTaskIds(staff)).thenReturn(java.util.Set.of(7L));
+
+        assertDoesNotThrow(() -> adjustmentService.requireAccess(adjustment));
+
+        when(taskReadScopeService.staffTaskIds(staff)).thenReturn(java.util.Set.of());
+        BizException error = assertThrows(BizException.class,
+                () -> adjustmentService.requireAccess(adjustment));
+        assertEquals(20005, error.getErrorCode().getCode());
     }
 
     private static void adminLogin() {

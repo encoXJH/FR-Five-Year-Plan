@@ -13,6 +13,7 @@ public record MaterialQuery(
         String keyword,
         Long ownerScope,
         List<Long> unitScopeIds,
+        List<Long> staffTaskIds,
         List<Long> fileIds,
         int limit,
         long offset) {

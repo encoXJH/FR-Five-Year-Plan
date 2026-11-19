@@ -19,12 +19,12 @@ const routes: RouteRecordRaw[] = [
     path: '/',
     component: () => import('@/components/Layout/index.vue'),
     children: [
-      { path: '', redirect: '/plans' },
+      { path: '', name: 'Root', component: () => import('@/views/plans/index.vue') },
       {
         path: 'plans',
         name: 'Plans',
         component: () => import('@/views/plans/index.vue'),
-        meta: { title: '首页', hideForRolesOnly: ['UNIT_OWNER'] },
+        meta: { title: '首页', hideForRolesOnly: ['UNIT_OWNER', 'STAFF'] },
       },
       {
         path: 'plans/:planId',
@@ -36,7 +36,7 @@ const routes: RouteRecordRaw[] = [
         path: 'plans/:planId/indicators',
         name: 'PlanIndicators',
         component: () => import('@/views/indicators/index.vue'),
-        meta: { title: '指标总表', hideForRolesOnly: ['UNIT_OWNER'] },
+        meta: { title: '指标总表', hideForRolesOnly: ['UNIT_OWNER', 'STAFF'] },
       },
       {
         path: 'plans/:planId/gantt',
@@ -46,13 +46,13 @@ const routes: RouteRecordRaw[] = [
         path: 'plans/:planId/indicator-progress',
         name: 'IndicatorProgress',
         component: () => import('@/views/indicators/progress.vue'),
-        meta: { title: '指标进度', hideForRolesOnly: ['UNIT_OWNER'] },
+        meta: { title: '指标进度', hideForRolesOnly: ['UNIT_OWNER', 'STAFF'] },
       },
       {
         path: 'indicators',
         name: 'Indicators',
         component: () => import('@/views/indicators/index.vue'),
-        meta: { title: '指标总表', hideForRolesOnly: ['UNIT_OWNER'] },
+        meta: { title: '指标总表', hideForRolesOnly: ['UNIT_OWNER', 'STAFF'] },
       },
       {
         path: 'indicators/:id',
@@ -100,7 +100,7 @@ const routes: RouteRecordRaw[] = [
         path: 'reviews',
         name: 'Reviews',
         component: () => import('@/views/review/index.vue'),
-        meta: { title: '审核中心', permissions: ['submission:review'] },
+        meta: { title: '审核中心', permissions: ['submission:review'], hideForRolesOnly: ['STAFF'] },
       },
       {
         path: 'adjustments',
@@ -112,7 +112,7 @@ const routes: RouteRecordRaw[] = [
         path: 'adjustments/apply',
         name: 'AdjustmentApply',
         component: () => import('@/views/adjustment/apply.vue'),
-        meta: { title: '发起调整申请', permissions: ['adjustment:apply'], hideTabbar: true },
+        meta: { title: '发起调整申请', permissions: ['adjustment:apply'], hideForRolesOnly: ['STAFF'], hideTabbar: true },
       },
       {
         path: 'stats',
@@ -219,7 +219,13 @@ router.beforeEach(async (to) => {
 })
 
 router.afterEach((to) => {
-  const title = typeof to.meta.title === 'string' ? to.meta.title : ''
+  const userStore = useUserStore()
+  const roleTitle = userStore.isStaffOnly && to.name === 'Workbench'
+    ? '我的任务'
+    : userStore.isStaffOnly && to.name === 'Adjustments'
+      ? '调整记录'
+      : null
+  const title = roleTitle ?? (typeof to.meta.title === 'string' ? to.meta.title : '')
   document.title = title ? `${title} · 双高管理平台` : '双高管理平台'
 })
 
