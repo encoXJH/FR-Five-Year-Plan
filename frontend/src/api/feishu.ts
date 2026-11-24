@@ -1,4 +1,12 @@
 import { http } from '@/utils/request'
+import type { PageResult } from '@/types/api'
+import type {
+  FeishuBotJob,
+  FeishuBotLog,
+  FeishuBotLogQuery,
+  FeishuBotRunResult,
+  FeishuBotStatus,
+} from '@/types/feishu'
 
 /**
  * 飞书集成（P15 飞书集成 Tab；API 约定 15.11）。
@@ -48,6 +56,25 @@ export function syncFeishuOrg(idempotencyKey: string): Promise<FeishuSyncSummary
   return http.post(
     '/integrations/feishu/sync-org',
     {},
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  )
+}
+
+/** GET /integrations/feishu/bot/status：机器人开关、调度规则与今日推送统计 */
+export function fetchFeishuBotStatus(): Promise<FeishuBotStatus> {
+  return http.get('/integrations/feishu/bot/status')
+}
+
+/** GET /integrations/feishu/bot/logs：按推送状态、通知类型和创建日期查询日志 */
+export function listFeishuBotLogs(params: FeishuBotLogQuery): Promise<PageResult<FeishuBotLog>> {
+  return http.get('/integrations/feishu/bot/logs', params)
+}
+
+/** POST /integrations/feishu/bot/run：手动执行进度检查或校级汇总（幂等） */
+export function runFeishuBot(job: FeishuBotJob, idempotencyKey: string): Promise<FeishuBotRunResult> {
+  return http.post(
+    '/integrations/feishu/bot/run',
+    { job },
     { headers: { 'Idempotency-Key': idempotencyKey } },
   )
 }

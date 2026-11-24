@@ -292,7 +292,6 @@ function openMaterials(row: TaskListItem): void {
 
 function mayAssignStaff(row: TaskListItem): boolean {
   return userStore.roles.includes('UNIT_OWNER')
-    && row.owner?.id === userStore.userInfo?.id
     && canWriteTask(row)
     && row.status !== 'TRANSFERRED_OUT'
     && row.status !== 'CLOSED'
@@ -469,6 +468,13 @@ useAutoRefresh(
         </el-select>
       </div>
     </div>
+
+    <el-alert
+      type="info"
+      :closable="false"
+      class="page-alert"
+      title="五年任务一次下发，后续年度无需重新下发；每年 1 月 1 日自动切换当前填报年度。"
+    />
 
     <el-alert
       v-if="isAdminView && !filters.unitId"

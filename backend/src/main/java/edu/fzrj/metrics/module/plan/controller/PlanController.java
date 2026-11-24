@@ -44,7 +44,7 @@ public class PlanController {
         return planService.list(status);
     }
 
-    @Operation(summary = "新建计划（source：BLANK / TEMPLATE / COPY）", description = "权限：plan:manage")
+    @Operation(summary = "新建计划并激活全部年度（source：BLANK / TEMPLATE / COPY）", description = "权限：plan:manage")
     @PostMapping
     @PreAuthorize("hasAuthority('plan:manage')")
     @AuditLog(action = "CREATE", resourceType = "plan", resourceId = "#result.id", after = "#result")
@@ -58,6 +58,10 @@ public class PlanController {
         return planService.detail(planId);
     }
 
+    public PlanDtos.Detail detailIncludingTraining(Long planId) {
+        return planService.detailIncludingTraining(planId);
+    }
+
     @Operation(summary = "修改计划属性（带 version；起止年份仅草稿可改）", description = "权限：plan:manage")
     @PatchMapping("/{planId}")
     @PreAuthorize("hasAuthority('plan:manage')")
@@ -67,11 +71,11 @@ public class PlanController {
         return planService.patch(planId, new PatchHelper(body));
     }
 
-    @Operation(summary = "启动执行（DRAFT → ACTIVE，生成各年度计划年度行）", description = "权限：plan:manage；需带 version")
+    @Operation(summary = "启动执行（DRAFT → ACTIVE；指标计划激活全部年度，培训计划不生成指标年度）", description = "权限：plan:manage；需带 version")
     @PostMapping("/{planId}/activate")
     @PreAuthorize("hasAuthority('plan:manage')")
     @AuditLog(action = "UPDATE", resourceType = "plan", resourceId = "#planId",
-            before = "detail(#planId)", after = "#result")
+            before = "detailIncludingTraining(#planId)", after = "#result")
     public PlanDtos.Detail activate(@PathVariable Long planId,
                                     @Valid @RequestBody PlanDtos.VersionRequest request) {
         return planService.activate(planId, request.getVersion());
@@ -81,7 +85,7 @@ public class PlanController {
     @PostMapping("/{planId}/archive")
     @PreAuthorize("hasAuthority('plan:manage')")
     @AuditLog(action = "UPDATE", resourceType = "plan", resourceId = "#planId",
-            before = "detail(#planId)", after = "#result")
+            before = "detailIncludingTraining(#planId)", after = "#result")
     public PlanDtos.Detail archive(@PathVariable Long planId,
                                    @Valid @RequestBody PlanDtos.VersionRequest request) {
         return planService.archive(planId, request.getVersion());
@@ -92,7 +96,7 @@ public class PlanController {
     @DeleteMapping("/{planId}")
     @PreAuthorize("hasAuthority('plan:manage')")
     @AuditLog(action = "DELETE", resourceType = "plan", resourceId = "#planId", reason = "#request.reason",
-            before = "detail(#planId)")
+            before = "detailIncludingTraining(#planId)")
     public void delete(@PathVariable Long planId, @Valid @RequestBody PlanDtos.DeleteRequest request) {
         planService.delete(planId, request);
     }

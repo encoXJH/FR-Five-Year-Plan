@@ -39,6 +39,13 @@ function resolveIndex(item: MenuItem): string {
   return item.resolvePath ? item.resolvePath(route) : item.path
 }
 
+const activeMenuPath = computed(() => {
+  const activeItem = visibleGroups.value
+    .flatMap((group) => group.items)
+    .find((item) => item.activeWhen?.(route))
+  return activeItem ? resolveIndex(activeItem) : route.path
+})
+
 function displayTitle(item: MenuItem): string {
   return userStore.isStaffOnly && item.titleForStaff ? item.titleForStaff : item.title
 }
@@ -48,7 +55,7 @@ function displayTitle(item: MenuItem): string {
   <el-menu
     class="app-menu"
     :class="{ 'is-collapsed': collapsed }"
-    :default-active="route.path"
+    :default-active="activeMenuPath"
     :collapse="collapsed"
     :collapse-transition="false"
     router

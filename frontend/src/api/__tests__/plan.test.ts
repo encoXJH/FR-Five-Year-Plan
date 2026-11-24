@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { deletePlan, listPlans } from '../plan'
+import { activatePlan, archivePlan, deletePlan, listPlans } from '../plan'
 import { http } from '@/utils/request'
 
 vi.mock('@/utils/request', () => ({
-  http: { get: vi.fn(), delete: vi.fn() },
+  http: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
 }))
 
 const getMock = http.get as unknown as ReturnType<typeof vi.fn>
+const postMock = http.post as unknown as ReturnType<typeof vi.fn>
 const deleteMock = http.delete as unknown as ReturnType<typeof vi.fn>
 
 const responseItem = {
@@ -22,6 +23,7 @@ const responseItem = {
   indicatorCountA: 1,
   indicatorCountAPlus: 2,
   taskCountB: 3,
+  version: 3,
 }
 
 describe('计划列表卡片映射', () => {
@@ -40,6 +42,7 @@ describe('计划列表卡片映射', () => {
       indicatorCountA: 1,
       indicatorCountAPlus: 2,
       taskCountB: 3,
+      version: 3,
       updatedAt: responseItem.createdAt,
     })
   })
@@ -77,6 +80,29 @@ describe('计划列表卡片映射', () => {
     const [plan] = await listPlans()
 
     expect(plan.overallCompletionRate).toBeNull()
+  })
+})
+
+describe('启动草稿计划', () => {
+  it('携带乐观锁版本并调用启动执行接口', async () => {
+    postMock.mockResolvedValue({ id: '1', status: 'ACTIVE' })
+
+    await activatePlan('1', 3)
+
+    expect(postMock).toHaveBeenCalledWith('/plans/1/activate', { version: 3 })
+  })
+})
+
+describe('归档计划', () => {
+  it('携带卡片乐观锁版本和归档原因', async () => {
+    postMock.mockResolvedValue({ id: 'training-1', status: 'ARCHIVED' })
+
+    await archivePlan('training-1', 7, '年度采集结束')
+
+    expect(postMock).toHaveBeenCalledWith('/plans/training-1/archive', {
+      version: 7,
+      reason: '年度采集结束',
+    })
   })
 })
 

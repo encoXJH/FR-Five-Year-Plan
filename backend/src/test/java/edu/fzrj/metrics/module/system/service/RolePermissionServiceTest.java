@@ -112,11 +112,12 @@ class RolePermissionServiceTest {
         when(rolePermissionMapper.selectList(any())).thenReturn(List.of(
                 grant("UNIT_OWNER", RolePermissions.USER_CREATE),
                 grant("UNIT_OWNER", RolePermissions.SUBMISSION_REVIEW),
+                grant("UNIT_OWNER", RolePermissions.TRAINING_FILL),
                 grant("UNIT_OWNER", RolePermissions.SUBMISSION_SUBMIT)));
 
         List<String> permissions = rolePermissionService.configuredPermissionsOf(List.of("STAFF"));
 
-        assertEquals(List.of(RolePermissions.SUBMISSION_SUBMIT), permissions);
+        assertEquals(List.of(RolePermissions.SUBMISSION_SUBMIT, RolePermissions.TRAINING_FILL), permissions);
     }
 
     @Test
@@ -145,10 +146,10 @@ class RolePermissionServiceTest {
 
     @Test
     void 用户添加默认授权且三类角色允许管理员取消() {
-        assertEquals(18, RolePermissions.defaultPermissions("ADMIN").size());
+        assertEquals(19, RolePermissions.defaultPermissions("ADMIN").size());
         assertEquals(7, RolePermissions.defaultPermissions("LEADER").size());
         assertEquals(9, RolePermissions.defaultPermissions("SCHOOL_OWNER").size());
-        assertEquals(7, RolePermissions.defaultPermissions("UNIT_OWNER").size());
+        assertEquals(8, RolePermissions.defaultPermissions("UNIT_OWNER").size());
         RolePermissions.PermissionDefinition definition = RolePermissions.definitions().stream()
                 .filter(item -> item.code().equals(RolePermissions.USER_CREATE)).findFirst().orElseThrow();
         assertEquals(Set.of("LEADER", "SCHOOL_OWNER", "UNIT_OWNER"), definition.configurableRoles());

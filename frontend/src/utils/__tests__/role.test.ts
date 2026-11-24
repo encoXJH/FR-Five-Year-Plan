@@ -37,8 +37,8 @@ describe('用户创建角色矩阵', () => {
 })
 
 describe('创建用户的单元约束', () => {
-  it('干事隐藏归属输入后自动携带创建人的全部单元', () => {
-    expect(creationUnitIds(['UNIT_OWNER'], ['STAFF'], ['other'], ['101', '102'])).toEqual(['101', '102'])
+  it('干事单元留空，由服务端继承创建人的全部单元', () => {
+    expect(creationUnitIds(['UNIT_OWNER'], ['STAFF'], ['other'], ['101', '102'])).toEqual([])
   })
 
   it('学院负责人创建学院负责人时仅保留本人单元', () => {

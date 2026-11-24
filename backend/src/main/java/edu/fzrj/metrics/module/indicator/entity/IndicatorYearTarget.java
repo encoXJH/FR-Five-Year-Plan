@@ -1,6 +1,8 @@
 package edu.fzrj.metrics.module.indicator.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
@@ -34,21 +36,27 @@ public class IndicatorYearTarget {
     private BigDecimal target;
 
     /** 缓存：年度完成值（审核通过口径，按统计口径计算） */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal actualValue;
 
     /** 缓存：RATIO 口径汇总分子 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal actualNumerator;
 
     /** 缓存：RATIO 口径汇总分母 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal actualDenominator;
 
     /** 缓存：STOCK / GROWTH 口径的年末总量 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal actualTotal;
 
     /** 缓存：完成率（小数） */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal completionRate;
 
     /** 缓存：达成状态：NOT_STARTED / IN_PROGRESS / ACHIEVED / EXCEEDED / NOT_ACHIEVED / LAGGING */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String achieveStatus;
 
     /** 缓存最近计算时间 */

@@ -17,7 +17,9 @@ public interface TaskStaffMapper extends BaseMapper<TaskStaff> {
     @Select("SELECT DISTINCT su.* FROM sys_user su "
             + "JOIN user_role ur ON ur.user_id = su.id AND ur.role = 'STAFF' "
             + "JOIN user_unit uu ON uu.user_id = su.id AND uu.unit_id = #{unitId} "
-            + "WHERE su.deleted = 0 AND su.is_enabled = 1 AND su.owner_user_id = #{ownerId} "
+            + "WHERE su.deleted = 0 AND su.is_enabled = 1 "
+            + "AND NOT EXISTS (SELECT 1 FROM user_role other "
+            + "WHERE other.user_id = su.id AND other.role <> 'STAFF') "
             + "ORDER BY su.name, su.id")
-    List<SysUser> selectAssignableStaff(@Param("ownerId") Long ownerId, @Param("unitId") Long unitId);
+    List<SysUser> selectAssignableStaff(@Param("unitId") Long unitId);
 }

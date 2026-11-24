@@ -74,6 +74,24 @@ public class NotificationService {
         return new NotifyDtos.ReadAllResult((long) updated);
     }
 
+    /** 按业务去重键原子写入；已存在时返回 false，不覆盖原通知。 */
+    public boolean insertOnce(Notification notification) {
+        if (notification.getFeishuStatus() == null) {
+            notification.setFeishuStatus("PENDING");
+        }
+        if (notification.getFeishuRetryCount() == null) {
+            notification.setFeishuRetryCount(0);
+        }
+        if (notification.getCreatedAt() == null) {
+            notification.setCreatedAt(LocalDateTime.now());
+        }
+        try {
+            return notificationMapper.insert(notification) == 1;
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            return false;
+        }
+    }
+
     private NotifyDtos.NotificationItem toItem(Notification n) {
         return new NotifyDtos.NotificationItem(n.getId(), n.getType(), n.getTitle(), n.getContent(),
                 n.getBizType(), n.getBizId(), n.getLink(), n.getReadAt(), n.getCreatedAt());

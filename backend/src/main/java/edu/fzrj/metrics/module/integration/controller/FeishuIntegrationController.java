@@ -1,9 +1,11 @@
 package edu.fzrj.metrics.module.integration.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import edu.fzrj.metrics.common.api.PageResult;
 import edu.fzrj.metrics.common.audit.AuditLog;
 import edu.fzrj.metrics.common.idempotent.Idempotent;
 import edu.fzrj.metrics.module.integration.dto.FeishuDtos;
+import edu.fzrj.metrics.module.integration.service.FeishuBotService;
 import edu.fzrj.metrics.module.integration.service.FeishuEventService;
 import edu.fzrj.metrics.module.integration.service.FeishuSyncService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -28,11 +30,14 @@ public class FeishuIntegrationController {
 
     private final FeishuEventService feishuEventService;
     private final FeishuSyncService feishuSyncService;
+    private final FeishuBotService feishuBotService;
 
     public FeishuIntegrationController(FeishuEventService feishuEventService,
-                                       FeishuSyncService feishuSyncService) {
+                                       FeishuSyncService feishuSyncService,
+                                       FeishuBotService feishuBotService) {
         this.feishuEventService = feishuEventService;
         this.feishuSyncService = feishuSyncService;
+        this.feishuBotService = feishuBotService;
     }
 
     @Operation(summary = "飞书事件回调",
@@ -68,5 +73,31 @@ public class FeishuIntegrationController {
     @AuditLog(action = "SYNC_ORG", resourceType = "feishu", after = "#result")
     public FeishuDtos.SyncOrgView syncOrg() {
         return feishuSyncService.sync();
+    }
+
+    @Operation(summary = "双高管理平台机器人状态",
+            description = "权限：system:manage；返回连接与调度状态、提醒规则及今日推送统计，不返回任何秘密")
+    @GetMapping("/bot/status")
+    @PreAuthorize("hasAuthority('system:manage')")
+    public FeishuDtos.BotStatusView botStatus() {
+        return feishuBotService.status();
+    }
+
+    @Operation(summary = "双高管理平台机器人推送记录",
+            description = "权限：system:manage；按状态、类型、关键字、创建日期分页查询")
+    @GetMapping("/bot/logs")
+    @PreAuthorize("hasAuthority('system:manage')")
+    public PageResult<FeishuDtos.BotLogItem> botLogs(FeishuDtos.BotLogQuery query) {
+        return feishuBotService.logs(query);
+    }
+
+    @Operation(summary = "手动执行双高管理平台机器人任务",
+            description = "权限：system:manage；job=PROGRESS 进度检查 / LEADER_DIGEST 校级汇总；幂等并写审计")
+    @PostMapping("/bot/run")
+    @PreAuthorize("hasAuthority('system:manage')")
+    @Idempotent
+    @AuditLog(action = "UPDATE", resourceType = "feishu_bot", after = "#result")
+    public FeishuBotService.RunResult runBot(@RequestBody FeishuDtos.BotRunRequest request) {
+        return feishuBotService.runJob(request.job());
     }
 }

@@ -242,9 +242,9 @@ public class TaskService {
         }
         requireTaskVersion(task, request.getVersion());
         LoginUser user = SecurityUtils.getLoginUser();
-        if (!dataScopeService.isUnitScope(user) || !Objects.equals(task.getOwnerId(), user.getUserId())
+        if (!dataScopeService.isUnitScope(user)
                 || task.getUnitId() == null || !user.getUnitIds().contains(task.getUnitId())) {
-            throw new BizException(ErrorCode.DATA_SCOPE_DENIED, "只有任务负责人本人可以分配干事");
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED, "只有同学院负责人可以分配干事");
         }
         requireCurrentTask(task);
         if ("TRANSFERRED_OUT".equals(task.getStatus()) || "CLOSED".equals(task.getStatus())) {
@@ -516,7 +516,6 @@ public class TaskService {
                 && !Boolean.TRUE.equals(task.getIsHistorical())
                 && !"TRANSFERRED_OUT".equals(task.getStatus()) && !"CLOSED".equals(task.getStatus())
                 && dataScopeService.isUnitScope(user)
-                && Objects.equals(task.getOwnerId(), user.getUserId())
                 && task.getUnitId() != null && user.getUnitIds().contains(task.getUnitId());
     }
 

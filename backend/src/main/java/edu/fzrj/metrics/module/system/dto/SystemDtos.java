@@ -120,6 +120,42 @@ public final class SystemDtos {
     }
 
     @Data
+    public static class UserImportConfirmRequest {
+        @NotBlank(message = "导入批次不能为空")
+        private String importId;
+        @NotBlank(message = "统一初始密码必填")
+        @Size(min = 8, max = 64, message = "密码长度 8–64 位")
+        private String initialPassword;
+    }
+
+    public record UserImportRowResult(
+            Integer rowNum, String name, String username, String phone,
+            List<String> roles, String primaryUnitCode, List<String> otherUnitCodes,
+            Boolean valid, List<String> errors) {
+    }
+
+    public record UserImportPreviewResponse(
+            String importId, Integer totalRows, Integer validRows, Integer invalidRows,
+            List<UserImportRowResult> rows) {
+    }
+
+    public record UserImportConfirmResponse(
+            Integer createdCount,
+            @JsonSerialize(contentUsing = ToStringSerializer.class) List<Long> userIds) {
+    }
+
+    @Data
+    public static class UserImportDraftRow {
+        private Integer rowNum;
+        private String name;
+        private String username;
+        private String phone;
+        private List<String> roles = List.of();
+        private Long primaryUnitId;
+        private List<Long> unitIds = List.of();
+    }
+
+    @Data
     public static class RolesRequest {
         @NotEmpty(message = "角色列表不能为空（清空角色传停用）")
         private List<String> roles;

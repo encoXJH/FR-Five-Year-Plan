@@ -10,6 +10,7 @@ import RolePermissionPanel from './components/RolePermissionPanel.vue'
 import DictPanel from './components/DictPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import FeishuPanel from './components/FeishuPanel.vue'
+import FeishuBotPanel from './components/FeishuBotPanel.vue'
 
 const userStore = useUserStore()
 const activeTab = ref('orgUnits')
@@ -33,6 +34,7 @@ const canManageDirections = computed(() => isAdmin.value && userStore.can('syste
         <el-tab-pane label="字典" name="dicts" lazy><DictPanel /></el-tab-pane>
         <el-tab-pane label="参数配置" name="settings" lazy><SettingsPanel /></el-tab-pane>
         <el-tab-pane label="飞书集成" name="feishu" lazy><FeishuPanel /></el-tab-pane>
+        <el-tab-pane label="双高管理平台机器人" name="feishuBot" lazy><FeishuBotPanel /></el-tab-pane>
       </el-tabs>
     </el-card>
   </div>

@@ -47,6 +47,18 @@ public class FeishuConfig {
     @Value("${app.feishu.push-enabled:true}")
     private boolean pushEnabled;
 
+    /** 双高管理平台机器人业务提醒开关（数据库 feishu.botEnabled 优先，此处为缺行回退值） */
+    @Value("${app.feishu.bot-enabled:true}")
+    private boolean botEnabled;
+
+    /** 进度提醒扫描 cron，默认每天 08:45 */
+    @Value("${app.feishu.bot-progress-cron:0 45 8 * * ?}")
+    private String botProgressCron;
+
+    /** 校级待办汇总 cron，默认每天 09:00 */
+    @Value("${app.feishu.bot-leader-digest-cron:0 0 9 * * ?}")
+    private String botLeaderDigestCron;
+
     /** 首次绑定票据有效期（分钟） */
     @Value("${app.feishu.binding-ticket-expire-minutes:10}")
     private int bindingTicketExpireMinutes;

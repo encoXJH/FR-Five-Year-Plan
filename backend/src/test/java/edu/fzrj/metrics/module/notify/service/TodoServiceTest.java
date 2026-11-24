@@ -15,6 +15,7 @@ import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
+import edu.fzrj.metrics.module.training.service.TrainingReviewService;
 import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
@@ -58,6 +59,8 @@ class TodoServiceTest {
     private SettingService settingService;
     @Mock
     private TaskReadScopeService taskReadScopeService;
+    @Mock
+    private TrainingReviewService trainingReviewService;
 
     @InjectMocks
     private TodoService todoService;

@@ -20,6 +20,9 @@ import type {
   SystemSettings,
   SystemUser,
   SystemUserSaveRequest,
+  UserImportConfirmRequest,
+  UserImportConfirmResult,
+  UserImportPreviewResult,
 } from '@/types/system'
 import type { Role } from '@/types/enums'
 
@@ -81,6 +84,28 @@ export function listStaffUsers(params: StaffUserQuery): Promise<PageResult<Staff
 
 export function createUser(data: SystemUserSaveRequest): Promise<SystemUser> {
   return http.post('/users', data)
+}
+
+/** GET /users/import-template（用户批量导入模板，xlsx 文件流） */
+export function downloadUserImportTemplate(): Promise<Blob> {
+  return http.get('/users/import-template', undefined, { responseType: 'blob' })
+}
+
+/** POST /users/import-preview（multipart file，返回逐行校验结果） */
+export function previewUserImport(file: File): Promise<UserImportPreviewResult> {
+  const form = new FormData()
+  form.append('file', file)
+  return http.post('/users/import-preview', form)
+}
+
+/** POST /users/import-confirm（同一 importId 重试须复用 Idempotency-Key） */
+export function confirmUserImport(
+  data: UserImportConfirmRequest,
+  idempotencyKey: string,
+): Promise<UserImportConfirmResult> {
+  return http.post('/users/import-confirm', data, {
+    headers: { 'Idempotency-Key': idempotencyKey },
+  })
 }
 
 /** PATCH /users/{userId}（修改 / 停用，带 version） */

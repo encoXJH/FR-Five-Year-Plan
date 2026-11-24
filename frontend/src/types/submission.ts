@@ -137,6 +137,11 @@ export interface PendingReviewQuery {
   pageSize?: number
 }
 
+/** GET /reviews/history 查询参数；空状态表示全部已通过和已驳回 */
+export interface ReviewHistoryQuery extends PendingReviewQuery {
+  status?: 'APPROVED' | 'REJECTED'
+}
+
 /** GET /reviews/pending 列表项，与填报列表共用后端 ListItem 契约 */
 export type PendingReviewItem = SubmissionListItem
 

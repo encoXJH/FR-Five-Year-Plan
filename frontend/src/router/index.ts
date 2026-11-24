@@ -32,6 +32,13 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '首页', hideForRolesOnly: ['UNIT_OWNER', 'STAFF'] },
       },
       {
+        // P03 无计划上下文时由概览页选择当前账号可见的默认指标计划
+        path: 'plan-overview',
+        name: 'PlanOverviewEntry',
+        component: () => import('@/views/plans/overview.vue'),
+        meta: { title: '计划概览' },
+      },
+      {
         // P03 计划概览
         path: 'plans/:planId',
         name: 'PlanOverview',
@@ -97,6 +104,19 @@ const routes: RouteRecordRaw[] = [
         name: 'Workbench',
         component: () => import('@/views/workbench/index.vue'),
         meta: { title: '学院工作台' },
+      },
+      {
+        path: 'training',
+        name: 'TrainingSheetList',
+        component: () => import('@/views/training/list.vue'),
+        meta: { title: '职业培训填写', permissions: ['training:fill'], requiredRoles: ['UNIT_OWNER', 'STAFF'] },
+      },
+      {
+        // 职业培训详情，从填写列表、计划卡或审核中心进入
+        path: 'training/:sheetId',
+        name: 'TrainingSheetDetail',
+        component: () => import('@/views/training/index.vue'),
+        meta: { title: '职业培训信息采集', permissions: ['training:fill', 'submission:review'] },
       },
       {
         // P08 任务填报（隐藏菜单，从学院工作台任务行进入）

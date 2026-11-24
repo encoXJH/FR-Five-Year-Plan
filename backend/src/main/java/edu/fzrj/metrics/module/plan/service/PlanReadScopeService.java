@@ -10,6 +10,8 @@ import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
+import edu.fzrj.metrics.module.training.entity.TrainingSheet;
+import edu.fzrj.metrics.module.training.mapper.TrainingSheetMapper;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
@@ -31,13 +33,16 @@ public class PlanReadScopeService {
     private final IndicatorMapper indicatorMapper;
     private final TaskMapper taskMapper;
     private final TaskReadScopeService taskReadScopeService;
+    private final TrainingSheetMapper trainingSheetMapper;
 
     public PlanReadScopeService(DataScopeService dataScopeService, IndicatorMapper indicatorMapper,
-                                TaskMapper taskMapper, TaskReadScopeService taskReadScopeService) {
+                                TaskMapper taskMapper, TaskReadScopeService taskReadScopeService,
+                                TrainingSheetMapper trainingSheetMapper) {
         this.dataScopeService = dataScopeService;
         this.indicatorMapper = indicatorMapper;
         this.taskMapper = taskMapper;
         this.taskReadScopeService = taskReadScopeService;
+        this.trainingSheetMapper = trainingSheetMapper;
     }
 
     public List<Plan> filterVisiblePlans(List<Plan> plans) {
@@ -151,8 +156,21 @@ public class PlanReadScopeService {
                             .eq(Task::getDeleted, 0L)
                             .select(Task::getPlanId))
                     .forEach(task -> planIds.add(task.getPlanId()));
+            trainingSheetMapper.selectList(new LambdaQueryWrapper<TrainingSheet>()
+                            .eq(TrainingSheet::getOwnerId, user.getUserId())
+                            .in(TrainingSheet::getUnitId, user.getUnitIds())
+                            .eq(TrainingSheet::getDeleted, 0L)
+                            .select(TrainingSheet::getPlanId))
+                    .forEach(sheet -> planIds.add(sheet.getPlanId()));
         }
         if (dataScopeService.isAssignedScope(user)) {
+            if (!user.getUnitIds().isEmpty()) {
+                trainingSheetMapper.selectList(new LambdaQueryWrapper<TrainingSheet>()
+                                .in(TrainingSheet::getUnitId, user.getUnitIds())
+                                .eq(TrainingSheet::getDeleted, 0L)
+                                .select(TrainingSheet::getPlanId))
+                        .forEach(sheet -> planIds.add(sheet.getPlanId()));
+            }
             Set<Long> assignedTaskIds = taskReadScopeService.staffTaskIds(user);
             if (!assignedTaskIds.isEmpty()) {
                 taskMapper.selectList(new LambdaQueryWrapper<Task>()

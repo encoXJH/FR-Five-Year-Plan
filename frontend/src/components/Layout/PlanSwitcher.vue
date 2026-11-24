@@ -2,20 +2,48 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowDown } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { listPlans } from '@/api/plan'
+import { listTrainingSheets } from '@/api/training'
+import { useUserStore } from '@/stores/user'
 import type { PlanCard } from '@/types/plan'
+import type { TrainingSheetSummary } from '@/types/training'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 
 const plans = ref<PlanCard[]>([])
+const trainingSheets = ref<TrainingSheetSummary[]>([])
 const routePlanId = computed(() =>
   typeof route.params.planId === 'string' ? route.params.planId : '',
 )
-const currentPlan = computed(() => plans.value.find((p) => p.id === routePlanId.value) ?? null)
+const routeSheetId = computed(() =>
+  typeof route.params.sheetId === 'string' ? route.params.sheetId : '',
+)
+const currentSheet = computed(() => trainingSheets.value.find((sheet) => sheet.id === routeSheetId.value) ?? null)
+const activePlanId = computed(() => routePlanId.value || currentSheet.value?.planId || '')
+const currentPlan = computed(() => plans.value.find((plan) => plan.id === activePlanId.value) ?? null)
+const planOptions = computed(() => plans.value.filter((plan) =>
+  plan.planType !== 'TRAINING' || trainingSheets.value.some((sheet) => sheet.planId === plan.id)))
 
 async function switchPlan(planId: string): Promise<void> {
-  if (!planId || planId === routePlanId.value) return
+  if (!planId || planId === activePlanId.value) return
+  const target = plans.value.find((plan) => plan.id === planId)
+  if (!target) return
+  if (target.planType === 'TRAINING') {
+    const sheet = trainingSheets.value.find((item) => item.planId === planId)
+    if (!sheet) {
+      ElMessage.info('该计划尚未初始化培训采集表')
+      return
+    }
+    await router.replace({ path: `/training/${sheet.id}`, query: { from: 'plans' } })
+    return
+  }
+  if (route.name === 'TrainingSheetDetail') {
+    await router.replace({ path: `/plans/${planId}` })
+    return
+  }
   if (route.name) {
     await router.replace({
       name: route.name,
@@ -36,15 +64,25 @@ onMounted(() => {
       plans.value = list
     })
     .catch(() => undefined)
+  if (userStore.permissions.includes('training:fill') || userStore.permissions.includes('submission:review')) {
+    listTrainingSheets()
+      .then((list) => {
+        trainingSheets.value = list
+      })
+      .catch(() => undefined)
+  }
 })
 </script>
 
 <template>
-  <div v-if="routePlanId" class="plan-toolbar">
+  <div v-if="routePlanId || routeSheetId" class="plan-toolbar">
     <span class="plan-toolbar-label">当前计划</span>
     <el-dropdown class="plan-switch" trigger="click" @command="switchPlan">
       <span class="plan-entry" :title="currentPlan?.name ?? '当前计划'">
         <span class="plan-name">{{ currentPlan?.name ?? '当前计划' }}</span>
+        <el-tag v-if="currentPlan?.planType === 'TRAINING'" type="success" size="small" effect="plain">
+          职业培训
+        </el-tag>
         <el-tag v-if="currentPlan?.status === 'ARCHIVED'" type="info" size="small">
           已归档
         </el-tag>
@@ -56,12 +94,21 @@ onMounted(() => {
       <template #dropdown>
         <el-dropdown-menu>
           <el-dropdown-item
-            v-for="p in plans"
+            v-for="p in planOptions"
             :key="p.id"
             :command="p.id"
-            :disabled="p.id === routePlanId"
+            :disabled="p.id === activePlanId"
           >
             {{ p.name }}
+            <el-tag
+              v-if="p.planType === 'TRAINING'"
+              type="success"
+              size="small"
+              effect="plain"
+              class="plan-item-tag"
+            >
+              职业培训
+            </el-tag>
             <el-tag
               v-if="p.status === 'ARCHIVED'"
               type="info"

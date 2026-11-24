@@ -80,6 +80,38 @@ export interface SystemUserSaveRequest {
   version?: number
 }
 
+export interface UserImportPreviewRow {
+  rowNum: number
+  name: string | null
+  username: string | null
+  phone: string | null
+  roles: string[]
+  primaryUnitCode: string | null
+  otherUnitCodes: string[]
+  valid: boolean
+  errors: string[]
+}
+
+/** POST /users/import-preview 响应 */
+export interface UserImportPreviewResult {
+  importId: string
+  totalRows: number
+  validRows: number
+  invalidRows: number
+  rows: UserImportPreviewRow[]
+}
+
+export interface UserImportConfirmRequest {
+  importId: string
+  initialPassword: string
+}
+
+/** POST /users/import-confirm 响应 */
+export interface UserImportConfirmResult {
+  createdCount: number
+  userIds: string[]
+}
+
 /** 学院用户管理中的纯干事（GET /users/staff；手机号已脱敏） */
 export interface StaffUser extends SystemUser {
   ownerUserId?: string | null

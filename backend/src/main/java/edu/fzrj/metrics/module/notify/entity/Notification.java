@@ -25,7 +25,7 @@ public class Notification {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long userId;
 
-    /** 通知类型：TASK_DISTRIBUTED 任务下发 / DEADLINE_REMINDER 截止提醒 / REVIEW_RESULT 审核结果 / ADJUSTMENT_TODO 调整待办 / ADJUSTMENT_RESULT 调整结果 / WARNING 预警 */
+    /** 通知类型：TASK_DISTRIBUTED 历史任务下发或干事任务分配 / DEADLINE_REMINDER 截止提醒 / REVIEW_RESULT 审核结果 / REVIEW_TODO 审核待办汇总 / ADJUSTMENT_TODO 调整待办 / ADJUSTMENT_RESULT 调整结果 / WARNING 预警 */
     private String type;
 
     /** 标题 */
@@ -58,6 +58,9 @@ public class Notification {
 
     /** 飞书推送最近一次失败原因 */
     private String feishuLastError;
+
+    /** 业务通知去重键 */
+    private String dedupKey;
 
     /** 创建时间 */
     private LocalDateTime createdAt;

@@ -74,6 +74,8 @@ public class DictController {
             Map<String, Map<String, String>> m = new LinkedHashMap<>();
             m.put("PlanStatus", items("DRAFT:草稿", "ACTIVE:执行中", "ARCHIVED:已归档"));
             m.put("PlanSource", items("BLANK:空白", "TEMPLATE:从模板", "COPY:复制计划"));
+            m.put("PlanType", items("INDICATOR:指标计划", "TRAINING:职业培训信息采集"));
+            m.put("TrainingSheetStatus", items("DRAFT:草稿", "PENDING_REVIEW:待审核", "APPROVED:已通过", "REJECTED:已驳回"));
             m.put("SubjectType", items("SCHOOL:校级", "MAJOR_GROUP:专业群"));
             m.put("IndicatorLevel", items("A:指标", "A_PLUS:历史指标", "B:学院任务"));
             m.put("IndicatorNature", items("CONSTRAINT:约束性", "DEVELOPMENT:发展性"));
@@ -99,7 +101,7 @@ public class DictController {
             m.put("PreviewType", items("IMAGE:IMAGE", "PDF:PDF", "OFFICE:OFFICE", "VIDEO:VIDEO", "UNSUPPORTED:UNSUPPORTED"));
             m.put("ExportType", items("INDICATORS:指标体系", "TASKS:学院任务", "STATS_REPORT:统计报表", "SETTLEMENT:核算结果", "AUDIT_LOGS:操作日志", "MATERIAL_ZIP:材料 ZIP"));
             m.put("JobStatus", items("PENDING:排队中", "RUNNING:执行中", "SUCCEEDED:成功", "FAILED:失败"));
-            m.put("NotificationType", items("TASK_DISTRIBUTED:任务下发", "DEADLINE_REMINDER:截止提醒", "REVIEW_RESULT:审核结果", "ADJUSTMENT_TODO:调整待办", "ADJUSTMENT_RESULT:调整结果", "WARNING:预警"));
+            m.put("NotificationType", items("TASK_DISTRIBUTED:任务下发", "DEADLINE_REMINDER:截止提醒", "REVIEW_RESULT:审核结果", "REVIEW_TODO:审核待办汇总", "ADJUSTMENT_TODO:调整待办", "ADJUSTMENT_RESULT:调整结果", "WARNING:预警"));
             m.put("AuditAction", items("LOGIN:LOGIN", "CREATE:CREATE", "UPDATE:UPDATE", "DELETE:DELETE", "IMPORT:IMPORT", "EXPORT:EXPORT", "FINALIZE:FINALIZE", "DISTRIBUTE:DISTRIBUTE", "ACCEPT:ACCEPT", "SUBMIT:SUBMIT", "WITHDRAW:WITHDRAW", "REVIEW:REVIEW", "ADJUST_APPLY:ADJUST_APPLY", "ADJUST_DECIDE:ADJUST_DECIDE", "SETTLE:SETTLE", "UNLOCK:UNLOCK", "PERMISSION_CHANGE:PERMISSION_CHANGE", "FILE_DOWNLOAD:FILE_DOWNLOAD", "FILE_PREVIEW:FILE_PREVIEW", "SYNC_ORG:SYNC_ORG"));
             m.put("ClientType", items("WEB:WEB", "FEISHU_PC:FEISHU_PC", "FEISHU_MOBILE:FEISHU_MOBILE", "SCREEN:SCREEN"));
             m.put("PlanYearStatus", items("NOT_ACTIVATED:未激活", "ACTIVE:已激活", "LOCKED:已核算锁定"));

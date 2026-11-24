@@ -30,12 +30,14 @@ public final class RolePermissions {
     public static final String USER_CREATE = "user:create";
     public static final String MATERIAL_VIEW = "material:view";
     public static final String MATERIAL_UPLOAD = "material:upload";
+    public static final String TRAINING_FILL = "training:fill";
 
     public static final Set<String> ALL = Set.of(
             PLAN_MANAGE, INDICATOR_EDIT, ALLOCATION_EDIT, TASK_DISTRIBUTE, TASK_ACCEPT,
             SUBMISSION_SUBMIT, SUBMISSION_REVIEW, ADJUSTMENT_APPLY, ADJUSTMENT_DECIDE,
             SETTLEMENT_MANAGE, SCREEN_VIEW, STATS_VIEW,
-            AUDIT_LOG_VIEW, AUDIT_LOG_EXPORT, SYSTEM_MANAGE, USER_CREATE, MATERIAL_VIEW, MATERIAL_UPLOAD);
+            AUDIT_LOG_VIEW, AUDIT_LOG_EXPORT, SYSTEM_MANAGE, USER_CREATE, MATERIAL_VIEW, MATERIAL_UPLOAD,
+            TRAINING_FILL);
 
     private static final Map<String, Set<String>> ROLE_MAP = Map.of(
             "ADMIN", ALL,
@@ -45,7 +47,7 @@ public final class RolePermissions {
                     ADJUSTMENT_APPLY, ADJUSTMENT_DECIDE, STATS_VIEW,
                     USER_CREATE, MATERIAL_VIEW, MATERIAL_UPLOAD),
             "UNIT_OWNER", Set.of(SUBMISSION_SUBMIT, SUBMISSION_REVIEW, ADJUSTMENT_DECIDE, STATS_VIEW,
-                    USER_CREATE, MATERIAL_VIEW, MATERIAL_UPLOAD));
+                    USER_CREATE, MATERIAL_VIEW, MATERIAL_UPLOAD, TRAINING_FILL));
 
     public static final List<String> ROLE_ORDER = List.of("ADMIN", "LEADER", "SCHOOL_OWNER", "UNIT_OWNER");
 
@@ -107,7 +109,10 @@ public final class RolePermissions {
                     Set.of("LEADER", "SCHOOL_OWNER", "UNIT_OWNER"), ADMIN_ONLY),
             new PermissionDefinition(MATERIAL_UPLOAD, "材料上传", "系统与材料",
                     "上传填报或业务附件；材料库直接绑定仍由角色和业务规则限制",
-                    Set.of("SCHOOL_OWNER"), Set.of("ADMIN", "UNIT_OWNER")));
+                    Set.of("SCHOOL_OWNER"), Set.of("ADMIN", "UNIT_OWNER")),
+            new PermissionDefinition(TRAINING_FILL, "职业培训信息采集", "任务执行",
+                    "填写、提交并导出本人负责学院的职业培训信息",
+                    Set.of("UNIT_OWNER"), ADMIN_ONLY));
 
     public static List<PermissionDefinition> definitions() {
         return DEFINITIONS;

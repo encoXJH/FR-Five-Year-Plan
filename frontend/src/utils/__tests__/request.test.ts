@@ -1,5 +1,7 @@
 import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { AxiosError } from 'axios'
+import { ElMessage } from 'element-plus'
 import service, { http } from '../request'
 
 const originalCrypto = globalThis.crypto
@@ -24,7 +26,34 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
   Object.defineProperty(globalThis, 'crypto', { value: originalCrypto, configurable: true })
+})
+
+describe('Blob 文件下载错误', () => {
+  it('解析 Blob 中的业务错误并展示服务端提示', async () => {
+    const message = '暂无审核通过的培训项目可导出'
+    const messageSpy = vi.spyOn(ElMessage, 'error').mockImplementation(() => ({ close: vi.fn() }))
+    adapter.mockRejectedValueOnce(new AxiosError(
+      'Conflict',
+      'ERR_BAD_REQUEST',
+      { responseType: 'blob' } as InternalAxiosRequestConfig,
+      undefined,
+      {
+        data: new Blob([JSON.stringify({ code: 60001, message, data: null, requestId: 'blob-error' })], {
+          type: 'application/json',
+        }),
+        status: 409,
+        statusText: 'Conflict',
+        headers: {},
+        config: { responseType: 'blob' } as InternalAxiosRequestConfig,
+      },
+    ))
+
+    await expect(http.get('/training-sheets/1/export', undefined, { responseType: 'blob' }))
+      .rejects.toMatchObject({ code: 60001, message })
+    expect(messageSpy).toHaveBeenCalledWith(message)
+  })
 })
 
 describe('request 请求编号兼容', () => {

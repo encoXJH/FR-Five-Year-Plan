@@ -8,13 +8,9 @@ import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
 import edu.fzrj.metrics.module.indicator.service.IndicatorService;
-import edu.fzrj.metrics.module.notify.entity.Notification;
-import edu.fzrj.metrics.module.notify.mapper.NotificationMapper;
 import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.plan.service.PlanReadScopeService;
 import edu.fzrj.metrics.module.plan.service.PlanService;
-import edu.fzrj.metrics.module.system.entity.OrgUnit;
-import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.service.OrgUnitAdminService;
 import edu.fzrj.metrics.module.task.dto.TaskDtos;
 import edu.fzrj.metrics.module.task.entity.Task;
@@ -40,7 +36,7 @@ import java.util.stream.Collectors;
 
 /**
  * 任务下发（API 约定 15.4）：先复核指标完整性、40002、40003，再校验 50001、50002；
- * 全部通过后在一个事务内把 B 任务与指标置为 DISTRIBUTED，并给学院负责人生成站内通知。
+ * 全部通过后在一个事务内把 B 任务与指标置为 DISTRIBUTED。
  */
 @Service
 public class DistributeService {
@@ -51,9 +47,7 @@ public class DistributeService {
     private final TaskMapper taskMapper;
     private final TaskYearMapper taskYearMapper;
     private final TaskYearActivationService taskYearActivationService;
-    private final OrgUnitMapper orgUnitMapper;
     private final OrgUnitAdminService orgUnitAdminService;
-    private final NotificationMapper notificationMapper;
     private final DataScopeService dataScopeService;
     private final PlanReadScopeService planReadScopeService;
 
@@ -61,8 +55,7 @@ public class DistributeService {
                              IndicatorMapper indicatorMapper, TaskMapper taskMapper,
                              TaskYearMapper taskYearMapper,
                              TaskYearActivationService taskYearActivationService,
-                             OrgUnitMapper orgUnitMapper,
-                             OrgUnitAdminService orgUnitAdminService, NotificationMapper notificationMapper,
+                             OrgUnitAdminService orgUnitAdminService,
                              DataScopeService dataScopeService, PlanReadScopeService planReadScopeService) {
         this.planService = planService;
         this.indicatorService = indicatorService;
@@ -70,9 +63,7 @@ public class DistributeService {
         this.taskMapper = taskMapper;
         this.taskYearMapper = taskYearMapper;
         this.taskYearActivationService = taskYearActivationService;
-        this.orgUnitMapper = orgUnitMapper;
         this.orgUnitAdminService = orgUnitAdminService;
-        this.notificationMapper = notificationMapper;
         this.dataScopeService = dataScopeService;
         this.planReadScopeService = planReadScopeService;
     }
@@ -168,16 +159,12 @@ public class DistributeService {
         pending.forEach(task -> orgUnitAdminService.requireBAssignable(task.getUnitId()));
 
         LocalDateTime now = LocalDateTime.now();
-        Map<Long, OrgUnit> units = unitsOf(pending.stream().map(Task::getUnitId).toList());
-        Map<Long, Indicator> candidateById = candidates.stream()
-                .collect(Collectors.toMap(Indicator::getId, Function.identity()));
         for (Task task : pending) {
             task.setStatus("DISTRIBUTED");
             task.setDistributedAt(now);
             task.setDistributedBy(userId);
             task.setUpdatedBy(userId);
             taskMapper.updateById(task);
-            notifyOwner(plan, task, candidateById.get(task.getIndicatorId()), units.get(task.getUnitId()));
         }
         activateTaskYears(plan, userId);
         for (Indicator indicator : candidates) {
@@ -279,23 +266,6 @@ public class DistributeService {
                 });
     }
 
-    private void notifyOwner(Plan plan, Task task, Indicator indicator, OrgUnit unit) {
-        if (task.getOwnerId() == null) {
-            return;
-        }
-        Notification notification = new Notification();
-        notification.setUserId(task.getOwnerId());
-        notification.setType("TASK_DISTRIBUTED");
-        notification.setTitle("新的学院任务下发：" + task.getCode());
-        notification.setContent("【" + plan.getName() + "】" + (indicator == null ? "" : indicator.getName())
-                + "（" + task.getCode() + "）已下发到 " + (unit == null ? "本单位" : unit.getName()) + "，请在年度激活后及时填报。");
-        notification.setBizType("task");
-        notification.setBizId(task.getId());
-        notification.setFeishuStatus("PENDING");
-        notification.setFeishuRetryCount(0);
-        notificationMapper.insert(notification);
-    }
-
     private Map<Long, List<TaskYear>> taskYearsByTask(List<Long> taskIds) {
         if (taskIds.isEmpty()) {
             return Map.of();
@@ -304,16 +274,5 @@ public class DistributeService {
                         .in(TaskYear::getTaskId, taskIds)
                         .eq(TaskYear::getDeleted, 0L))
                 .stream().collect(Collectors.groupingBy(TaskYear::getTaskId));
-    }
-
-    private Map<Long, OrgUnit> unitsOf(List<Long> unitIds) {
-        List<Long> distinct = unitIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
-        if (distinct.isEmpty()) {
-            return Map.of();
-        }
-        return orgUnitMapper.selectList(new LambdaQueryWrapper<OrgUnit>()
-                        .in(OrgUnit::getId, distinct)
-                        .eq(OrgUnit::getDeleted, 0L))
-                .stream().collect(Collectors.toMap(OrgUnit::getId, Function.identity()));
     }
 }

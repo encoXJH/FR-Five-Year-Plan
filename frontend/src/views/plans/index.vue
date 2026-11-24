@@ -6,11 +6,13 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { MoreFilled, Plus } from '@element-plus/icons-vue'
 import ReasonDialog from '@/components/ReasonDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { archivePlan, createPlan, deletePlan, getPlan, listPlans, savePlanAsTemplate } from '@/api/plan'
+import { activatePlan, archivePlan, createPlan, deletePlan, listPlans, savePlanAsTemplate } from '@/api/plan'
 import { listTemplates } from '@/api/template'
+import { exportTrainingSheet, listTrainingSheets } from '@/api/training'
 import { getTodos, listNotifications, markNotificationRead } from '@/api/todo'
 import { useUserStore } from '@/stores/user'
 import { enumLabel } from '@/utils/enumLabels'
+import { triggerFileDownload } from '@/utils/file'
 import {
   formatDateTime,
   formatPercent,
@@ -24,6 +26,12 @@ import type { CreatePlanRequest, PlanCard, PlanTemplate } from '@/types/plan'
 import type { PlanSource, PlanStatus } from '@/types/enums'
 import type { TodoItem } from '@/types/todo'
 import type { NotificationItem } from '@/types/notification'
+import {
+  canArchivePlanCard,
+  canDeletePlanCard,
+  canExportTrainingPlan,
+  trainingPlanExportFilename,
+} from './planCard'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -59,9 +67,44 @@ async function loadPlans(silent = false): Promise<void> {
   }
 }
 
-function goPlan(plan: PlanCard): void {
+async function goPlan(plan: PlanCard): Promise<void> {
+  if (plan.planType === 'TRAINING') {
+    try {
+      const sheets = await listTrainingSheets(plan.id)
+      if (sheets.length === 0) {
+        ElMessage.info('该计划尚未初始化培训采集表')
+        return
+      }
+      router.push({ path: `/training/${sheets[0].id}`, query: { from: 'plans' } })
+    } catch {
+      // 拦截器已提示
+    }
+    return
+  }
   setCurrentPlan(plan)
   router.push(`/plans/${plan.id}/indicators`)
+}
+
+const exportingTraining = reactive<Record<string, boolean>>({})
+
+async function handleTrainingExport(plan: PlanCard): Promise<void> {
+  if (exportingTraining[plan.id]) return
+  exportingTraining[plan.id] = true
+  try {
+    const sheets = await listTrainingSheets(plan.id)
+    if (sheets.length === 0) {
+      ElMessage.info('该计划尚未初始化培训采集表')
+      return
+    }
+    const blob = await exportTrainingSheet(sheets[0].id)
+    const url = URL.createObjectURL(blob)
+    triggerFileDownload(url, trainingPlanExportFilename(plan.name))
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000)
+  } catch {
+    // 拦截器已提示
+  } finally {
+    exportingTraining[plan.id] = false
+  }
 }
 
 function setAsCurrent(plan: PlanCard): void {
@@ -74,12 +117,40 @@ function percentValue(rate: number | null): number {
   return rate === null ? 0 : Math.min(rate * 100, 100)
 }
 
-// ---------- 卡片 ⋯ 菜单：进入 / 复制 / 另存为模板 / 归档 ----------
+// ---------- 卡片 ⋯ 菜单：进入 / 启动执行 / 复制 / 另存为模板 / 归档 ----------
+const activating = ref(false)
+
+async function handleActivate(plan: PlanCard): Promise<void> {
+  try {
+    const effect = plan.planType === 'TRAINING'
+      ? '不会生成指标年度或任务'
+      : '全部规划年度同时激活'
+    await ElMessageBox.confirm(
+      `启动后「${plan.name}」将变为执行中，${effect}。确认启动？`,
+      '启动执行',
+      { confirmButtonText: '确认启动', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  activating.value = true
+  try {
+    const activated = await activatePlan(plan.id, plan.version)
+    if (currentPlanId.value === plan.id) setCurrentPlan(activated)
+    ElMessage.success(`「${plan.name}」已启动执行`)
+    await loadPlans()
+  } catch {
+    // 拦截器已提示
+  } finally {
+    activating.value = false
+  }
+}
+
 const copying = ref(false)
 
 async function handleCopy(plan: PlanCard): Promise<void> {
   await ElMessageBox.confirm(
-    `将复制「${plan.name}」的指标体系结构，生成一份草稿计划（不含执行数据）。确认复制？`,
+    `将复制「${plan.name}」的指标体系结构，生成一份直接激活的新计划（不含执行数据）。确认复制？`,
     '复制计划',
     { confirmButtonText: '确认复制', cancelButtonText: '取消' },
   )
@@ -144,11 +215,11 @@ function openArchiveDialog(plan: PlanCard): void {
 
 async function submitArchive(reason: string): Promise<void> {
   if (!archiveTarget.value) return
+  const target = archiveTarget.value
   archiving.value = true
   try {
-    const detail = await getPlan(archiveTarget.value.id)
-    await archivePlan(archiveTarget.value.id, detail.version, reason)
-    ElMessage.success(`「${archiveTarget.value.name}」已归档`)
+    await archivePlan(target.id, target.version, reason)
+    ElMessage.success(`「${target.name}」已归档`)
     archiveDialogVisible.value = false
     await loadPlans()
   } catch {
@@ -172,8 +243,7 @@ async function submitDelete(reason: string): Promise<void> {
   const target = deleteTarget.value
   deleting.value = true
   try {
-    const detail = await getPlan(target.id)
-    await deletePlan(target.id, detail.version, reason)
+    await deletePlan(target.id, target.version, reason)
     ElMessage.success(`「${target.name}」已删除`)
     deleteDialogVisible.value = false
     if (currentPlanId.value === target.id) {
@@ -190,6 +260,8 @@ async function submitDelete(reason: string): Promise<void> {
 
 function handleCardCommand(plan: PlanCard, command: string): void {
   if (command === 'enter') goPlan(plan)
+  else if (command === 'training-export') void handleTrainingExport(plan)
+  else if (command === 'activate') void handleActivate(plan)
   else if (command === 'current') setAsCurrent(plan)
   else if (command === 'copy') void handleCopy(plan)
   else if (command === 'template') openSaveAsTemplate(plan)
@@ -209,7 +281,6 @@ const form = reactive<CreatePlanRequest>({
   startYear: 2026,
   endYear: 2030,
   baselineYear: 2025,
-  settleDeadline: '01-15',
   source: 'BLANK',
   templateId: undefined,
   sourcePlanId: undefined,
@@ -234,7 +305,6 @@ function openCreate(): void {
   form.startYear = 2026
   form.endYear = 2030
   form.baselineYear = 2025
-  form.settleDeadline = '01-15'
   form.source = 'BLANK'
   form.templateId = undefined
   form.sourcePlanId = undefined
@@ -271,7 +341,6 @@ async function submitCreate(): Promise<void> {
       startYear: form.startYear,
       endYear: form.endYear,
       baselineYear: form.baselineYear,
-      settleDeadline: form.settleDeadline || null,
       source: form.source,
     }
     if (form.source === 'TEMPLATE') payload.templateId = form.templateId
@@ -383,7 +452,10 @@ useAutoRefresh(() => Promise.all([loadPlans(true), loadTodos(), loadNotification
     >
       <div class="card-top">
         <span class="plan-name" :title="plan.name">
-          <el-tag v-if="plan.id === currentPlanId" size="small" type="primary" effect="plain" class="current-tag">
+          <el-tag v-if="plan.planType === 'TRAINING'" size="small" type="success" effect="plain" class="current-tag">
+            {{ enumLabel('PlanType', plan.planType, userStore.enums) }}
+          </el-tag>
+          <el-tag v-else-if="plan.id === currentPlanId" size="small" type="primary" effect="plain" class="current-tag">
             当前项目
           </el-tag>
           {{ plan.name }}
@@ -400,16 +472,30 @@ useAutoRefresh(() => Promise.all([loadPlans(true), loadTodos(), loadNotification
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item command="enter">进入</el-dropdown-item>
-                <el-dropdown-item command="current">
+                <el-dropdown-item
+                  v-if="canExportTrainingPlan(plan.planType, userStore.can)"
+                  command="training-export"
+                  :disabled="exportingTraining[plan.id]"
+                >
+                  导出已通过项目
+                </el-dropdown-item>
+                <el-dropdown-item
+                  v-if="canManage && plan.status === 'DRAFT'"
+                  command="activate"
+                  :disabled="activating"
+                >
+                  启动执行
+                </el-dropdown-item>
+                <el-dropdown-item v-if="plan.planType !== 'TRAINING'" command="current">
                   {{ plan.id === currentPlanId ? '当前项目（已设）' : '设为当前项目' }}
                 </el-dropdown-item>
-                <el-dropdown-item v-if="canManage" command="copy">复制</el-dropdown-item>
-                <el-dropdown-item v-if="canManage" command="template">另存为模板</el-dropdown-item>
-                <el-dropdown-item v-if="canManage && plan.status !== 'ARCHIVED'" command="archive" divided>
+                <el-dropdown-item v-if="canManage && plan.planType !== 'TRAINING'" command="copy">复制</el-dropdown-item>
+                <el-dropdown-item v-if="canManage && plan.planType !== 'TRAINING'" command="template">另存为模板</el-dropdown-item>
+                <el-dropdown-item v-if="canArchivePlanCard(canManage, plan.status)" command="archive" divided>
                   <span class="text-danger">归档</span>
                 </el-dropdown-item>
                 <el-dropdown-item
-                  v-if="canManage && (plan.status === 'DRAFT' || plan.status === 'ARCHIVED')"
+                  v-if="canDeletePlanCard(canManage, plan.status)"
                   command="delete"
                   divided
                 >
@@ -421,9 +507,17 @@ useAutoRefresh(() => Promise.all([loadPlans(true), loadTodos(), loadNotification
         </div>
       </div>
       <div class="plan-period">
-        周期 {{ plan.startYear }}–{{ plan.endYear }} · 基线 {{ plan.baselineYear }}
+        <template v-if="plan.planType === 'TRAINING'">采集周期 {{ plan.startYear }}–{{ plan.endYear }} · 按培训项目填写</template>
+        <template v-else>周期 {{ plan.startYear }}–{{ plan.endYear }} · 基线 {{ plan.baselineYear }}</template>
       </div>
-      <div class="card-body">
+      <div v-if="plan.planType === 'TRAINING'" class="card-body">
+        <div class="plan-stats">
+          <div>职业培训项目信息采集</div>
+          <div>不涉及指标、分解下发或年度核算</div>
+          <div>更新于 {{ formatDateTime(plan.updatedAt) }}</div>
+        </div>
+      </div>
+      <div v-else class="card-body">
         <el-progress
           type="circle"
           :width="72"
@@ -519,6 +613,12 @@ useAutoRefresh(() => Promise.all([loadPlans(true), loadTodos(), loadNotification
       label-width="120px"
       class="create-form"
     >
+      <el-alert
+        type="info"
+        :closable="false"
+        class="create-auto-alert"
+        title="创建后计划立即执行，全部年度自动激活；五年任务一次下发，后续年度自动接续。"
+      />
       <el-form-item label="计划名称" prop="name">
         <el-input v-model="form.name" maxlength="100" show-word-limit placeholder="如：2026–2030 五年发展规划" />
       </el-form-item>
@@ -529,9 +629,6 @@ useAutoRefresh(() => Promise.all([loadPlans(true), loadTodos(), loadNotification
       </el-form-item>
       <el-form-item label="基线年">
         <el-input-number v-model="form.baselineYear" :min="2000" :max="2100" :controls="false" />
-      </el-form-item>
-      <el-form-item label="核算截止日">
-        <el-input v-model="form.settleDeadline" placeholder="MM-DD，如 01-15（次年）" style="width: 200px" />
       </el-form-item>
       <el-form-item v-if="form.source === 'TEMPLATE'" label="来源模板" prop="templateId">
         <el-select v-model="form.templateId" placeholder="请选择模板" style="width: 100%">
@@ -764,6 +861,10 @@ useAutoRefresh(() => Promise.all([loadPlans(true), loadTodos(), loadNotification
 .source-options {
   display: flex;
   gap: var(--space-3);
+}
+
+.create-auto-alert {
+  margin-bottom: 16px;
 }
 
 .source-card {

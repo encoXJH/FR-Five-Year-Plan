@@ -16,6 +16,7 @@ import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
+import edu.fzrj.metrics.module.training.service.TrainingReviewService;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
@@ -47,11 +48,13 @@ public class TodoService {
     private final AdjustmentService adjustmentService;
     private final SettingService settingService;
     private final TaskReadScopeService taskReadScopeService;
+    private final TrainingReviewService trainingReviewService;
 
     public TodoService(TaskMapper taskMapper, TaskYearMapper taskYearMapper,
                        PlanYearMapper planYearMapper, SubmissionMapper submissionMapper,
                        ReviewService reviewService, AdjustmentService adjustmentService,
-                       SettingService settingService, TaskReadScopeService taskReadScopeService) {
+                       SettingService settingService, TaskReadScopeService taskReadScopeService,
+                       TrainingReviewService trainingReviewService) {
         this.taskMapper = taskMapper;
         this.taskYearMapper = taskYearMapper;
         this.planYearMapper = planYearMapper;
@@ -60,6 +63,7 @@ public class TodoService {
         this.adjustmentService = adjustmentService;
         this.settingService = settingService;
         this.taskReadScopeService = taskReadScopeService;
+        this.trainingReviewService = trainingReviewService;
     }
 
     /** 填报截止日（YYYY-MM-DD）：年度 + 系统参数 plan.fillDeadline（默认 12-31，界面设计规范 A8） */
@@ -83,6 +87,7 @@ public class TodoService {
         List<NotifyDtos.TodoItem> items = new ArrayList<>();
         items.addAll(fillTodos(user));
         items.addAll(reviewTodos(user));
+        items.addAll(trainingReviewTodos(user));
         items.addAll(approvalTodos(user));
         items.sort(Comparator.comparing(NotifyDtos.TodoItem::todoSince,
                 Comparator.nullsLast(Comparator.naturalOrder())));
@@ -184,6 +189,16 @@ public class TodoService {
                     return new NotifyDtos.TodoItem("REVIEW", s.getId(), s.getPlanId(), s.getYear(),
                             task.getCode(), detail, s.getSubmittedAt(), fillDeadlineOfYear(s.getYear()));
                 })
+                .toList();
+    }
+
+    private List<NotifyDtos.TodoItem> trainingReviewTodos(LoginUser user) {
+        return trainingReviewService.actionableSummaries(user).stream()
+                .map(sheet -> new NotifyDtos.TodoItem("REVIEW", sheet.id(), sheet.planId(), null,
+                        null, sheet.planName() + ("UNIT_REVIEW".equals(sheet.currentReviewNode())
+                                ? "待学院负责人审核" : "待校级负责人审核"),
+                        sheet.submittedAt(), null, "training_sheet",
+                        "/training/" + sheet.id() + "?from=reviews"))
                 .toList();
     }
 

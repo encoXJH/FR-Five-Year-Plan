@@ -40,6 +40,14 @@ public class ReviewController {
         return reviewService.pending(query);
     }
 
+    @Operation(summary = "历史审核列表（通过 / 驳回，支持计划 / 学院 / 年度 / 关键字筛选）",
+            description = "权限：submission:review；按当前角色数据范围只读返回，点击详情仍逐 ID 校验材料访问权限")
+    @GetMapping("/reviews/history")
+    @PreAuthorize("hasAuthority('submission:review')")
+    public PageResult<SubmissionDtos.ListItem> history(@ModelAttribute SubmissionDtos.HistoryQuery query) {
+        return reviewService.history(query);
+    }
+
     @Operation(summary = "审核：{ result, comment, approvedValue? }，approvedValue 用于核减",
             description = "权限：submission:review（学院负责人初审、校级负责人终审；管理员代审 reason 选填）；"
                     + "必须带 Idempotency-Key；院审通过仅转校审，终审通过才计完成值；"

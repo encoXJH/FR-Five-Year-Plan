@@ -129,6 +129,13 @@ public final class SubmissionDtos {
         private LocalDateTime submittedAtTo;
     }
 
+    /** 历史审核列表查询：仅 APPROVED / REJECTED，空值表示全部。 */
+    @EqualsAndHashCode(callSuper = true)
+    @Data
+    public static class HistoryQuery extends PendingQuery {
+        private String status;
+    }
+
     public record FileView(
             @JsonSerialize(using = ToStringSerializer.class) Long id,
             String fileName,

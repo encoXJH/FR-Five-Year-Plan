@@ -218,7 +218,7 @@
 | `Indicator` | `directionId` | string / null | A 可空且不作为下发门槛；只能由 ADMIN 在系统管理中修改，自身或下属已下发后锁定；普通指标表单、列表和详情不展示该字段或 S 信息 |
 | `OrgUnit` | `isBAssignable` | boolean | 与既有 `isEnabled` 共同决定能否承接新 B；分解预览、保存、下发和转移接收统一校验二者均为 `true`，不得按单元编码硬编码 |
 | `Task` | `isHistorical` | boolean | 列表和详情必须返回。`true` 时目标冻结、全部执行写操作禁止，详情和审计仍按数据范围可读 |
-| `Task` | `staff` / `assignableStaff` / `canAssignStaff` | array / array / boolean | 详情返回当前干事、当前负责人可选择的本人干事及是否可编辑；无干事或无候选人返回 `[]`，不通过全校用户选项组装候选人 |
+| `Task` | `staff` / `assignableStaff` / `canAssignStaff` | array / array / boolean | 详情返回当前干事、同学院负责人可选择的本学院全部启用纯 STAFF 及是否可编辑；无干事或无候选人返回 `[]`，不通过全校用户选项组装候选人 |
 | `IndicatorDtos` | `bSummaries` | array | 指标详情的下属 B 概要数组，空时返回 `[]`；数组项使用 `level=B` 和 `isHistorical` |
 | 统计树节点 | `level` / `isHistorical` | string / boolean | B 叶节点固定返回 `level=B`，并返回 `isHistorical`；所有节点均不返回 `directionId`，统计树固定为 A → A+ → B，不包含 S 层 |
 
@@ -273,7 +273,7 @@ sequenceDiagram
 - S 总负责人只是 `direction.leaderId` 的责任关联，不新增角色或数据范围，不改变 LEADER 全校可见规则及既有调整审批链；S 配置仅限 ADMIN 的 `system:manage`。
 - 前端通过 `GET /auth/me` 获取 `roles`、`permissions`（权限码）和 `dataScope`，用来控制菜单和按钮的显示；**服务端必须对每个请求重新校验**。
 - 角色功能权限由 ADMIN 在 `GET /PUT /role-permissions` 中按四类固定角色配置。权限目录使用服务端白名单：`configurableRoles` 允许开关，`lockedRoles` 必须保留，其他角色组合禁止授予；ADMIN 的全部权限锁定。`user:create` 允许 ADMIN 取消 LEADER / SCHOOL_OWNER / UNIT_OWNER 的授权，取消后菜单、路由、`POST /users` 及 `/users/staff` 管理接口均失效。多角色仍取配置后的权限并集，服务端每次认证时重新读取，相关用户刷新页面或重新登录后更新前端展示。
-- STAFF 不作为第五类独立配置角色，动态继承 UNIT_OWNER 当前生效权限并排除 `user:create`、`submission:review`，再与本人其他角色权限取并集；STAFF + UNIT_OWNER 时保留 UNIT_OWNER 自身的 `user:create` 和 `submission:review`。任务分配不新增权限码，仅当前任务负责人本人可操作。
+- STAFF 不作为第五类独立配置角色，动态继承 UNIT_OWNER 当前生效权限并排除 `user:create`、`submission:review`，再与本人其他角色权限取并集；STAFF + UNIT_OWNER 时保留 UNIT_OWNER 自身的上述权限。`training:fill` 可由纯 STAFF 继承并限同学院培训采集，仍不获得审核权限。任务分配不新增权限码，同学院任一 UNIT_OWNER 均可操作，候选人覆盖本学院全部启用纯 STAFF，不受任务负责人和干事创建人限制。
 - UNIT_OWNER 的 `/users/staff` 管理范围不是 `createdBy` 或 `owner_user_id`，而是当前负责人 `unitIds` 与目标用户 `user_unit` 的交集，并且目标用户必须仅具有 STAFF 一个角色。跨创建人同学院干事可见可管，多角色、外院和无学院关系账号排除；角色、创建人及干事归属不可通过该组接口修改。
 - `DELETE /users/{userId}` 仅限 `system:manage`，必须携带 `version + reason`。逻辑删除后清理当前 `user_role`、`user_unit`、`task_staff` 并吊销 refreshToken，历史业务外键及姓名展示保留；当前有效负责人引用、未删除下属干事、草稿/待审填报和在途调整必须阻断，禁止删除本人及最后一名启用 ADMIN。
 - 角色权限配置只改变功能权限，不改变角色编码、数据范围、资源归属、固定调整审批链以及目标调整、材料绑定等专属业务规则。`submission:review` 授予 LEADER 和 UNIT_OWNER，UNIT_OWNER 初审归属干事填报、LEADER 终审全校填报；SCHOOL_OWNER 不参与新审核链，STAFF 不继承审核权限。
@@ -345,7 +345,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 
 - 下发、确认接收、提交填报、审核；
 - 发起调整、调整审批（`decision`）；
-- 导入确认、年度核算、五年核算、解锁；
+- 指标及用户导入确认、年度核算、五年核算、解锁；
 - 一页式分解（新建 A+ 并保存 B 草稿）；
 - 创建导出任务。
 
@@ -650,7 +650,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | `PreviewType` 预览方式 | `IMAGE` / `PDF` / `OFFICE` / `VIDEO` / `UNSUPPORTED` | — |
 | `ExportType` 导出类型 | `INDICATORS` / `TASKS` / `STATS_REPORT` / `SETTLEMENT` / `AUDIT_LOGS` / `MATERIAL_ZIP` | 指标体系 / B 任务 / 统计报表 / 核算结果 / 操作日志 / 材料 ZIP |
 | `JobStatus` 异步任务状态 | `PENDING` / `RUNNING` / `SUCCEEDED` / `FAILED` | 排队中 / 执行中 / 成功 / 失败 |
-| `NotificationType` 通知类型 | `TASK_DISTRIBUTED` / `DEADLINE_REMINDER` / `REVIEW_RESULT` / `ADJUSTMENT_TODO` / `ADJUSTMENT_RESULT` / `WARNING` | 任务下发 / 截止提醒 / 审核结果 / 调整待办 / 调整结果 / 预警 |
+| `NotificationType` 通知类型 | `TASK_DISTRIBUTED` / `DEADLINE_REMINDER` / `REVIEW_RESULT` / `REVIEW_TODO` / `ADJUSTMENT_TODO` / `ADJUSTMENT_RESULT` / `WARNING` | 任务下发 / 截止提醒 / 审核结果 / 审核待办汇总 / 调整待办 / 调整结果 / 预警 |
 | `AuditAction` 日志动作 | `LOGIN` / `CREATE` / `UPDATE` / `DELETE` / `IMPORT` / `EXPORT` / `FINALIZE` / `DISTRIBUTE` / `ACCEPT` / `SUBMIT` / `WITHDRAW` / `REVIEW` / `ADJUST_APPLY` / `ADJUST_DECIDE` / `SETTLE` / `UNLOCK` / `PERMISSION_CHANGE` / `FILE_DOWNLOAD` / `FILE_PREVIEW` / `SYNC_ORG` | — |
 | `ClientType` 客户端 | `WEB` / `FEISHU_PC` / `FEISHU_MOBILE` / `SCREEN` | — |
 | `PlanYearStatus` 计划年度状态 | `NOT_ACTIVATED` / `ACTIVE` / `LOCKED` | 未激活 / 已激活 / 已核算锁定 |
@@ -663,6 +663,8 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | `TranscodeStatus` 转码状态 | `PROCESSING` / `SUCCEEDED` / `FAILED` | 转码中 / 成功 / 失败 |
 | `UploadSessionStatus` 上传会话状态 | `UPLOADING` / `COMPLETED` / `EXPIRED` | 上传中 / 已完成 / 已过期 |
 | `FeishuEventStatus` 飞书事件处理状态 | `RECEIVED` / `PROCESSED` / `FAILED` | 已接收 / 已处理 / 处理失败 |
+
+`TASK_DISTRIBUTED` 为兼容保留的通知类型：现行学院任务下发不生成学院负责人通知；该类型用于历史任务下发记录及新增干事任务分配通知。干事分配通知链接为 `/tasks/{taskId}/submit`，去重键为 `TASK_STAFF_ASSIGNED:{taskId}:{staffId}:{taskStaffId}`。
 
 **计量类型与统计口径的合法组合**（不符合时返回 `40007`）：
 
@@ -723,7 +725,10 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | 卡片交互回调 | `POST /api/v1/integrations/feishu/card-actions`（P1，例如在消息卡片上直接“确认接收”）。校验规则同上，业务操作仍按第 4 章校验权限 |
 | 消息推送 | 由服务端主动发送应用消息或卡片。消息里的链接通过飞书 AppLink 打开平台网页应用中的对应页面（具体格式以飞书开放平台文档为准） |
 | 组织同步 | `POST /integrations/feishu/sync-org`（P1，管理员手动触发），也可以定时同步；同步结果写入审计日志 |
-| 失败处理 | 飞书接口调用失败时按指数退避最多重试 3 次；消息推送失败不影响主业务，只记录日志，站内待办照常生成 |
+| 双高管理平台机器人 | 进度提醒默认每天 08:45、校级待办汇总默认每天 09:00，时区 `Asia/Shanghai`；通知使用 `dedup_key` 持久化去重，手动执行与定时任务共用同一去重规则；任务下发不通知学院负责人，新增干事分配仅通知新增干事 |
+| 机器人调度开关 | `sys_setting` 的 `feishu.botEnabled` 为业务调度持久化开关，V41 初始 `false`；复用 `PATCH /settings` 携带当前 version。关闭时自动进度提醒和校级待办汇总均跳过，手动执行及既有通知保留；不会修改 `feishu.pushEnabled` |
+| 消息推送开关 | `sys_setting` 的 `feishu.pushEnabled` 为持久化总开关，V39 初始 `false`；复用 `PATCH /settings` 携带当前 version。关闭时轮询、单条抢占和实际发送前均停止，消息保持 PENDING；开启后待推送消息将真实发送 |
+| 失败处理 | 飞书接口调用失败时按指数退避最多重试 3 次；消息推送失败不影响主业务，只记录日志，站内待办照常生成。发送前重新检查接收人启用、删除和绑定状态；推送采用 CAS 租约及通知 ID 稳定 UUID 防止重复发送 |
 
 ---
 
@@ -785,19 +790,19 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
 | GET | `/plans` | 计划列表（首页卡片，含整体完成率） | 已登录 |
-| POST | `/plans` | 新建计划（`source`：BLANK / TEMPLATE / COPY） | `plan:manage` |
+| POST | `/plans` | 新建 INDICATOR 计划（`source`：BLANK / TEMPLATE / COPY）后直接返回 ACTIVE，全部规划年度均为 ACTIVE，并同步已下发非历史任务年度；不再需要单独启动。五年任务一次下发，后续填报年度随服务器自然年自动接续，PC 不再采集 `settleDeadline`，该字段仅历史兼容 | `plan:manage` |
 | GET | `/plans/{planId}` | 计划详情 | 已登录 |
 | PATCH | `/plans/{planId}` | 修改计划属性 | `plan:manage` |
-| POST | `/plans/{planId}/activate` | 启动执行 | `plan:manage` |
-| POST | `/plans/{planId}/archive` | 归档 | `plan:manage` |
-| DELETE | `/plans/{planId}` | 删除草稿或已归档计划（逻辑删除）；请求体 `{ version, reason }`，执行中计划须先归档 | `plan:manage` |
+| POST | `/plans/{planId}/activate` | 启动既有 DRAFT 计划；INDICATOR 同时激活全部规划年度，TRAINING 仅将状态改为 ACTIVE，不生成 plan_year、指标或任务；新建 INDICATOR 无需调用 | `plan:manage` |
+| POST | `/plans/{planId}/archive` | 归档 INDICATOR / TRAINING；培训归档后保存、提交和审核返回 30002，历史详情与导出只读保留 | `plan:manage` |
+| DELETE | `/plans/{planId}` | 删除草稿或已归档计划（逻辑删除）；请求体 `{ version, reason }`，执行中计划须先归档；TRAINING 同事务级联逻辑删除 training_sheet / training_project，保留 training_review 和审计 | `plan:manage` |
 | POST | `/plans/{planId}/save-as-template` | 另存为模板 | `plan:manage` |
 | GET | `/templates` | 模板列表 | `plan:manage` |
 | GET / PATCH | `/templates/{templateId}` | 模板详情 / 修改 | `plan:manage` |
 | POST | `/templates/{templateId}/copy` | 复制模板 | `plan:manage` |
 | POST | `/templates/{templateId}/disable` / `enable` | 停用 / 启用 | `plan:manage` |
 
-> `GET /plans` 只返回当前用户可见计划。卡片项包含 `completionRate`、`indicatorCountA`、`indicatorCountAPlus`、`taskCountB`、`createdAt`、`updatedAt`；数量与完成率仅统计当前用户可见范围，`updatedAt` 为空时回退 `createdAt`，无有效完成率基数时 `completionRate=null`。跨范围直访 `GET /plans/{planId}` 返回 `403` + `20005`。
+> `GET /plans` 只返回当前用户可见计划。卡片项包含 `planType`、`completionRate`、`indicatorCountA`、`indicatorCountAPlus`、`taskCountB`、`createdAt`、`updatedAt`、`version`；`version` 用于计划启动、归档和删除的乐观锁校验。`planType` 为 INDICATOR / TRAINING，存量默认 INDICATOR。TRAINING 的完成率和指标任务数不计算，旧指标详情、模板复制、分解下发、填报审核、调整、年度及统计操作统一拒绝，但允许通过专用状态动作 `/plans/{planId}/activate` 启动既有培训草稿。数量与完成率仅统计当前用户可见的 INDICATOR 范围，`updatedAt` 为空时回退 `createdAt`，无有效完成率基数时 `completionRate=null`。跨范围直访 `GET /plans/{planId}` 返回 `403` + `20005`。
 >
 > 模板后台快照必须保留 S 及 A 归属，供另存、复制计划和复制模板使用；模板结构、原始 JSON 预览及普通业务导出不得暴露 S 名称、`directionId` 或方向树。S 数据只由后台复制逻辑携带，不提供对外方向维度。
 
@@ -826,15 +831,15 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | GET | `/indicators/{indicatorId}/allocation` | 仅获取 A+ 的分解矩阵：合格执行单元 × 年度、历史冻结目标及合计校验结果；其他层级返回 40006 | `allocation:edit` |
 | PUT | `/indicators/{indicatorId}/allocation` | 保存非历史 B 草稿，允许合计不足或超额；已下发指标可追加合格学院，新增行须启用且 `isBAssignable=true`；历史及已生效任务必须原样保留，不得改负责人、改目标或删除 | `allocation:edit` |
 | POST ⚡ | `/plans/{planId}/distribute` | DRAFT 与历史 FINALIZED 均可直接下发；`indicatorIds` 为空时处理全部可下发 A+。下发前依次复核完整性（10001）、年度目标五年守恒（40002）、A/A+ 拆分守恒（40003）、B 分解平衡（50001）及学院负责人（50002），并再次校验单元资格；已下发指标存在追加的待下发 B 时仅处理新任务，无待办对象幂等跳过。下发成功后，计划年度已激活的年份其 `task_year.year_status` 同步置为 `IN_PROGRESS`，学院可直接填报 | `task:distribute` |
-| POST ⚡ | `/plans/{planId}/years/{year}/activate` | 管理员手动激活年度；计划启动后各年度默认未激活，激活后该年已下发任务的年度状态转为进行中，重复激活幂等。填报仅允许当前自然年份且年度未锁定；历史任务跳过且不生成待办或提醒 | `settlement:manage` |
+| POST ⚡ | `/plans/{planId}/years/{year}/activate` | 历史兼容接口；现行 INDICATOR 创建时全部年度已激活，无需逐年调用。对既有未激活年度激活后，该年已下发非历史任务转为进行中，重复激活幂等；历史任务跳过且不生成待办或提醒 | `settlement:manage` |
 | GET | `/tasks` | B 任务列表（可按 `planId`、`unitId`、`indicatorId`、`year`、`status`、`yearStatus`、`isHistorical` 过滤），每项返回 `isHistorical`；同时返回 `displayYear/latestSubmissionId/latestSubmissionStatus/fileCount/requiredFileCount` 材料摘要，供工作台定位展示年度最新填报及材料缺口；`adjustableAmount` 为 INCREMENT 展示年度剩余可调整量（目标 − 已认定 − 已冻结），其他口径为 null；学院端可见本单元全部任务，`PENDING_DISTRIBUTION` 任务仅只读展示，不能填报 | 按数据范围 |
-| GET | `/tasks/{taskId}` | B 任务详情（各年度目标、完成值、状态、`isHistorical`）；历史任务及既有记录只读可见；待下发任务可查看但不可填报；另返回当前 `staff`、负责人可选择的 `assignableStaff` 和 `canAssignStaff` | 按数据范围 |
-| PUT | `/tasks/{taskId}/staff` | 整体保存任务干事 `{ staffIds, version }`，支持多人、部分或全部移除；仅具有 UNIT_OWNER 的当前任务负责人本人可操作，候选人必须是归属本人且属于任务单元的启用干事；差异合并，实际变化时任务版本只推进一次并记录前后 staffIds 审计，不修改 owner、目标和年度状态 | 当前任务负责人 |
+| GET | `/tasks/{taskId}` | B 任务详情（各年度目标、完成值、状态、`isHistorical`）；历史任务及既有记录只读可见；待下发任务可查看但不可填报；另返回当前 `staff`、同学院负责人可选择的本学院 `assignableStaff` 和 `canAssignStaff` | 按数据范围 |
+| PUT | `/tasks/{taskId}/staff` | 整体保存任务干事 `{ staffIds, version }`，支持多人、部分或全部移除；同学院任一 UNIT_OWNER 均可操作，候选人必须是属于任务单元的启用纯 STAFF，不受任务负责人和干事创建人限制；差异合并，实际变化时任务版本只推进一次并记录前后 staffIds 审计，不修改 owner、目标和年度状态；仅新增关系通知对应干事，未变化、仅移除或校验失败不通知 | 同学院 UNIT_OWNER |
 | POST ⚡ | `/tasks/{taskId}/accept` | 历史兼容接口；现行学院角色不再分配此权限，下发后无需接收即可按年度状态填报 | `task:accept` |
 | POST ⚡ | `/task-completion-links` | 创建任务完成进度直接关联，请求 `{ taskAId, taskBId, sourceNote? }`；ID 按字符串传输，来源说明不超过 500 字；允许跨计划，双方须为非历史任务且统计口径一致，同一任务自关联或重复活跃关联返回 10001；建联后立即双向重算各年度既有审核进度 | `system:manage` |
 | GET | `/task-completion-links` | 关联列表；可选 `taskId` 过滤任一侧包含该任务的直接关联 | `system:manage` |
 
-> 任务干事整体保存示例：`PUT /tasks/1930000000000000001`，请求体 `{ "staffIds": ["1930000000000000101", "1930000000000000102"], "version": 3 }`；全部移除时 `staffIds` 传 `[]`。响应为更新后的任务详情。任务版本冲突返回 `409 + 10005`，非当前任务负责人或候选人不符合归属、启用、STAFF 角色和任务单元要求时整体拒绝，不产生部分分配。
+> 任务干事整体保存示例：`PUT /tasks/1930000000000000001`，请求体 `{ "staffIds": ["1930000000000000101", "1930000000000000102"], "version": 3 }`；全部移除时 `staffIds` 传 `[]`。响应为更新后的任务详情。任务版本冲突返回 `409 + 10005`，非同学院 UNIT_OWNER 或候选人不符合启用、纯 STAFF 和任务单元要求时整体拒绝，不产生部分分配。
 >
 > 分解预览、草稿保存、下发和转移接收必须共用同一套 `isEnabled && isBAssignable` 校验，初始前 8 个二级学院（现行编码 01–08）合格，但接口不得按编码硬编码。历史 B 不出现在可编辑矩阵行中，其目标作为只读冻结基数参与守恒；历史任务详情、目标、已审核完成值、快照和审计不删除、不重编号。
 >
@@ -855,6 +860,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | POST ⚡ | `/submissions/{submissionId}/withdraw` | 撤回非历史任务的待审核填报，UNIT_REVIEW / LEADER_REVIEW 均可；重提按填报身份从头审核；历史任务禁止 | `submission:submit` |
 | GET | `/plans/{planId}/submissions/uploads?year=` | 当年已上传指标清单：返回指标、学院、上传人、时间、状态及当前审核节点；历史 A+ 归一到所属 A 展示 | 按数据范围 |
 | GET | `/reviews/pending` | 当前用户可处理的待审核列表，支持 `reviewNode` 过滤；LEADER 仅校审，UNIT_OWNER 仅本人任务且归属干事的院审，ADMIN 可看两级，多角色取并集；不包含历史及已终止记录 | `submission:review` |
+| GET | `/reviews/history` | 历史审核只读列表，仅 APPROVED / REJECTED，支持 `status`、`planId`、`indicatorId`、`unitId`、`year`、`keyword`、`submittedAtFrom/To` 和分页，默认审核时间倒序；ADMIN / LEADER 全校，UNIT_OWNER 限本人任务及归属干事，不能按已清空的 currentReviewNode 过滤；材料详情继续使用 `/submissions/{id}` 逐 ID 校验 | `submission:review` |
 | POST ⚡ | `/submissions/{submissionId}/review` | 按数据库当前节点审核：`{ result, comment, approvedValue? }`；院审通过转校审且不计完成值，校审通过才 APPROVED 并重算；两级均可核减，校审默认继承院审认定值且不能调高；历史任务禁止 | `submission:review` |
 | POST ⚡ | `/submissions/batch-review` | 按各记录当前节点批量通过，校审沿用院审认定值；仅接受非历史任务，混入历史或已终止记录时不得写入 | `submission:review` |
 
@@ -904,11 +910,11 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | GET | `/plans/{planId}/gantt?indicatorId=` | 全计划或单 A 的 A→B 全年度甘特读模型，含进度、里程碑、FS 依赖和关键路径；按数据范围裁剪并归集历史 A+ | 已登录（按数据范围） |
 | POST ⚡ | `/plans/{planId}/task-dependencies` | 创建同计划 B 的 FS 依赖；拒绝自依赖、重复、跨计划、历史任务和成环 | `allocation:edit` |
 | DELETE | `/task-dependencies/{dependencyId}?version=` | 逻辑删除依赖，必须携带当前版本 | `allocation:edit`（按数据范围） |
-| POST ⚡ | `/plans/{planId}/years/{year}/settle` | 年度核算并锁定；跳过历史任务的批处理写入和补做生成，历史已审核值仍保留用于历史统计 | `settlement:manage` |
-| GET | `/plans/{planId}/years/{year}/settlement` | 年度核算结果查询（含逐任务明细与待补做关联；未核算时 items 为空） | 已登录（按数据范围） |
-| POST ⚡ | `/plans/{planId}/years/{year}/unlock` | 解锁年度数据（必须带 `reason`） | `settlement:manage` |
-| POST ⚡ | `/plans/{planId}/final-settle` | 五年核算；不可量化 A 不参与，历史任务不生成新的核算写入 | `settlement:manage` |
-| GET | `/plans/{planId}/final-settlement` | 五年核算结果查询（未核算返回 10003） | 已登录 |
+| POST ⚡ | `/plans/{planId}/years/{year}/settle` | 历史兼容接口，不在新计划概览提供入口；年度核算并锁定，跳过历史任务的批处理写入和补做生成，历史已审核值仍保留用于历史统计 | `settlement:manage` |
+| GET | `/plans/{planId}/years/{year}/settlement` | 历史年度核算结果查询（含逐任务明细与待补做关联；未核算时 items 为空） | 已登录（按数据范围） |
+| POST ⚡ | `/plans/{planId}/years/{year}/unlock` | 历史兼容接口，不在新计划概览提供入口；解锁年度数据必须带 `reason` | `settlement:manage` |
+| POST ⚡ | `/plans/{planId}/final-settle` | 历史兼容接口，不在新计划概览提供入口；不可量化 A 不参与，历史任务不生成新的核算写入 | `settlement:manage` |
+| GET | `/plans/{planId}/final-settlement` | 历史五年核算结果查询（未核算返回 10003） | 已登录 |
 | GET | `/screens/{planId}?year=` | 大屏聚合数据（可缓存 1–5 分钟）；A 级指标面板字段为 `byIndicator: IndicatorStat[]`，并提供 A → A+ → B 下钻，不含 S、方向筛选或方向下钻 | `screen:view` |
 | POST ⚡ | `/exports` | 创建异步导出任务：`{ type: ExportType, params }`，返回 `exportId` | 视导出类型而定 |
 | GET | `/exports/{exportId}` | 查询导出任务状态；成功时返回签名下载地址 | 任务创建人 |
@@ -981,7 +987,10 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | GET / POST | `/major-groups` | 专业群列表 / 新增 | 已登录 / `system:manage` |
 | PATCH | `/major-groups/{majorGroupId}` | 修改专业群 | `system:manage` |
 | GET | `/users` | 用户列表 | `system:manage` |
-| POST | `/users` | 分级新增用户。创建矩阵：ADMIN → ADMIN/LEADER/SCHOOL_OWNER/UNIT_OWNER；LEADER → LEADER/SCHOOL_OWNER/UNIT_OWNER；SCHOOL_OWNER → SCHOOL_OWNER/UNIT_OWNER；UNIT_OWNER → UNIT_OWNER/STAFF。创建 STAFF 时请求角色只能为 STAFF，服务端强制 `owner_user_id=当前创建人`，单元只能来自创建人；UNIT_OWNER 创建 UNIT_OWNER 时目标单元必须非空且为本人单元子集。新干事不生成任务分配 | `user:create` |
+| POST | `/users` | 分级新增用户。创建矩阵：ADMIN → ADMIN/LEADER/SCHOOL_OWNER/UNIT_OWNER；LEADER → LEADER/SCHOOL_OWNER/UNIT_OWNER；SCHOOL_OWNER → SCHOOL_OWNER/UNIT_OWNER；UNIT_OWNER → UNIT_OWNER/STAFF。创建 STAFF 时请求角色只能为 STAFF，单元字段必须留空，服务端强制 `owner_user_id=当前创建人` 并继承创建人全部学院；UNIT_OWNER 创建 UNIT_OWNER 时目标单元必须非空且为本人单元子集。新干事不生成任务分配 | `user:create` |
+| GET | `/users/import-template` | 下载用户 Excel 导入模板；含填写说明、当前可创建角色及动态单元字典，输入列为文本格式，记录 FILE_DOWNLOAD 审计 | `user:create` |
+| POST | `/users/import-preview` | multipart `file` 上传 `.xlsx≤10MB`，最多 200 个非空数据行；返回 `{ importId, totalRows, validRows, invalidRows, rows[] }`，逐行含 rowNum、六个字段、valid、errors，手机号脱敏。预览批次绑定创建人并暂存 30 分钟，不保存密码 | `user:create` |
+| POST ⚡ | `/users/import-confirm` | 请求 `{ importId, initialPassword }`，统一初始密码 8–64 位；预检有错返回 `10001`，跨创建人返回 `20005`，批次不存在或过期返回 `10003`。确认重新校验权限、角色、学院及工号，整批成功或回滚，返回 `{ createdCount, userIds }`，IMPORT 审计不记录密码 | `user:create` |
 | GET | `/users/staff` | UNIT_OWNER 查询本学院全部纯 STAFF 账号（含其他创建人），支持 unitId / keyword / isEnabled / 分页；多角色、外院及无学院关系账号排除 | `user:create` + UNIT_OWNER |
 | PATCH | `/users/staff/{userId}` | 编辑本学院纯干事的 name / phone / unitId / isEnabled，必须带 version；unitId 仅限负责人当前学院，保留负责人范围外学院关系，角色、创建人及 owner_user_id 不变；停用吊销 refreshToken | `user:create` + UNIT_OWNER |
 | POST | `/users/staff/{userId}/password-reset` | 重置本学院纯干事密码，必须带 password / version，清除登录锁定并吊销全部 refreshToken | `user:create` + UNIT_OWNER |
@@ -994,7 +1003,7 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | POST | `/users/{userId}/password-reset` | 重置用户密码（重置后吊销该用户全部 refreshToken） | `system:manage` |
 | GET | `/dicts/enums` | 全部枚举的中文名称 | 已登录 |
 | GET / PUT | `/dicts/{dictType}` | 字典（计量单位等） | 已登录 / `system:manage` |
-| GET / PATCH | `/settings` | 系统参数 | `system:manage` |
+| GET / PATCH | `/settings` | 系统参数；消息推送与机器人调度分别通过 `feishu.pushEnabled`、`feishu.botEnabled` 修改，必须携带各项当前 version，冲突返回 10005 | `system:manage` |
 | POST | `/files` | 直接上传 | 已登录 |
 | POST | `/files/multipart/init` | 初始化分片上传 | 已登录 |
 | PUT | `/files/multipart/{uploadId}/parts/{partNumber}` | LOCAL 上传分片 | 上传人 |
@@ -1005,6 +1014,8 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | GET | `/files/{fileId}/preview` | 获取预览地址 | 按业务权限 |
 | GET | `/files/{fileId}/download-url` | 获取下载地址 | 按业务权限 |
 
+> 用户导入模板字段为 `姓名、工号、手机号、角色编码、主单元编码、其他单元编码`；多角色和多单元支持中英文逗号，STAFF 单元列必须留空。统一密码只在确认请求传输，不进入 Excel、预览、暂存批次、响应或审计。用户导入是 5.8 默认逐条处理的明确例外：任一预检错误禁止确认，确认阶段任一创建失败整批回滚，不静默跳过、不覆盖已有账号。已逻辑删除同工号允许创建全新 ID。
+
 ### 15.11 集成（M13）
 
 | 方法 | 路径 | 说明 | 鉴权方式 |
@@ -1013,6 +1024,24 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | POST | `/integrations/feishu/card-actions` | 飞书卡片交互回调（P1） | 飞书签名 |
 | GET | `/integrations/feishu/status` | 飞书集成状态（配置概览 + 最近一次同步结果，P15 飞书集成 Tab） | `system:manage` |
 | POST ⚡ | `/integrations/feishu/sync-org` | 手动同步组织架构（P1） | `system:manage` |
+| GET | `/integrations/feishu/bot/status` | 双高管理平台机器人连接、开关、cron、规则及今日推送统计，不返回秘密 | `system:manage` |
+| GET | `/integrations/feishu/bot/logs` | 机器人推送记录；支持状态、通知类型、关键字、创建日期及标准分页；仅返回 `feishu.logClearedAt` 清空时点之后创建的记录，清空不删除站内通知，后续新日志正常显示 | `system:manage` |
+| POST ⚡ | `/integrations/feishu/bot/run` | 手动执行 `{ job: PROGRESS / LEADER_DIGEST }`，返回扫描、新增和去重数量；写 UPDATE 审计 | `system:manage` |
+
+### 15.12 职业培训信息采集（TRAINING）
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| POST ⚡ | `/training-plans` | 创建 DRAFT 培训计划及采集表 `{ name, startYear, endYear, baselineYear, unitId, ownerId }`；同名有效 TRAINING 计划重复调用返回已有采集表，不生成指标、任务或 plan_year | `system:manage` |
+| GET | `/training-sheets` | 当前用户可读取的采集表，支持 planId 过滤；指定 UNIT_OWNER 仅限本人负责表，纯 STAFF 按同学院 unitIds 访问，LEADER 全校读取以支持计划卡和审核详情 | ADMIN、LEADER + `submission:review`、指定负责人或同学院纯 STAFF + `training:fill` |
+| GET | `/training-reviews/pending` | 分页返回当前用户实际可处理的培训待审，支持 planId、unitId、reviewNode；院审排除本人提交 | `submission:review` + 当前节点数据范围 |
+| GET | `/training-sheets/{sheetId}` | 返回 `{ sheet, fields, projects, reviews }`；sheet 为项目状态汇总，projects 逐项含 status、submitterRole、currentReviewNode、revisionNo、canEdit、canReview、reviewComment，reviews 含 projectId/rowNo | `training:fill` 或 `submission:review`，逐 ID 校验范围 |
+| PUT | `/training-sheets/{sheetId}/projects` | 整体保存 `{ version, projects[] }`；草稿允许缺项，仅 DRAFT/REJECTED 项目可写，待审和已通过项目不能修改或删除，实际变化推进 version | 指定负责人或同学院纯 STAFF + `training:fill` |
+| POST ⚡ | `/training-sheets/{sheetId}/submit` | 提交 `{ version, projectIds[] }`，至少选择一个完整且可编辑项目；仅选中项目进入审核，其他草稿继续编辑。纯 STAFF 进入 UNIT_REVIEW，UNIT_OWNER/管理员代填进入 LEADER_REVIEW，各项目 revisionNo+1 | 指定负责人或同学院纯 STAFF + `training:fill` |
+| POST ⚡ | `/training-sheets/{sheetId}/review` | 审核 `{ projectId,version,result,comment?,reason? }`；院审通过仅将该项目转校审，校审通过项目为 APPROVED 且 plan 置 ACTIVE；任一级驳回该项目为 REJECTED，意见必填（60004） | 同学院 UNIT_OWNER 院审、LEADER 校审、ADMIN 按节点代审 + `submission:review` |
+| GET | `/training-sheets/{sheetId}/export` | 按原模板导出 57 列、四行复合表头，从第 5 行写项目；后端仅导出 APPROVED 项目，无已通过项目返回 60001，记录导出和下载审计 | `training:fill` 或 `submission:review`，逐 ID 校验范围 |
+
+> 项目状态为 DRAFT / PENDING_REVIEW / APPROVED / REJECTED，待审节点为 UNIT_REVIEW / LEADER_REVIEW。PENDING_REVIEW 和 APPROVED 项目只读，REJECTED 项目可修改重提并重新走完整审核链；未选中或其他状态项目不受本次提交影响。sheet.status 仅为汇总：任一项目待审为 PENDING_REVIEW，非空且全部通过为 APPROVED，无待审且存在驳回为 REJECTED，其他为 DRAFT；待审项目节点不一致时 sheet.currentReviewNode=null。培训审核记录关联 projectId 并写入只追加 training_review，不写普通 submission。项目数据使用 c01–c57 稳定键，`c14=c32=Σ(c18:c31)`、`c44=Σ(c33:c43)`、`c54=Σ(c45:c53)`，合计及到账经费由后端 BigDecimal 重算，填报人取当前用户。保存、提交和审核带 version，创建、提交和审核必须幂等；越权返回 20005，版本冲突返回 10005。TRAINING 不进入指标计划或年度核算流程。
 
 ---
 

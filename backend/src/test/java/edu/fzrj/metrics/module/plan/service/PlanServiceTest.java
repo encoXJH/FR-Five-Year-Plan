@@ -28,6 +28,11 @@ import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.module.task.service.TaskYearActivationService;
+import edu.fzrj.metrics.module.training.entity.TrainingProject;
+import edu.fzrj.metrics.module.training.entity.TrainingSheet;
+import edu.fzrj.metrics.module.training.mapper.TrainingProjectMapper;
+import edu.fzrj.metrics.module.training.mapper.TrainingReviewMapper;
+import edu.fzrj.metrics.module.training.mapper.TrainingSheetMapper;
 import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
@@ -35,6 +40,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -93,6 +100,12 @@ class PlanServiceTest {
     private ObjectMapper objectMapper;
     @Mock
     private PlanReadScopeService planReadScopeService;
+    @Mock
+    private TrainingSheetMapper trainingSheetMapper;
+    @Mock
+    private TrainingProjectMapper trainingProjectMapper;
+    @Mock
+    private TrainingReviewMapper trainingReviewMapper;
 
     @InjectMocks
     private PlanService planService;
@@ -106,6 +119,8 @@ class PlanServiceTest {
         TableInfoHelper.initTableInfo(assistant, Task.class);
         TableInfoHelper.initTableInfo(assistant, TaskYear.class);
         TableInfoHelper.initTableInfo(assistant, OrgUnit.class);
+        TableInfoHelper.initTableInfo(assistant, TrainingSheet.class);
+        TableInfoHelper.initTableInfo(assistant, TrainingProject.class);
     }
 
     @BeforeEach
@@ -192,7 +207,45 @@ class PlanServiceTest {
     }
 
     @Test
-    void 启动计划后年度默认未激活等待管理员手动激活() {
+    void 新建计划后直接激活全部年度() {
+        Plan stored = draftPlan();
+        stored.setId(null);
+        stored.setVersion(0);
+        doAnswer(invocation -> {
+            Plan inserted = invocation.getArgument(0);
+            inserted.setId(1L);
+            stored.setId(1L);
+            stored.setName(inserted.getName());
+            stored.setStartYear(inserted.getStartYear());
+            stored.setEndYear(inserted.getEndYear());
+            stored.setBaselineYear(inserted.getBaselineYear());
+            stored.setSettleDeadline(inserted.getSettleDeadline());
+            stored.setStatus(inserted.getStatus());
+            stored.setSource(inserted.getSource());
+            return null;
+        }).when(planMapper).insert(any(Plan.class));
+        when(planMapper.selectOne(any())).thenReturn(stored);
+        when(planMapper.updateById(any(Plan.class))).thenReturn(1);
+        when(planYearMapper.selectList(any())).thenReturn(List.of());
+        PlanDtos.CreateRequest request = new PlanDtos.CreateRequest();
+        request.setName("自动激活计划");
+        request.setStartYear(2026);
+        request.setEndYear(2030);
+        request.setBaselineYear(2025);
+        request.setSource("BLANK");
+
+        PlanDtos.Detail result = planService.create(request);
+
+        ArgumentCaptor<PlanYear> years = ArgumentCaptor.forClass(PlanYear.class);
+        verify(planYearMapper, times(5)).insert(years.capture());
+        assertTrue(years.getAllValues().stream().allMatch(year -> "ACTIVE".equals(year.getStatus())));
+        assertTrue(years.getAllValues().stream().allMatch(year -> year.getActivatedAt() != null));
+        assertEquals("ACTIVE", result.status());
+        verify(taskYearActivationService).syncPlan(1L, 99L);
+    }
+
+    @Test
+    void 启动既有草稿计划时直接激活全部年度() {
         Plan plan = draftPlan();
         when(planMapper.selectOne(any())).thenReturn(plan);
         when(planMapper.updateById(any(Plan.class))).thenReturn(1);
@@ -201,10 +254,26 @@ class PlanServiceTest {
 
         ArgumentCaptor<PlanYear> years = ArgumentCaptor.forClass(PlanYear.class);
         verify(planYearMapper, times(5)).insert(years.capture());
-        assertTrue(years.getAllValues().stream().allMatch(year -> "NOT_ACTIVATED".equals(year.getStatus())));
-        assertTrue(years.getAllValues().stream().allMatch(year -> year.getActivatedAt() == null));
-        assertTrue(years.getAllValues().stream().allMatch(year -> year.getActivatedBy() == null));
+        assertTrue(years.getAllValues().stream().allMatch(year -> "ACTIVE".equals(year.getStatus())));
+        assertTrue(years.getAllValues().stream().allMatch(year -> year.getActivatedAt() != null));
+        assertTrue(years.getAllValues().stream().allMatch(year -> year.getActivatedBy() != null));
         assertEquals("ACTIVE", plan.getStatus());
+    }
+
+    @Test
+    void 启动职业培训草稿计划不生成指标年度或任务() {
+        Plan plan = draftPlan();
+        plan.setPlanType("TRAINING");
+        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(planMapper.updateById(any(Plan.class))).thenReturn(1);
+
+        PlanDtos.Detail result = planService.activate(1L, 2);
+
+        assertEquals("ACTIVE", result.status());
+        assertEquals("TRAINING", result.planType());
+        assertTrue(result.years().isEmpty());
+        verify(planYearMapper, never()).insert(any(PlanYear.class));
+        verifyNoInteractions(taskYearActivationService);
     }
 
     @Test
@@ -302,6 +371,37 @@ class PlanServiceTest {
         BizException error = assertThrows(BizException.class, () -> planService.detail(1L));
 
         assertEquals(20005, error.getErrorCode().getCode());
+    }
+
+    @Test
+    void 职业培训采集计划列表不查询指标任务或完成率() {
+        Plan plan = new Plan();
+        plan.setId(1L);
+        plan.setName("职业培训信息采集");
+        plan.setPlanType("TRAINING");
+        when(planMapper.selectList(any())).thenReturn(List.of(plan));
+        when(planReadScopeService.filterVisiblePlans(any())).thenReturn(List.of(plan));
+
+        PlanDtos.ListItem item = planService.list(null).get(0);
+
+        assertEquals("TRAINING", item.planType());
+        assertNull(item.completionRate());
+        assertEquals(0L, item.indicatorCountA());
+        assertEquals(0L, item.taskCountB());
+        verifyNoInteractions(indicatorMapper, taskMapper, taskYearMapper);
+    }
+
+    @Test
+    void 职业培训采集计划不能进入指标计划详情和操作() {
+        Plan plan = new Plan();
+        plan.setId(1L);
+        plan.setPlanType("TRAINING");
+        when(planMapper.selectOne(any())).thenReturn(plan);
+
+        BizException error = assertThrows(BizException.class, () -> planService.detail(1L));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        verify(planReadScopeService, never()).requireVisible(any());
     }
 
     @Test
@@ -516,10 +616,55 @@ class PlanServiceTest {
     }
 
     @Test
+    void 培训计划按版本归档并执行数据范围校验() {
+        Plan plan = draftPlan();
+        plan.setPlanType("TRAINING");
+        plan.setStatus("ACTIVE");
+        when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
+        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(planMapper.updateById(any(Plan.class))).thenReturn(1);
+
+        PlanDtos.Detail result = planService.archive(1L, 2);
+
+        assertEquals("ARCHIVED", result.status());
+        assertEquals("TRAINING", result.planType());
+        assertEquals(99L, plan.getUpdatedBy());
+        verify(planReadScopeService).requireVisible(plan);
+        verify(planMapper).selectByIdForUpdate(1L);
+    }
+
+    @Test
+    void 重复归档返回状态错误() {
+        Plan plan = draftPlan();
+        plan.setPlanType("TRAINING");
+        plan.setStatus("ARCHIVED");
+        when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
+
+        BizException error = assertThrows(BizException.class, () -> planService.archive(1L, 2));
+
+        assertEquals(30001, error.getErrorCode().getCode());
+        verify(planMapper, never()).updateById(any(Plan.class));
+    }
+
+    @Test
+    void 归档版本冲突时不写入() {
+        Plan plan = draftPlan();
+        plan.setPlanType("TRAINING");
+        plan.setStatus("ACTIVE");
+        when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
+
+        BizException error = assertThrows(BizException.class, () -> planService.archive(1L, 1));
+
+        assertEquals(10005, error.getErrorCode().getCode());
+        assertEquals("ACTIVE", plan.getStatus());
+        verify(planMapper, never()).updateById(any(Plan.class));
+    }
+
+    @Test
     void 已归档计划按版本逻辑删除并保留历史数据() {
         Plan plan = draftPlan();
         plan.setStatus("ARCHIVED");
-        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
         when(planMapper.updateById(any(Plan.class))).thenReturn(1);
         PlanDtos.DeleteRequest request = new PlanDtos.DeleteRequest();
         request.setVersion(2);
@@ -536,7 +681,7 @@ class PlanServiceTest {
     @Test
     void 草稿计划可以逻辑删除() {
         Plan plan = draftPlan();
-        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
         when(planMapper.updateById(any(Plan.class))).thenReturn(1);
         PlanDtos.DeleteRequest request = new PlanDtos.DeleteRequest();
         request.setVersion(2);
@@ -548,10 +693,11 @@ class PlanServiceTest {
     }
 
     @Test
-    void 执行中计划必须先归档再删除() {
+    void 执行中培训计划必须先归档再删除() {
         Plan plan = draftPlan();
+        plan.setPlanType("TRAINING");
         plan.setStatus("ACTIVE");
-        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
         PlanDtos.DeleteRequest request = new PlanDtos.DeleteRequest();
         request.setVersion(2);
         request.setReason("清理测试计划");
@@ -561,13 +707,14 @@ class PlanServiceTest {
         assertEquals(30001, error.getErrorCode().getCode());
         assertNull(plan.getDeleted());
         verify(planMapper, never()).updateById(any(Plan.class));
+        verifyNoInteractions(trainingSheetMapper, trainingProjectMapper, trainingReviewMapper);
     }
 
     @Test
     void 删除计划版本冲突时不写入() {
         Plan plan = draftPlan();
         plan.setStatus("ARCHIVED");
-        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
         PlanDtos.DeleteRequest request = new PlanDtos.DeleteRequest();
         request.setVersion(1);
         request.setReason("清理测试计划");
@@ -577,6 +724,39 @@ class PlanServiceTest {
         assertEquals(10005, error.getErrorCode().getCode());
         assertNull(plan.getDeleted());
         verify(planMapper, never()).updateById(any(Plan.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"DRAFT", "ARCHIVED"})
+    void 删除培训计划级联逻辑删除三表并保留审核记录(String status) {
+        Plan plan = draftPlan();
+        plan.setPlanType("TRAINING");
+        plan.setStatus(status);
+        TrainingSheet sheet = new TrainingSheet();
+        sheet.setId(11L);
+        sheet.setPlanId(1L);
+        TrainingProject project = new TrainingProject();
+        project.setId(101L);
+        project.setSheetId(11L);
+        when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
+        when(trainingSheetMapper.selectList(any())).thenReturn(List.of(sheet));
+        when(trainingProjectMapper.selectList(any())).thenReturn(List.of(project));
+        when(planMapper.updateById(any(Plan.class))).thenReturn(1);
+        PlanDtos.DeleteRequest request = new PlanDtos.DeleteRequest();
+        request.setVersion(2);
+        request.setReason("清理培训计划");
+
+        planService.delete(1L, request);
+
+        assertEquals(1L, plan.getDeleted());
+        assertEquals(11L, sheet.getDeleted());
+        assertEquals(101L, project.getDeleted());
+        assertEquals(99L, plan.getUpdatedBy());
+        assertEquals(99L, sheet.getUpdatedBy());
+        assertEquals(99L, project.getUpdatedBy());
+        verify(trainingSheetMapper).updateById(sheet);
+        verify(trainingProjectMapper).updateById(project);
+        verifyNoInteractions(trainingReviewMapper);
     }
 
     @Test

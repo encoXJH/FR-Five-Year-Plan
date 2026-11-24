@@ -4,6 +4,10 @@ export type PlanStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED'
 
 export type PlanSource = 'BLANK' | 'TEMPLATE' | 'COPY'
 
+export type PlanType = 'INDICATOR' | 'TRAINING'
+
+export type TrainingSheetStatus = 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED'
+
 export type SubjectType = 'SCHOOL' | 'MAJOR_GROUP'
 
 export type IndicatorLevel = 'A' | 'A_PLUS' | 'B'
@@ -65,6 +69,7 @@ export type NotificationType =
   | 'TASK_DISTRIBUTED'
   | 'DEADLINE_REMINDER'
   | 'REVIEW_RESULT'
+  | 'REVIEW_TODO'
   | 'ADJUSTMENT_TODO'
   | 'ADJUSTMENT_RESULT'
   | 'WARNING'

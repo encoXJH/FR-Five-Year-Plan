@@ -77,6 +77,9 @@ app:
     accounts-url: ${FEISHU_ACCOUNTS_URL:https://accounts.feishu.cn}
     push-enabled: ${FEISHU_PUSH_ENABLED:true}
     push-interval-ms: ${FEISHU_PUSH_INTERVAL_MS:60000}
+    bot-enabled: ${FEISHU_BOT_ENABLED:true}
+    bot-progress-cron: ${FEISHU_BOT_PROGRESS_CRON:0 45 8 * * ?}
+    bot-leader-digest-cron: ${FEISHU_BOT_LEADER_DIGEST_CRON:0 0 9 * * ?}
     push-initial-delay-ms: ${FEISHU_PUSH_INITIAL_DELAY_MS:15000}
     push-batch-size: ${FEISHU_PUSH_BATCH_SIZE:50}
     connect-timeout-ms: ${FEISHU_CONNECT_TIMEOUT_MS:3000}

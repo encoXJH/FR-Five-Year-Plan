@@ -1,6 +1,8 @@
 package edu.fzrj.metrics.module.task.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
@@ -55,39 +57,51 @@ public class TaskYear {
     private BigDecimal frozenAmount;
 
     /** 本任务自身审核通过填报计算的年度完成值 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal ownActualValue;
 
     /** 本任务自身 RATIO 口径分子 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal ownActualNumerator;
 
     /** 本任务自身 RATIO 口径分母 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal ownActualDenominator;
 
     /** 本任务自身 STOCK / GROWTH 口径最新审核通过总量 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal ownActualTotal;
 
     /** 有效缓存：自身与直接关联候选选择后的年度完成值 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal actualValue;
 
     /** 有效缓存：RATIO 口径分子 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal actualNumerator;
 
     /** 有效缓存：RATIO 口径分母 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal actualDenominator;
 
     /** 有效缓存：STOCK / GROWTH 口径最新完成总量 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal actualTotal;
 
     /** 缓存：是否达标 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Boolean isAchieved;
 
     /** 缓存：完成率（小数） */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal completionRate;
 
     /** 是否由直接关联任务同步达标 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Boolean linkedAchieved;
 
     /** 当前有效完成值的直接关联来源任务年度；自身值时为空 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     @JsonSerialize(using = ToStringSerializer.class)
     private Long linkedSourceTaskYearId;
 

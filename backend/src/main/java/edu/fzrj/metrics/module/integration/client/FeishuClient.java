@@ -138,10 +138,21 @@ public class FeishuClient {
 
     /** 发送互动卡片消息（receive_id_type=open_id）；content 为卡片 JSON 字符串；成功返回 true */
     public boolean sendCardMessage(String openId, String cardJson) {
+        return sendCardMessage(openId, cardJson, null);
+    }
+
+    /** 使用稳定 UUID 发送，飞书可在超时重试时识别同一消息。 */
+    public boolean sendCardMessage(String openId, String cardJson, String uuid) {
         try {
+            Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("receive_id", openId);
+            payload.put("msg_type", "interactive");
+            payload.put("content", cardJson);
+            if (uuid != null && !uuid.isBlank()) {
+                payload.put("uuid", uuid);
+            }
             JsonNode body = post("/open-apis/im/v1/messages?receive_id_type=open_id",
-                    Map.of("receive_id", openId, "msg_type", "interactive", "content", cardJson),
-                    "Bearer " + tenantAccessToken());
+                    payload, "Bearer " + tenantAccessToken());
             return body != null;
         } catch (Exception e) {
             log.warn("飞书消息发送失败 openId={}：{}", openId, e.getMessage());

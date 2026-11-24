@@ -22,6 +22,7 @@ vi.mock('vue-router', async (importOriginal) => {
 })
 
 import router from './index'
+import { menuGroups } from '@/components/Layout/menu'
 
 vi.stubGlobal('document', { title: '' })
 
@@ -98,6 +99,28 @@ describe('干事与用户添加路由权限', () => {
     await router.push('/403')
     await router.push('/reviews')
     expect(router.currentRoute.value.path).toBe('/403')
+  })
+
+  it('职业培训填写位于学院工作台下，干事可填写且校领导仅进入审核详情', async () => {
+    const taskItems = menuGroups.find((group) => group.key === 'task')?.items ?? []
+    const workbenchIndex = taskItems.findIndex((item) => item.path === '/workbench')
+    expect(taskItems[workbenchIndex + 1]).toMatchObject({ path: '/training', title: '职业培训填写' })
+
+    userStore.roles = ['STAFF']
+    userStore.permissions = ['training:fill']
+    userStore.homePath = '/workbench'
+    await router.push('/training')
+    expect(router.currentRoute.value.path).toBe('/training')
+    await router.push('/training/123')
+    expect(router.currentRoute.value.path).toBe('/training/123')
+
+    userStore.roles = ['LEADER']
+    userStore.permissions = ['submission:review']
+    await router.push('/403')
+    await router.push('/training')
+    expect(router.currentRoute.value.path).toBe('/403')
+    await router.push('/training/123')
+    expect(router.currentRoute.value.path).toBe('/training/123')
   })
 
   it('纯干事根路径进入我的任务工作台', async () => {

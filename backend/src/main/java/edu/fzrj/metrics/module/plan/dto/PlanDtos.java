@@ -96,6 +96,7 @@ public final class PlanDtos {
             Integer baselineYear,
             String status,
             String source,
+            String planType,
             LocalDateTime finalizedAt,
             /** 当前用户可见范围内，量化 A 指标五年累计完成率的算术平均 */
             BigDecimal completionRate,
@@ -103,7 +104,8 @@ public final class PlanDtos {
             Long indicatorCountA,
             Long indicatorCountAPlus,
             Long taskCountB,
-            LocalDateTime updatedAt) {
+            LocalDateTime updatedAt,
+            Integer version) {
     }
 
     /** 计划详情 */
@@ -116,6 +118,7 @@ public final class PlanDtos {
             String settleDeadline,
             String status,
             String source,
+            String planType,
             @JsonSerialize(using = ToStringSerializer.class) Long templateId,
             @JsonSerialize(using = ToStringSerializer.class) Long sourcePlanId,
             Boolean isReceiverConfirmRequired,

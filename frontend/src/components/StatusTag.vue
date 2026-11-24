@@ -30,6 +30,12 @@ const STATUS_TAG: Record<string, Record<string, TagStyle>> = {
     REJECTED: { type: 'danger' },
     WITHDRAWN: { type: 'info' },
   },
+  TrainingSheetStatus: {
+    DRAFT: { type: 'info', effect: 'plain' },
+    PENDING_REVIEW: { type: 'warning' },
+    APPROVED: { type: 'success' },
+    REJECTED: { type: 'danger' },
+  },
   ReviewNode: {
     UNIT_REVIEW: { type: 'warning' },
     LEADER_REVIEW: { type: 'primary' },
@@ -127,6 +133,12 @@ const DEFAULT_LABELS: Record<string, Record<string, string>> = {
     REJECTED: '已驳回',
     WITHDRAWN: '已撤回',
   },
+  TrainingSheetStatus: {
+    DRAFT: '草稿',
+    PENDING_REVIEW: '待审核',
+    APPROVED: '已通过',
+    REJECTED: '已驳回',
+  },
   ReviewNode: {
     UNIT_REVIEW: '学院负责人审核',
     LEADER_REVIEW: '校级负责人审核',
@@ -194,6 +206,10 @@ const style = computed<TagStyle>(() => STATUS_TAG[props.kind]?.[props.value] ?? 
 const label = computed(() => {
   if (props.kind === 'SubmissionStatus') {
     return submissionStatusLabel(props.value, props.reviewNode, userStore.enums)
+  }
+  if (props.kind === 'TrainingSheetStatus' && props.value === 'PENDING_REVIEW' && props.reviewNode) {
+    const node = userStore.enums.ReviewNode?.[props.reviewNode] ?? DEFAULT_LABELS.ReviewNode[props.reviewNode]
+    return `待${node}`
   }
   return userStore.enums[props.kind]?.[props.value]
     ?? DEFAULT_LABELS[props.kind]?.[props.value]

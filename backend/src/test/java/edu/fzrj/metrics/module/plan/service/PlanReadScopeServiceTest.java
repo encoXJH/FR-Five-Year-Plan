@@ -10,6 +10,8 @@ import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
+import edu.fzrj.metrics.module.training.entity.TrainingSheet;
+import edu.fzrj.metrics.module.training.mapper.TrainingSheetMapper;
 import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
@@ -43,6 +45,8 @@ class PlanReadScopeServiceTest {
     private TaskMapper taskMapper;
     @Mock
     private TaskReadScopeService taskReadScopeService;
+    @Mock
+    private TrainingSheetMapper trainingSheetMapper;
 
     @InjectMocks
     private PlanReadScopeService planReadScopeService;
@@ -52,6 +56,7 @@ class PlanReadScopeServiceTest {
         MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(), "");
         TableInfoHelper.initTableInfo(assistant, Indicator.class);
         TableInfoHelper.initTableInfo(assistant, Task.class);
+        TableInfoHelper.initTableInfo(assistant, TrainingSheet.class);
     }
 
     @AfterEach
@@ -82,6 +87,28 @@ class PlanReadScopeServiceTest {
                 .map(Plan::getId).toList());
         BizException error = assertThrows(BizException.class,
                 () -> planReadScopeService.requireVisible(plan(1L)));
+        assertEquals(20005, error.getErrorCode().getCode());
+    }
+
+    @Test
+    void 培训负责人可见并直接读取本人采集计划() {
+        login("UNIT_OWNER", 14L);
+        when(dataScopeService.isUnitScope(any())).thenReturn(true);
+        TrainingSheet sheet = new TrainingSheet();
+        sheet.setPlanId(3L);
+        sheet.setOwnerId(99L);
+        sheet.setUnitId(14L);
+        when(trainingSheetMapper.selectList(any())).thenReturn(List.of(sheet));
+        Plan training = plan(3L);
+        training.setPlanType("TRAINING");
+
+        assertEquals(List.of(3L), planReadScopeService.filterVisiblePlans(List.of(plan(1L), training))
+                .stream().map(Plan::getId).toList());
+        planReadScopeService.requireVisible(training);
+        Plan otherTraining = plan(4L);
+        otherTraining.setPlanType("TRAINING");
+        BizException error = assertThrows(BizException.class,
+                () -> planReadScopeService.requireVisible(otherTraining));
         assertEquals(20005, error.getErrorCode().getCode());
     }
 

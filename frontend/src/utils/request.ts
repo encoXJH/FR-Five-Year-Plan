@@ -187,7 +187,14 @@ service.interceptors.response.use(
     }
 
     const silent = isSilent(config)
-    const body = response.data as Partial<ApiResponse<unknown>> | undefined
+    let body = response.data as Partial<ApiResponse<unknown>> | undefined
+    if (response.data instanceof Blob) {
+      try {
+        body = JSON.parse(await response.data.text()) as Partial<ApiResponse<unknown>>
+      } catch {
+        body = undefined
+      }
+    }
     const code = typeof body?.code === 'number' ? body.code : undefined
     const message = typeof body?.message === 'string' ? body.message : ''
     const requestId = typeof body?.requestId === 'string' ? body.requestId : ''

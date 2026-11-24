@@ -34,10 +34,14 @@ import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Path;
+import jakarta.validation.Validator;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -50,6 +54,7 @@ import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -63,6 +68,7 @@ class UserAdminServiceTest {
     @Mock private RefreshTokenMapper refreshTokenMapper;
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private UserUnitService userUnitService;
+    @Mock private Validator validator;
     @InjectMocks private UserAdminService userAdminService;
 
     private MockedStatic<SecurityUtils> security;
@@ -97,11 +103,12 @@ class UserAdminServiceTest {
     @ParameterizedTest
     @MethodSource("allowedCreationMatrix")
     void 创建矩阵逐角色校验允许项(String creatorRole, String targetRole) {
-        List<Long> unitIds = "UNIT_OWNER".equals(creatorRole) ? List.of(101L) : List.of();
-        mockCreator(creatorRole, unitIds);
-        mockSuccessfulCreate(targetRole, unitIds);
+        List<Long> creatorUnitIds = "UNIT_OWNER".equals(creatorRole) ? List.of(101L) : List.of();
+        List<Long> requestUnitIds = "STAFF".equals(targetRole) ? List.of() : creatorUnitIds;
+        mockCreator(creatorRole, creatorUnitIds);
+        mockSuccessfulCreate(targetRole, creatorUnitIds);
 
-        SystemDtos.UserItem result = userAdminService.create(createRequest(targetRole, unitIds));
+        SystemDtos.UserItem result = userAdminService.create(createRequest(targetRole, requestUnitIds));
 
         assertEquals(List.of(targetRole), result.roles());
         assertEquals("STAFF".equals(targetRole) ? 99L : null, result.ownerUserId());
@@ -152,6 +159,50 @@ class UserAdminServiceTest {
     }
 
     @Test
+    void 创建干事单元留空并继承创建人全部学院() {
+        mockCreator("UNIT_OWNER", List.of(101L, 102L));
+        mockSuccessfulCreate("STAFF", List.of(101L, 102L));
+
+        SystemDtos.UserItem result = userAdminService.create(createRequest("STAFF", List.of()));
+
+        assertEquals(101L, result.unitId());
+        assertEquals(List.of(101L, 102L), result.unitIds());
+        assertEquals(99L, result.ownerUserId());
+        verify(userUnitService).replaceUnits(1L, 101L, List.of(101L, 102L), 99L);
+    }
+
+    @Test
+    void 创建干事显式指定单元会被拒绝() {
+        mockCreator("UNIT_OWNER", List.of(101L, 102L));
+        when(sysUserMapper.selectCount(any())).thenReturn(0L);
+
+        BizException error = assertThrows(BizException.class,
+                () -> userAdminService.create(createRequest("STAFF", List.of(101L))));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        verify(sysUserMapper, never()).insert(any(SysUser.class));
+    }
+
+    @Test
+    void 内部调用创建方法仍显式执行DTO校验() {
+        SystemDtos.UserCreateRequest request = new SystemDtos.UserCreateRequest();
+        @SuppressWarnings("unchecked")
+        ConstraintViolation<SystemDtos.UserCreateRequest> violation = mock(ConstraintViolation.class);
+        Path path = mock(Path.class);
+        when(path.toString()).thenReturn("name");
+        when(violation.getPropertyPath()).thenReturn(path);
+        when(violation.getMessage()).thenReturn("姓名必填");
+        when(validator.validate(request)).thenReturn(Set.of(violation));
+
+        BizException error = assertThrows(BizException.class, () -> userAdminService.create(request));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        assertEquals("name", error.getErrors().get(0).getField());
+        verify(validator).validate(request);
+        verify(sysUserMapper, never()).insert(any(SysUser.class));
+    }
+
+    @Test
     void 学院负责人创建学院负责人必须指定本人学院() {
         mockCreator("UNIT_OWNER", List.of(101L));
         when(sysUserMapper.selectCount(any())).thenReturn(0L);
@@ -164,8 +215,8 @@ class UserAdminServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"UNIT_OWNER", "STAFF"})
-    void 学院负责人不能在其他学院创建负责人或干事(String targetRole) {
+    @ValueSource(strings = {"UNIT_OWNER"})
+    void 学院负责人不能在其他学院创建负责人(String targetRole) {
         mockCreator("UNIT_OWNER", List.of(101L));
         when(sysUserMapper.selectCount(any())).thenReturn(0L);
         when(orgUnitMapper.selectCount(any())).thenReturn(1L);
@@ -507,7 +558,9 @@ class UserAdminServiceTest {
         SysUser[] stored = new SysUser[1];
         when(sysUserMapper.selectCount(any())).thenReturn(0L);
         if (!unitIds.isEmpty()) {
-            when(orgUnitMapper.selectCount(any())).thenReturn(1L);
+            if (!"STAFF".equals(targetRole)) {
+                when(orgUnitMapper.selectCount(any())).thenReturn(1L);
+            }
             when(orgUnitMapper.selectList(any())).thenReturn(unitIds.stream()
                     .map(id -> unit(id, "学院" + id)).toList());
         }

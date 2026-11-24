@@ -8,6 +8,18 @@
 /** 客户端环境（与 API 约定 X-Client-Type 一致） */
 export type ClientEnv = 'WEB' | 'FEISHU_PC' | 'FEISHU_MOBILE'
 
+/** 管理页面展示中文执行时间，避免直接暴露 Quartz cron 表达式。 */
+export function formatFeishuBotSchedule(cron: string): string {
+  const value = cron.trim()
+  if (!value) return '未配置执行时间'
+  const match = /^0\s+(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+\?$/.exec(value)
+  if (!match) return '按自定义周期执行'
+  const minute = Number(match[1])
+  const hour = Number(match[2])
+  if (minute > 59 || hour > 23) return '按自定义周期执行'
+  return `每天 ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+}
+
 /** 依据 UA 探测当前环境：UA 含 Lark / Feishu 视为飞书客户端，再按移动端关键字细分 */
 export function detectClientEnv(ua: string): ClientEnv {
   const s = ua.toLowerCase()

@@ -6,14 +6,19 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import edu.fzrj.metrics.common.api.PageResult;
 import edu.fzrj.metrics.common.audit.AuditLog;
+import edu.fzrj.metrics.common.idempotent.Idempotent;
 import edu.fzrj.metrics.module.system.dto.SystemDtos;
 import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.service.UserAdminService;
 import edu.fzrj.metrics.module.system.service.UserDeletionService;
+import edu.fzrj.metrics.module.system.service.UserImportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,8 +29,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -37,15 +46,20 @@ import java.util.List;
 @RequestMapping("/api/v1/users")
 public class UserController {
 
+    private static final MediaType XLSX_MEDIA_TYPE = MediaType.parseMediaType(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
     private final SysUserMapper sysUserMapper;
     private final UserAdminService userAdminService;
     private final UserDeletionService userDeletionService;
+    private final UserImportService userImportService;
 
     public UserController(SysUserMapper sysUserMapper, UserAdminService userAdminService,
-                          UserDeletionService userDeletionService) {
+                          UserDeletionService userDeletionService, UserImportService userImportService) {
         this.sysUserMapper = sysUserMapper;
         this.userAdminService = userAdminService;
         this.userDeletionService = userDeletionService;
+        this.userImportService = userImportService;
     }
 
     @Operation(summary = "用户选项（负责人选择等轻量场景，已登录即可）")
@@ -75,6 +89,40 @@ public class UserController {
     @AuditLog(action = "CREATE", resourceType = "user", resourceId = "#result.id")
     public SystemDtos.UserItem create(@Valid @RequestBody SystemDtos.UserCreateRequest request) {
         return userAdminService.create(request);
+    }
+
+    @Operation(summary = "下载用户 Excel 导入模板",
+            description = "权限：user:create；模板含填写说明、当前可创建角色和动态单元字典；全部输入列按文本格式；记录 FILE_DOWNLOAD 审计")
+    @GetMapping("/import-template")
+    @PreAuthorize("hasAuthority('user:create')")
+    @AuditLog(action = "FILE_DOWNLOAD", resourceType = "user", resourceId = "'import-template'")
+    public ResponseEntity<byte[]> importTemplate() {
+        String filename = URLEncoder.encode("用户导入模板.xlsx", StandardCharsets.UTF_8).replace("+", "%20");
+        return ResponseEntity.ok()
+                .contentType(XLSX_MEDIA_TYPE)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + filename)
+                .body(userImportService.buildImportTemplate());
+    }
+
+    @Operation(summary = "上传用户 Excel 导入预览",
+            description = "权限：user:create；仅支持 .xlsx 且不超过 10MB，最多 200 个非空数据行；"
+                    + "返回独立 30 分钟预览批次及逐行错误，预检不保存密码；格式错误 80001，超限 80002")
+    @PostMapping("/import-preview")
+    @PreAuthorize("hasAuthority('user:create')")
+    public SystemDtos.UserImportPreviewResponse importPreview(@RequestParam("file") MultipartFile file) {
+        return userImportService.preview(file);
+    }
+
+    @Operation(summary = "确认用户 Excel 导入",
+            description = "权限：user:create；必须带 Idempotency-Key；请求 { importId, initialPassword }，统一密码 8–64 位；"
+                    + "预检有错返回 10001，跨创建人返回 20005，批次不存在或过期返回 10003；整批成功或回滚；IMPORT 审计不记录密码")
+    @PostMapping("/import-confirm")
+    @PreAuthorize("hasAuthority('user:create')")
+    @Idempotent
+    @AuditLog(action = "IMPORT", resourceType = "user", resourceId = "#request.importId", after = "#result")
+    public SystemDtos.UserImportConfirmResponse importConfirm(
+            @Valid @RequestBody SystemDtos.UserImportConfirmRequest request) {
+        return userImportService.confirm(request.getImportId(), request.getInitialPassword());
     }
 
     @Operation(summary = "本学院干事列表",

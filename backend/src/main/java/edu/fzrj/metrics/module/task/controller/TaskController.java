@@ -19,6 +19,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+import java.util.Map;
+
 /**
  * B 任务接口（API 约定 15.4）
  */
@@ -46,7 +49,7 @@ public class TaskController {
         return taskService.detail(taskId);
     }
 
-    @Operation(summary = "整体替换任务干事", description = "仅任务负责学院的 UNIT_OWNER 且为 task.owner 本人；空数组全部移除；需带 version")
+    @Operation(summary = "整体替换任务干事", description = "任务负责学院的任一 UNIT_OWNER 均可操作，可选本学院全部启用纯干事；空数组全部移除；需带 version")
     @PutMapping("/{taskId}/staff")
     @AuditLog(action = "UPDATE", resourceType = "task", resourceId = "#taskId",
             before = "staffAuditSnapshot(#taskId)", after = "staffAuditSnapshot(#taskId)")
@@ -64,5 +67,9 @@ public class TaskController {
     public TaskDtos.TaskDetail accept(@PathVariable Long taskId,
                                       @Valid @RequestBody PlanDtos.VersionRequest request) {
         return taskService.accept(taskId, request.getVersion());
+    }
+
+    public Map<String, List<Long>> staffAuditSnapshot(Long taskId) {
+        return taskService.staffAuditSnapshot(taskId);
     }
 }

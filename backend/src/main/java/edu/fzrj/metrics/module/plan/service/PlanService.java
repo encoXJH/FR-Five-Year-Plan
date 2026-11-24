@@ -34,6 +34,10 @@ import edu.fzrj.metrics.module.task.entity.TaskYear;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.module.task.service.TaskYearActivationService;
+import edu.fzrj.metrics.module.training.entity.TrainingProject;
+import edu.fzrj.metrics.module.training.entity.TrainingSheet;
+import edu.fzrj.metrics.module.training.mapper.TrainingProjectMapper;
+import edu.fzrj.metrics.module.training.mapper.TrainingSheetMapper;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
@@ -71,6 +75,8 @@ public class PlanService {
     private final TaskYearActivationService taskYearActivationService;
     private final ObjectMapper objectMapper;
     private final PlanReadScopeService planReadScopeService;
+    private final TrainingSheetMapper trainingSheetMapper;
+    private final TrainingProjectMapper trainingProjectMapper;
 
     public PlanService(PlanMapper planMapper, PlanYearMapper planYearMapper, TemplateMapper templateMapper,
                        DirectionMapper directionMapper, IndicatorMapper indicatorMapper,
@@ -78,8 +84,8 @@ public class PlanService {
                        OrgUnitMapper orgUnitMapper, UserRefResolver userRefResolver, UserRoleMapper userRoleMapper,
                        TaskMapper taskMapper, TaskYearMapper taskYearMapper,
                        TaskYearActivationService taskYearActivationService,
-                       ObjectMapper objectMapper,
-                       PlanReadScopeService planReadScopeService) {
+                       ObjectMapper objectMapper, PlanReadScopeService planReadScopeService,
+                       TrainingSheetMapper trainingSheetMapper, TrainingProjectMapper trainingProjectMapper) {
         this.planMapper = planMapper;
         this.planYearMapper = planYearMapper;
         this.templateMapper = templateMapper;
@@ -95,6 +101,8 @@ public class PlanService {
         this.taskYearActivationService = taskYearActivationService;
         this.objectMapper = objectMapper;
         this.planReadScopeService = planReadScopeService;
+        this.trainingSheetMapper = trainingSheetMapper;
+        this.trainingProjectMapper = trainingProjectMapper;
     }
 
     // ---------------- 查询 ----------------
@@ -111,6 +119,12 @@ public class PlanService {
     }
 
     private PlanDtos.ListItem toListItem(Plan plan) {
+        if ("TRAINING".equals(plan.getPlanType())) {
+            return new PlanDtos.ListItem(plan.getId(), plan.getName(), plan.getStartYear(), plan.getEndYear(),
+                    plan.getBaselineYear(), plan.getStatus(), plan.getSource(), plan.getPlanType(), plan.getFinalizedAt(),
+                    null, plan.getCreatedAt(), 0L, 0L, 0L,
+                    plan.getUpdatedAt() == null ? plan.getCreatedAt() : plan.getUpdatedAt(), plan.getVersion());
+        }
         List<Task> visibleTasks = planReadScopeService.visibleTasks(plan.getId());
         List<Indicator> indicators = indicatorMapper.selectList(new LambdaQueryWrapper<Indicator>()
                 .eq(Indicator::getPlanId, plan.getId())
@@ -121,10 +135,11 @@ public class PlanService {
         long indicatorCountAPlus = indicators.stream()
                 .filter(i -> visibleIndicatorIds.contains(i.getId()) && "A_PLUS".equals(i.getLevel())).count();
         return new PlanDtos.ListItem(plan.getId(), plan.getName(), plan.getStartYear(), plan.getEndYear(),
-                plan.getBaselineYear(), plan.getStatus(), plan.getSource(), plan.getFinalizedAt(),
+                plan.getBaselineYear(), plan.getStatus(), plan.getSource(), plan.getPlanType(), plan.getFinalizedAt(),
                 completionRateOf(plan, visibleTasks, indicators, visibleIndicatorIds), plan.getCreatedAt(),
                 indicatorCountA, indicatorCountAPlus,
-                (long) visibleTasks.size(), plan.getUpdatedAt() == null ? plan.getCreatedAt() : plan.getUpdatedAt());
+                (long) visibleTasks.size(), plan.getUpdatedAt() == null ? plan.getCreatedAt() : plan.getUpdatedAt(),
+                plan.getVersion());
     }
 
     /** 整体完成率：可见量化 A 指标五年累计完成率的算术平均；无可见指标时为 null */
@@ -214,7 +229,7 @@ public class PlanService {
                 && java.util.Objects.equals(indicator.getOwnerId(), user.getUserId());
     }
 
-    public Plan requirePlan(Long planId) {
+    public Plan requireAnyPlan(Long planId) {
         Plan plan = planMapper.selectOne(new LambdaQueryWrapper<Plan>()
                 .eq(Plan::getId, planId)
                 .eq(Plan::getDeleted, 0L));
@@ -224,8 +239,23 @@ public class PlanService {
         return plan;
     }
 
+    public Plan requirePlan(Long planId) {
+        Plan plan = requireAnyPlan(planId);
+        if ("TRAINING".equals(plan.getPlanType())) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "职业培训信息采集计划不支持指标计划操作");
+        }
+        return plan;
+    }
+
     public PlanDtos.Detail detail(Long planId) {
         Plan plan = requirePlan(planId);
+        planReadScopeService.requireVisible(plan);
+        return toDetail(plan);
+    }
+
+    /** 状态动作审计快照允许培训计划，指标详情接口仍仅使用 detail。 */
+    public PlanDtos.Detail detailIncludingTraining(Long planId) {
+        Plan plan = requireAnyPlan(planId);
         planReadScopeService.requireVisible(plan);
         return toDetail(plan);
     }
@@ -292,7 +322,7 @@ public class PlanService {
         if ("COPY".equals(request.getSource()) && Boolean.TRUE.equals(request.getCopyAllocations())) {
             copyAllocations(request.getSourcePlanId(), plan, userId);
         }
-        // 重查以拿到 DB 默认的 version / createdAt
+        activate(plan.getId(), requirePlan(plan.getId()).getVersion());
         return toDetail(requirePlan(plan.getId()));
     }
 
@@ -343,10 +373,10 @@ public class PlanService {
         return toDetail(requirePlan(planId));
     }
 
-    /** 启动执行：DRAFT → ACTIVE，生成待管理员激活的 plan_year 行 */
+    /** 启动执行：DRAFT → ACTIVE；指标计划激活全部年度，培训计划不生成指标年度或任务。 */
     @Transactional
     public PlanDtos.Detail activate(Long planId, Integer version) {
-        Plan plan = requirePlan(planId);
+        Plan plan = requireAnyPlan(planId);
         requireNotArchived(plan);
         requireVersion(plan.getVersion(), version);
         if (!"DRAFT".equals(plan.getStatus())) {
@@ -358,23 +388,31 @@ public class PlanService {
         if (planMapper.updateById(plan) == 0) {
             throw versionConflict(planId);
         }
-        for (int year = plan.getStartYear(); year <= plan.getEndYear(); year++) {
-            PlanYear planYear = new PlanYear();
-            planYear.setPlanId(plan.getId());
-            planYear.setYear(year);
-            planYear.setStatus("NOT_ACTIVATED");
-            planYear.setCreatedBy(userId);
-            planYear.setUpdatedBy(userId);
-            planYearMapper.insert(planYear);
+        if (!"TRAINING".equals(plan.getPlanType())) {
+            for (int year = plan.getStartYear(); year <= plan.getEndYear(); year++) {
+                PlanYear planYear = new PlanYear();
+                planYear.setPlanId(plan.getId());
+                planYear.setYear(year);
+                planYear.setStatus("ACTIVE");
+                planYear.setActivatedAt(java.time.LocalDateTime.now());
+                planYear.setActivatedBy(userId);
+                planYear.setCreatedBy(userId);
+                planYear.setUpdatedBy(userId);
+                planYearMapper.insert(planYear);
+            }
+            taskYearActivationService.syncPlan(plan.getId(), userId);
         }
-        taskYearActivationService.syncPlan(plan.getId(), userId);
-        return toDetail(requirePlan(planId));
+        return toDetail(requireAnyPlan(planId));
     }
 
     /** 归档：归档后只读，写操作一律 30002 */
     @Transactional
     public PlanDtos.Detail archive(Long planId, Integer version) {
-        Plan plan = requirePlan(planId);
+        Plan plan = planMapper.selectByIdForUpdate(planId);
+        if (plan == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "计划不存在");
+        }
+        planReadScopeService.requireVisible(plan);
         requireVersion(plan.getVersion(), version);
         if ("ARCHIVED".equals(plan.getStatus())) {
             throw new BizException(ErrorCode.PLAN_STATUS_INVALID, "计划已归档");
@@ -384,22 +422,53 @@ public class PlanService {
         if (planMapper.updateById(plan) == 0) {
             throw versionConflict(planId);
         }
-        return toDetail(requirePlan(planId));
+        return toDetail(requireAnyPlan(planId));
     }
 
     /** 删除草稿或已归档计划：逻辑删除，保留审计与历史执行数据。 */
     @Transactional
     public void delete(Long planId, PlanDtos.DeleteRequest request) {
-        Plan plan = requirePlan(planId);
+        Plan plan = planMapper.selectByIdForUpdate(planId);
+        if (plan == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "计划不存在");
+        }
         planReadScopeService.requireVisible(plan);
         requireVersion(plan.getVersion(), request.getVersion());
         if (!"DRAFT".equals(plan.getStatus()) && !"ARCHIVED".equals(plan.getStatus())) {
             throw new BizException(ErrorCode.PLAN_STATUS_INVALID, "执行中的计划请先归档后再删除");
         }
+        Long userId = SecurityUtils.getUserId();
+        List<TrainingSheet> sheets = List.of();
+        List<TrainingProject> projects = List.of();
+        if ("TRAINING".equals(plan.getPlanType())) {
+            sheets = trainingSheetMapper.selectList(new LambdaQueryWrapper<TrainingSheet>()
+                    .eq(TrainingSheet::getPlanId, planId)
+                    .eq(TrainingSheet::getDeleted, 0L)
+                    .orderByAsc(TrainingSheet::getId)
+                    .last("FOR UPDATE"));
+            List<Long> sheetIds = sheets.stream().map(TrainingSheet::getId).toList();
+            if (!sheetIds.isEmpty()) {
+                projects = trainingProjectMapper.selectList(new LambdaQueryWrapper<TrainingProject>()
+                        .in(TrainingProject::getSheetId, sheetIds)
+                        .eq(TrainingProject::getDeleted, 0L)
+                        .orderByAsc(TrainingProject::getId)
+                        .last("FOR UPDATE"));
+            }
+        }
         plan.setDeleted(planId);
-        plan.setUpdatedBy(SecurityUtils.getUserId());
+        plan.setUpdatedBy(userId);
         if (planMapper.updateById(plan) == 0) {
             throw versionConflict(planId);
+        }
+        for (TrainingSheet sheet : sheets) {
+            sheet.setDeleted(sheet.getId());
+            sheet.setUpdatedBy(userId);
+            trainingSheetMapper.updateById(sheet);
+        }
+        for (TrainingProject project : projects) {
+            project.setDeleted(project.getId());
+            project.setUpdatedBy(userId);
+            trainingProjectMapper.updateById(project);
         }
     }
 
@@ -835,7 +904,7 @@ public class PlanService {
         Map<Long, SysUser> users = plan.getFinalizedBy() == null
                 ? Map.of() : userRefResolver.mapOf(List.of(plan.getFinalizedBy()));
         return new PlanDtos.Detail(plan.getId(), plan.getName(), plan.getStartYear(), plan.getEndYear(),
-                plan.getBaselineYear(), plan.getSettleDeadline(), plan.getStatus(), plan.getSource(),
+                plan.getBaselineYear(), plan.getSettleDeadline(), plan.getStatus(), plan.getSource(), plan.getPlanType(),
                 plan.getTemplateId(), plan.getSourcePlanId(), plan.getIsReceiverConfirmRequired(),
                 plan.getFinalizedAt(), userRefResolver.refOf(plan.getFinalizedBy(), users),
                 years, plan.getVersion(), plan.getCreatedAt(), plan.getUpdatedAt());

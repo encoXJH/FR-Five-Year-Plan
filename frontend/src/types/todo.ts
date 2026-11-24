@@ -15,6 +15,8 @@ export interface TodoItem {
   todoSince: string
   /** 截止时间（YYYY-MM-DD），仅 FILL / REVIEW 有值 */
   deadline?: string | null
+  bizType?: string | null
+  link?: string | null
 }
 
 /** GET /todos 响应：items 按 todoSince 升序；summary 为各类型计数 */

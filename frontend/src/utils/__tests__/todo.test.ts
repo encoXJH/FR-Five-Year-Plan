@@ -63,6 +63,12 @@ describe('resolveTodoLink', () => {
     expect(resolveTodoLink(todo({ type: 'REVIEW', bizId: '7' }))).toBe('/reviews?submissionId=7')
   })
 
+  it('培训待办优先使用后端深链，不误跳普通填报审核', () => {
+    expect(resolveTodoLink(todo({
+      type: 'REVIEW', bizId: '7', bizType: 'training_sheet', link: '/training/7?from=reviews',
+    }))).toBe('/training/7?from=reviews')
+  })
+
   it('待确认接收和待审批携带业务 id；未知分组返回 null', () => {
     expect(resolveTodoLink(todo({ type: 'ACCEPT', bizId: '42', year: 2028 }))).toBe(
       '/workbench?taskId=42&year=2028',

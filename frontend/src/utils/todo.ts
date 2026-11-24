@@ -26,6 +26,7 @@ export function sortTodoItems(items: TodoItem[]): TodoItem[] {
  * 待填报 → 任务填报页；待审核 → 审核中心；待确认接收 → 学院工作台；待审批 → 调整管理。
  */
 export function resolveTodoLink(todo: TodoItem): string | null {
+  if (todo.link?.trim()) return todo.link
   switch (todo.type) {
     case 'FILL': {
       if (!todo.bizId) return '/workbench'

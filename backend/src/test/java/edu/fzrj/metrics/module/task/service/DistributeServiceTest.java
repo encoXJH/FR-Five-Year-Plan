@@ -8,13 +8,9 @@ import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
 import edu.fzrj.metrics.module.indicator.service.IndicatorService;
-import edu.fzrj.metrics.module.notify.entity.Notification;
-import edu.fzrj.metrics.module.notify.mapper.NotificationMapper;
 import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.plan.service.PlanReadScopeService;
 import edu.fzrj.metrics.module.plan.service.PlanService;
-import edu.fzrj.metrics.module.system.entity.OrgUnit;
-import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.service.OrgUnitAdminService;
 import edu.fzrj.metrics.module.task.dto.TaskDtos;
 import edu.fzrj.metrics.module.task.entity.Task;
@@ -66,11 +62,7 @@ class DistributeServiceTest {
     @Mock
     private TaskYearActivationService taskYearActivationService;
     @Mock
-    private OrgUnitMapper orgUnitMapper;
-    @Mock
     private OrgUnitAdminService orgUnitAdminService;
-    @Mock
-    private NotificationMapper notificationMapper;
     @Spy
     private DataScopeService dataScopeService;
     @Mock
@@ -83,7 +75,6 @@ class DistributeServiceTest {
     private Indicator parent;
     private Indicator candidate;
     private Task task;
-    private OrgUnit unit;
 
     @BeforeAll
     static void initMybatisLambdaCache() {
@@ -91,7 +82,6 @@ class DistributeServiceTest {
         TableInfoHelper.initTableInfo(assistant, Indicator.class);
         TableInfoHelper.initTableInfo(assistant, Task.class);
         TableInfoHelper.initTableInfo(assistant, TaskYear.class);
-        TableInfoHelper.initTableInfo(assistant, OrgUnit.class);
         TableInfoHelper.initTableInfo(assistant, edu.fzrj.metrics.module.plan.entity.PlanYear.class);
     }
 
@@ -129,11 +119,6 @@ class DistributeServiceTest {
         task.setStatus("PENDING_DISTRIBUTION");
         task.setIsHistorical(false);
 
-        unit = new OrgUnit();
-        unit.setId(31L);
-        unit.setCode("C01");
-        unit.setName("智能产业学院");
-
         LoginUser user = new LoginUser(99L, "admin", "管理员", null,
                 List.of("ADMIN"), List.of());
         SecurityContextHolder.getContext().setAuthentication(
@@ -159,7 +144,6 @@ class DistributeServiceTest {
         when(indicatorService.loadTargets(anyList())).thenReturn(Map.of(2L, Map.of(2026, BigDecimal.TEN)));
         when(taskMapper.selectList(any())).thenReturn(List.of(task));
         when(taskYearMapper.selectList(any())).thenReturn(List.of(year));
-        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit));
 
         TaskDtos.DistributeResponse response = distributeService.distribute(11L, request());
 
@@ -169,7 +153,6 @@ class DistributeServiceTest {
         assertEquals("DISTRIBUTED", parent.getStatus());
         assertEquals("DISTRIBUTED", task.getStatus());
         verify(indicatorService).validateForDistribution(plan, all);
-        verify(notificationMapper).insert(any(Notification.class));
     }
 
     @Test
@@ -185,7 +168,6 @@ class DistributeServiceTest {
         when(indicatorService.loadTargets(anyList())).thenReturn(Map.of(2L, Map.of(2026, BigDecimal.TEN)));
         when(taskMapper.selectList(any())).thenReturn(List.of(task));
         when(taskYearMapper.selectList(any())).thenReturn(List.of(year));
-        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit));
 
         distributeService.distribute(11L, request());
 
@@ -204,7 +186,6 @@ class DistributeServiceTest {
         assertEquals(0, response.taskCount());
         verify(indicatorService, never()).validateForDistribution(any(), anyList());
         verify(taskMapper, never()).updateById(any(Task.class));
-        verify(notificationMapper, never()).insert(any(Notification.class));
         verify(taskYearActivationService).syncPlan(11L, 99L);
     }
 
@@ -221,9 +202,6 @@ class DistributeServiceTest {
         pending.setCode("A01-1-C02");
         pending.setStatus("PENDING_DISTRIBUTION");
         pending.setIsHistorical(false);
-        OrgUnit newUnit = new OrgUnit();
-        newUnit.setId(32L);
-        newUnit.setCode("C02");
         TaskYear oldYear = new TaskYear();
         oldYear.setTaskId(21L);
         oldYear.setYear(2026);
@@ -237,7 +215,6 @@ class DistributeServiceTest {
         when(taskMapper.selectList(any())).thenReturn(List.of(task, pending));
         when(taskYearMapper.selectList(any())).thenReturn(List.of(oldYear, newYear));
         when(indicatorService.loadTargets(anyList())).thenReturn(Map.of(2L, Map.of(2026, BigDecimal.TEN)));
-        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit, newUnit));
 
         TaskDtos.DistributeResponse response = distributeService.distribute(11L, request());
 
@@ -246,7 +223,6 @@ class DistributeServiceTest {
         assertEquals("DISTRIBUTED", pending.getStatus());
         verify(taskMapper).updateById(pending);
         verify(taskMapper, never()).updateById(task);
-        verify(notificationMapper).insert(any(Notification.class));
     }
 
     @Test
@@ -280,7 +256,6 @@ class DistributeServiceTest {
         when(indicatorService.loadTargets(anyList())).thenReturn(Map.of(1L, Map.of(2026, BigDecimal.TEN)));
         when(taskMapper.selectList(any())).thenReturn(List.of(task));
         when(taskYearMapper.selectList(any())).thenReturn(List.of(year));
-        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit));
 
         TaskDtos.DistributeResponse response = distributeService.distribute(11L, request());
 
@@ -399,7 +374,6 @@ class DistributeServiceTest {
         when(indicatorService.loadTargets(anyList())).thenReturn(Map.of(2L, Map.of(2026, BigDecimal.TEN)));
         when(taskMapper.selectList(any())).thenReturn(List.of(task));
         when(taskYearMapper.selectList(any())).thenReturn(List.of(year));
-        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit));
 
         TaskDtos.DistributeResponse response = distributeService.distribute(11L, request());
 

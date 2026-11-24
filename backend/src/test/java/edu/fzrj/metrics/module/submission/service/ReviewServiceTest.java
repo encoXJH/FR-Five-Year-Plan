@@ -6,11 +6,13 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
+import edu.fzrj.metrics.module.adjustment.service.AdjustmentService;
 import edu.fzrj.metrics.module.indicator.entity.Indicator;
 import edu.fzrj.metrics.module.indicator.mapper.IndicatorMapper;
 import edu.fzrj.metrics.module.indicator.service.IndicatorService;
 import edu.fzrj.metrics.module.notify.entity.Notification;
 import edu.fzrj.metrics.module.notify.mapper.NotificationMapper;
+import edu.fzrj.metrics.module.notify.service.NotificationService;
 import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.plan.entity.PlanYear;
 import edu.fzrj.metrics.module.plan.mapper.PlanYearMapper;
@@ -80,6 +82,8 @@ class ReviewServiceTest {
     @Mock private SysUserMapper sysUserMapper;
     @Mock private PlanService planService;
     @Mock private AnnualTargetGuard annualTargetGuard;
+    @Mock private AdjustmentService adjustmentService;
+    @Mock private NotificationService notificationService;
 
     private ReviewService reviewService;
     private Task task;
@@ -98,7 +102,8 @@ class ReviewServiceTest {
     void setUp() {
         reviewService = new ReviewService(submissionMapper, reviewMapper, indicatorMapper, planYearMapper,
                 notificationMapper, submissionService, actualRecalcService, indicatorService, taskService,
-                taskMapper, sysUserMapper, planService, transactionManager(), annualTargetGuard);
+                taskMapper, sysUserMapper, planService, transactionManager(), annualTargetGuard,
+                adjustmentService, notificationService);
         login(30L, "LEADER");
 
         Indicator indicator = new Indicator();
@@ -173,6 +178,25 @@ class ReviewServiceTest {
         assertTrue(captor.getValue().getContent().contains("院审通过，待校级负责人审核"));
         assertEquals(40L, captor.getValue().getUserId());
         assertEquals("/tasks/2/submit?year=2026", captor.getValue().getLink());
+    }
+
+    @Test
+    void 干事终审通过保留提交人通知并追加全部院级负责人() {
+        Submission submission = staffSubmission(1L);
+        submission.setCurrentReviewNode("LEADER_REVIEW");
+        submission.setApprovedAmount(new BigDecimal("3"));
+        task.setUnitId(101L);
+        when(submissionService.requireSubmission(1L)).thenReturn(submission);
+        when(adjustmentService.unitOwnerIds(101L)).thenReturn(List.of(20L, 21L));
+
+        reviewService.review(1L, reviewRequest());
+
+        verify(notificationMapper).insert(any(Notification.class));
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationService, times(2)).insertOnce(captor.capture());
+        assertEquals(List.of(20L, 21L), captor.getAllValues().stream().map(Notification::getUserId).toList());
+        assertTrue(captor.getAllValues().stream().allMatch(n -> n.getContent().contains("请院级知悉")));
+        assertTrue(captor.getAllValues().stream().allMatch(n -> n.getDedupKey().contains("LEADER_REVIEW")));
     }
 
     @Test
@@ -573,6 +597,62 @@ class ReviewServiceTest {
         query.setReviewNode("OWNER_REVIEW");
 
         BizException error = assertThrows(BizException.class, () -> reviewService.pending(query));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        verify(submissionMapper, never()).selectPage(any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ADMIN", "LEADER"})
+    void 管理员和校级负责人历史审核范围不附加限制(String role) {
+        LambdaQueryWrapper<Submission> wrapper = new LambdaQueryWrapper<>();
+
+        reviewService.applyHistoryScope(wrapper, user(99L, role));
+
+        assertTrue(wrapper.getSqlSegment().isBlank());
+    }
+
+    @Test
+    void 学院负责人历史审核范围不依赖已清空审核节点() {
+        Task owned = new Task();
+        owned.setId(2L);
+        SysUser staff = new SysUser();
+        staff.setId(40L);
+        when(taskMapper.selectList(any())).thenReturn(List.of(owned));
+        when(sysUserMapper.selectList(any())).thenReturn(List.of(staff));
+        LambdaQueryWrapper<Submission> wrapper = new LambdaQueryWrapper<>();
+
+        reviewService.applyHistoryScope(wrapper, user(20L, "UNIT_OWNER"));
+
+        String sql = wrapper.getSqlSegment();
+        assertTrue(sql.contains("submitter_role"));
+        assertTrue(sql.contains("task_id"));
+        assertTrue(sql.contains("submitted_by"));
+        assertFalse(sql.contains("current_review_node"));
+        assertTrue(wrapper.getParamNameValuePairs().containsValue("STAFF"));
+    }
+
+    @Test
+    void 历史审核列表仅查询通过驳回并按审核时间倒序() {
+        when(submissionMapper.selectPage(any(), any())).thenReturn(emptyPage());
+        SubmissionDtos.HistoryQuery query = new SubmissionDtos.HistoryQuery();
+
+        reviewService.history(query);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaQueryWrapper<Submission>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(submissionMapper).selectPage(any(), captor.capture());
+        assertTrue(captor.getValue().getSqlSegment().contains("reviewed_at"));
+        assertTrue(captor.getValue().getParamNameValuePairs().containsValue("APPROVED"));
+        assertTrue(captor.getValue().getParamNameValuePairs().containsValue("REJECTED"));
+    }
+
+    @Test
+    void 历史审核状态不允许待审核() {
+        SubmissionDtos.HistoryQuery query = new SubmissionDtos.HistoryQuery();
+        query.setStatus("PENDING_REVIEW");
+
+        BizException error = assertThrows(BizException.class, () -> reviewService.history(query));
 
         assertEquals(10001, error.getErrorCode().getCode());
         verify(submissionMapper, never()).selectPage(any(), any());

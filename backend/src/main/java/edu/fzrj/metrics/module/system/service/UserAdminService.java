@@ -3,6 +3,7 @@ package edu.fzrj.metrics.module.system.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
+import edu.fzrj.metrics.common.api.FieldError;
 import edu.fzrj.metrics.common.api.PageResult;
 import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
@@ -18,6 +19,8 @@ import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.mapper.UserRoleMapper;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validator;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +28,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -41,7 +45,8 @@ import java.util.stream.Collectors;
 @Service
 public class UserAdminService {
 
-    private static final Set<String> ROLES = Set.of("ADMIN", "LEADER", "SCHOOL_OWNER", "UNIT_OWNER", "STAFF");
+    private static final List<String> ROLE_ORDER = List.of("ADMIN", "LEADER", "SCHOOL_OWNER", "UNIT_OWNER", "STAFF");
+    private static final Set<String> ROLES = Set.copyOf(ROLE_ORDER);
     private static final Map<String, Set<String>> CREATABLE_ROLES = Map.of(
             "ADMIN", Set.of("ADMIN", "LEADER", "SCHOOL_OWNER", "UNIT_OWNER"),
             "LEADER", Set.of("LEADER", "SCHOOL_OWNER", "UNIT_OWNER"),
@@ -56,16 +61,19 @@ public class UserAdminService {
     private final RefreshTokenMapper refreshTokenMapper;
     private final PasswordEncoder passwordEncoder;
     private final UserUnitService userUnitService;
+    private final Validator validator;
 
     public UserAdminService(SysUserMapper sysUserMapper, UserRoleMapper userRoleMapper,
                             OrgUnitMapper orgUnitMapper, RefreshTokenMapper refreshTokenMapper,
-                            PasswordEncoder passwordEncoder, UserUnitService userUnitService) {
+                            PasswordEncoder passwordEncoder, UserUnitService userUnitService,
+                            Validator validator) {
         this.sysUserMapper = sysUserMapper;
         this.userRoleMapper = userRoleMapper;
         this.orgUnitMapper = orgUnitMapper;
         this.refreshTokenMapper = refreshTokenMapper;
         this.passwordEncoder = passwordEncoder;
         this.userUnitService = userUnitService;
+        this.validator = validator;
     }
 
     // ---------------- 查询 ----------------
@@ -148,9 +156,9 @@ public class UserAdminService {
 
     @Transactional
     public SystemDtos.UserItem create(SystemDtos.UserCreateRequest request) {
+        validateCreateRequest(request);
         LoginUser creator = SecurityUtils.getLoginUser();
-        List<String> roles = validateRoles(request.getRoles());
-        validateCreatableRoles(roles, creator.getRoles());
+        List<String> roles = validateCreationRoles(request.getRoles(), creator.getRoles());
         String username = request.getUsername().trim();
         if (!username.matches("[A-Za-z0-9_.-]{1,64}")) {
             throw new BizException(ErrorCode.PARAM_INVALID, "登录名只允许字母、数字、下划线、点、短横线");
@@ -161,12 +169,7 @@ public class UserAdminService {
         if (duplicate > 0) {
             throw new BizException(ErrorCode.PARAM_INVALID, "登录名已存在：" + username);
         }
-        List<Long> requestedUnitIds = request.getUnitIds() == null ? List.of() : request.getUnitIds();
-        requestedUnitIds.forEach(this::requireUnitIfPresent);
-        requireUnitIfPresent(request.getUnitId());
-        Long primaryUnitId = request.getUnitId() != null ? request.getUnitId()
-                : requestedUnitIds.stream().filter(Objects::nonNull).findFirst().orElse(null);
-        validateCreatedUnits(roles, primaryUnitId, requestedUnitIds, creator);
+        UnitSelection units = resolveCreationUnits(roles, request.getUnitId(), request.getUnitIds(), creator);
 
         SysUser user = new SysUser();
         user.setUsername(username);
@@ -174,7 +177,7 @@ public class UserAdminService {
         user.setName(request.getName().trim());
         user.setPhone(StringUtils.hasText(request.getPhone()) ? request.getPhone().trim() : null);
         user.setEmail(StringUtils.hasText(request.getEmail()) ? request.getEmail().trim() : null);
-        user.setUnitId(primaryUnitId);
+        user.setUnitId(units.primaryUnitId());
         user.setOwnerUserId(roles.contains("STAFF") ? creator.getUserId() : null);
         user.setIsEnabled(true);
         user.setLoginFailCount(0);
@@ -182,7 +185,7 @@ public class UserAdminService {
         user.setUpdatedBy(user.getCreatedBy());
         sysUserMapper.insert(user);
         replaceRoles(user.getId(), roles);
-        userUnitService.replaceUnits(user.getId(), primaryUnitId, requestedUnitIds, user.getCreatedBy());
+        userUnitService.replaceUnits(user.getId(), units.primaryUnitId(), units.unitIds(), user.getCreatedBy());
         return toItems(List.of(sysUserMapper.selectById(user.getId()))).get(0);
     }
 
@@ -401,7 +404,67 @@ public class UserAdminService {
         return user;
     }
 
+    private void validateCreateRequest(SystemDtos.UserCreateRequest request) {
+        Set<ConstraintViolation<SystemDtos.UserCreateRequest>> violations = validator.validate(request);
+        if (violations.isEmpty()) {
+            return;
+        }
+        List<FieldError> errors = violations.stream()
+                .sorted(Comparator.comparing(v -> v.getPropertyPath().toString()))
+                .map(v -> new FieldError(v.getPropertyPath().toString(), v.getMessage()))
+                .toList();
+        throw new BizException(ErrorCode.PARAM_INVALID, ErrorCode.PARAM_INVALID.getMessage(), errors);
+    }
+
+    List<String> creatableRoles(List<String> creatorRoles) {
+        return ROLE_ORDER.stream()
+                .filter(role -> creatorRoles.stream().anyMatch(creatorRole ->
+                        CREATABLE_ROLES.getOrDefault(creatorRole, Set.of()).contains(role)))
+                .toList();
+    }
+
+    List<String> validateCreationRoles(List<String> roles, List<String> creatorRoles) {
+        List<String> distinct = validateRoles(roles);
+        validateCreatableRoles(distinct, creatorRoles);
+        return distinct;
+    }
+
+    UnitSelection resolveCreationUnits(List<String> roles, Long requestedPrimaryUnitId,
+                                       List<Long> requestedUnitIds, LoginUser creator) {
+        List<Long> requested = requestedUnitIds == null ? List.of() : requestedUnitIds;
+        if (roles.contains("STAFF")) {
+            if (requestedPrimaryUnitId != null || !requested.isEmpty()) {
+                throw new BizException(ErrorCode.PARAM_INVALID, "创建干事时单元必须留空，由服务端继承创建人全部学院");
+            }
+            List<Long> inherited = List.copyOf(new LinkedHashSet<>(creator.getUnitIds()));
+            if (inherited.isEmpty()) {
+                throw new BizException(ErrorCode.PARAM_INVALID, "当前创建人未配置学院，不能创建干事");
+            }
+            Long primary = creator.getUnitId() != null && inherited.contains(creator.getUnitId())
+                    ? creator.getUnitId() : inherited.get(0);
+            return new UnitSelection(primary, inherited);
+        }
+
+        LinkedHashSet<Long> normalized = new LinkedHashSet<>();
+        if (requestedPrimaryUnitId != null) {
+            normalized.add(requestedPrimaryUnitId);
+        }
+        requested.stream().filter(Objects::nonNull).forEach(normalized::add);
+        Long primary = requestedPrimaryUnitId != null ? requestedPrimaryUnitId
+                : normalized.stream().findFirst().orElse(null);
+        List<Long> unitIds = List.copyOf(normalized);
+        unitIds.forEach(this::requireUnitIfPresent);
+        validateCreatedUnits(roles, primary, unitIds, creator);
+        return new UnitSelection(primary, unitIds);
+    }
+
+    record UnitSelection(Long primaryUnitId, List<Long> unitIds) {
+    }
+
     private List<String> validateRoles(List<String> roles) {
+        if (roles == null || roles.isEmpty()) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "至少指定一个角色");
+        }
         List<String> distinct = new ArrayList<>(new LinkedHashSet<>(roles));
         for (String role : distinct) {
             if (!ROLES.contains(role)) {

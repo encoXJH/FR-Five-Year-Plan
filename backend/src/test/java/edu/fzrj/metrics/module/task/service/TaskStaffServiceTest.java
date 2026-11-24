@@ -3,6 +3,8 @@ package edu.fzrj.metrics.module.task.service;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import edu.fzrj.metrics.common.exception.BizException;
+import edu.fzrj.metrics.module.notify.entity.Notification;
+import edu.fzrj.metrics.module.notify.service.NotificationService;
 import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskStaff;
@@ -20,6 +22,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -33,6 +36,8 @@ class TaskStaffServiceTest {
 
     @Mock
     private TaskStaffMapper taskStaffMapper;
+    @Mock
+    private NotificationService notificationService;
     @InjectMocks
     private TaskStaffService taskStaffService;
 
@@ -43,16 +48,18 @@ class TaskStaffServiceTest {
     }
 
     @Test
-    void 多干事整体保存仅差异新增删除并保留未变化关系() {
+    void 同学院非任务负责人可跨创建人整体保存且仅写入差异() {
         Task task = task();
         TaskStaff first = relation(1L, 901L);
         TaskStaff second = relation(2L, 902L);
         when(taskStaffMapper.selectList(any())).thenReturn(List.of(first, second));
-        when(taskStaffMapper.selectAssignableStaff(99L, 31L))
+        when(taskStaffMapper.selectAssignableStaff(31L))
                 .thenReturn(List.of(user(902L), user(903L)));
 
+        mockInsertIds();
+
         TaskStaffService.MergeResult result = taskStaffService.merge(
-                task, List.of(902L, 903L, 903L), 99L);
+                task, List.of(902L, 903L, 903L), 88L);
 
         assertTrue(result.changed());
         assertEquals(List.of(901L, 902L), result.beforeStaffIds());
@@ -61,8 +68,17 @@ class TaskStaffServiceTest {
         ArgumentCaptor<TaskStaff> inserted = ArgumentCaptor.forClass(TaskStaff.class);
         verify(taskStaffMapper, times(1)).insert(inserted.capture());
         assertEquals(903L, inserted.getValue().getStaffId());
-        assertEquals(99L, inserted.getValue().getAssignedBy());
+        assertEquals(88L, inserted.getValue().getAssignedBy());
         verify(taskStaffMapper, never()).updateById(any(TaskStaff.class));
+        ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationService).insertOnce(notification.capture());
+        assertEquals(903L, notification.getValue().getUserId());
+        assertEquals("TASK_DISTRIBUTED", notification.getValue().getType());
+        assertEquals("干事任务分配：A01-C01", notification.getValue().getTitle());
+        assertEquals("task", notification.getValue().getBizType());
+        assertEquals(10L, notification.getValue().getBizId());
+        assertEquals("/tasks/10/submit", notification.getValue().getLink());
+        assertEquals("TASK_STAFF_ASSIGNED:10:903:1903", notification.getValue().getDedupKey());
     }
 
     @Test
@@ -75,15 +91,16 @@ class TaskStaffServiceTest {
         assertTrue(result.changed());
         assertEquals(List.of(), result.afterStaffIds());
         verify(taskStaffMapper).delete(any());
-        verify(taskStaffMapper, never()).selectAssignableStaff(any(), any());
+        verify(taskStaffMapper, never()).selectAssignableStaff(any());
         verify(taskStaffMapper, never()).insert(any(TaskStaff.class));
+        verify(notificationService, never()).insertOnce(any());
     }
 
     @Test
     void 任一干事不合格时不执行任何差异写入() {
         Task task = task();
         when(taskStaffMapper.selectList(any())).thenReturn(List.of(relation(1L, 901L)));
-        when(taskStaffMapper.selectAssignableStaff(99L, 31L)).thenReturn(List.of());
+        when(taskStaffMapper.selectAssignableStaff(31L)).thenReturn(List.of());
 
         BizException error = assertThrows(BizException.class,
                 () -> taskStaffService.merge(task, List.of(901L, 999L), 99L));
@@ -91,6 +108,49 @@ class TaskStaffServiceTest {
         assertEquals(10001, error.getErrorCode().getCode());
         verify(taskStaffMapper, never()).delete(any());
         verify(taskStaffMapper, never()).insert(any(TaskStaff.class));
+        verify(notificationService, never()).insertOnce(any());
+    }
+
+    @Test
+    void 分配名单未变化时不写关系也不通知() {
+        Task task = task();
+        when(taskStaffMapper.selectList(any())).thenReturn(List.of(relation(1L, 901L)));
+        when(taskStaffMapper.selectAssignableStaff(31L)).thenReturn(List.of(user(901L)));
+
+        TaskStaffService.MergeResult result = taskStaffService.merge(task, List.of(901L, 901L), 99L);
+
+        assertFalse(result.changed());
+        assertEquals(List.of(901L), result.afterStaffIds());
+        verify(taskStaffMapper, never()).delete(any());
+        verify(taskStaffMapper, never()).insert(any(TaskStaff.class));
+        verify(notificationService, never()).insertOnce(any());
+    }
+
+    @Test
+    void 移除后重新分配按新关系再次通知() {
+        Task task = task();
+        when(taskStaffMapper.selectList(any()))
+                .thenReturn(List.of(relation(1L, 901L)))
+                .thenReturn(List.of(relation(2L, 902L)));
+        when(taskStaffMapper.selectAssignableStaff(31L))
+                .thenReturn(List.of(user(901L), user(902L)));
+        mockInsertIds();
+
+        taskStaffService.merge(task, List.of(902L), 88L);
+        taskStaffService.merge(task, List.of(901L), 88L);
+
+        ArgumentCaptor<Notification> notifications = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationService, times(2)).insertOnce(notifications.capture());
+        assertEquals("TASK_STAFF_ASSIGNED:10:902:1902", notifications.getAllValues().get(0).getDedupKey());
+        assertEquals("TASK_STAFF_ASSIGNED:10:901:1901", notifications.getAllValues().get(1).getDedupKey());
+    }
+
+    private void mockInsertIds() {
+        when(taskStaffMapper.insert(any(TaskStaff.class))).thenAnswer(invocation -> {
+            TaskStaff row = invocation.getArgument(0);
+            row.setId(1000L + row.getStaffId());
+            return 1;
+        });
     }
 
     private Task task() {
@@ -98,6 +158,7 @@ class TaskStaffServiceTest {
         task.setId(10L);
         task.setUnitId(31L);
         task.setOwnerId(99L);
+        task.setCode("A01-C01");
         return task;
     }
 

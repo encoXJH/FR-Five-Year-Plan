@@ -2,12 +2,30 @@ import { describe, expect, it } from 'vitest'
 import {
   detectClientEnv,
   extractAppIdFromUrl,
+  formatFeishuBotSchedule,
   isFeishuOAuthStateValid,
   isFeishuUnavailableCode,
   isFeishuUA,
   normalizeAuthorizeInfo,
   parseFeishuCallbackSearch,
 } from '../feishu'
+
+describe('formatFeishuBotSchedule', () => {
+  it('默认每日 cron 转换为中文时间', () => {
+    expect(formatFeishuBotSchedule('0 45 8 * * ?')).toBe('每天 08:45')
+    expect(formatFeishuBotSchedule('0 0 9 * * ?')).toBe('每天 09:00')
+  })
+
+  it('单位数时分补零且忽略首尾空格', () => {
+    expect(formatFeishuBotSchedule('  0 5 6 * * ?  ')).toBe('每天 06:05')
+  })
+
+  it('自定义、非法或空配置不直接显示 cron', () => {
+    expect(formatFeishuBotSchedule('0 0/5 * * * ?')).toBe('按自定义周期执行')
+    expect(formatFeishuBotSchedule('0 60 8 * * ?')).toBe('按自定义周期执行')
+    expect(formatFeishuBotSchedule('')).toBe('未配置执行时间')
+  })
+})
 
 describe('detectClientEnv', () => {
   it('普通浏览器 UA 判定为 WEB', () => {

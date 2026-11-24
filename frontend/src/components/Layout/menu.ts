@@ -30,8 +30,10 @@ export interface MenuItem {
   requiredRoles?: Role[]
   /** 用户角色全部落在该列表内时隐藏（如纯学院负责人不显示统计报表） */
   hideForRolesOnly?: string[]
-  /** 按当前路由控制显示（如无计划上下文时隐藏计划概览） */
+  /** 按当前路由控制显示 */
   visibleWhen?: (route: RouteLocationNormalizedLoaded) => boolean
+  /** 当前路由是否应高亮该菜单（用于计划预览等跨路径场景） */
+  activeWhen?: (route: RouteLocationNormalizedLoaded) => boolean
   /** 动态解析跳转路径（如计划概览依赖当前路由 planId） */
   resolvePath?: (route: RouteLocationNormalizedLoaded) => string
 }
@@ -53,15 +55,14 @@ export const menuGroups: MenuGroup[] = [
         path: 'plan-overview',
         title: '计划概览',
         icon: DataBoard,
-        // 无计划上下文时隐藏，避免与“首页”解析出同一路径导致两项同时高亮
-        visibleWhen: (route) => {
-          const routePlanId = typeof route.params.planId === 'string' ? route.params.planId : ''
-          return Boolean(routePlanId || getCurrentPlan()?.id)
-        },
+        // 无缓存时进入通用概览入口，由页面选择当前账号可见的默认指标计划
+        activeWhen: (route) => route.name === 'PlanOverviewEntry'
+          || route.name === 'PlanOverview'
+          || (route.name === 'TrainingSheetDetail' && route.query.from === 'plans'),
         resolvePath: (route) => {
           const routePlanId = typeof route.params.planId === 'string' ? route.params.planId : ''
           const planId = routePlanId || getCurrentPlan()?.id
-          return planId ? `/plans/${planId}` : '/plans'
+          return planId ? `/plans/${planId}` : '/plan-overview'
         },
       },
       { path: '/todos', title: '待办与消息', icon: Bell },
@@ -95,6 +96,13 @@ export const menuGroups: MenuGroup[] = [
         icon: Tickets,
         permissions: ['submission:submit'],
         hideForRolesOnly: ['ADMIN'],
+      },
+      {
+        path: '/training',
+        title: '职业培训填写',
+        icon: Document,
+        permissions: ['training:fill'],
+        requiredRoles: ['UNIT_OWNER', 'STAFF'],
       },
       { path: '/materials', title: '材料库', icon: FolderOpened, permissions: ['material:view'] },
       // 任务填报（P08）为隐藏菜单，从学院工作台任务行进入（UI 规范 6.1）

@@ -75,6 +75,34 @@ class TaskYearActivationServiceTest {
     }
 
     @Test
+    void 后续规划年度一次同步无需逐年重复下发() {
+        List<PlanYear> activeYears = List.of(2027, 2028, 2029, 2030).stream().map(year -> {
+            PlanYear active = new PlanYear();
+            active.setPlanId(11L);
+            active.setYear(year);
+            active.setStatus("ACTIVE");
+            return active;
+        }).toList();
+        Task task = new Task();
+        task.setId(21L);
+        when(planYearMapper.selectList(any())).thenReturn(activeYears);
+        when(taskMapper.selectList(any())).thenReturn(List.of(task));
+        when(taskYearMapper.update(isNull(), any())).thenReturn(4);
+
+        int updated = taskYearActivationService.syncPlan(11L, 99L);
+
+        assertEquals(4, updated);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<TaskYear>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(taskYearMapper).update(isNull(), captor.capture());
+        assertTrue(captor.getValue().getSqlSegment().contains("year_status"));
+        for (Integer year : List.of(2027, 2028, 2029, 2030)) {
+            assertTrue(captor.getValue().getParamNameValuePairs().containsValue(year));
+        }
+        assertTrue(captor.getValue().getParamNameValuePairs().containsValue("IN_PROGRESS"));
+    }
+
+    @Test
     void 没有激活年度时不执行更新() {
         when(planYearMapper.selectList(any())).thenReturn(List.of());
 

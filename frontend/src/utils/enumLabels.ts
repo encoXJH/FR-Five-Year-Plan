@@ -5,6 +5,8 @@ import type { ReviewNode } from '@/types/submission'
 export const FALLBACK_ENUM_LABELS: Record<string, Record<string, string>> = {
   PlanStatus: { DRAFT: '草稿', ACTIVE: '执行中', ARCHIVED: '已归档' },
   PlanSource: { BLANK: '空白新建', TEMPLATE: '从模板新建', COPY: '复制已有计划' },
+  PlanType: { INDICATOR: '指标计划', TRAINING: '职业培训信息采集' },
+  TrainingSheetStatus: { DRAFT: '草稿', PENDING_REVIEW: '待审核', APPROVED: '已通过', REJECTED: '已驳回' },
   SubjectType: { SCHOOL: '校级', MAJOR_GROUP: '专业群' },
   IndicatorLevel: { A: '指标', A_PLUS: '历史指标', B: '学院任务' },
   IndicatorNature: { CONSTRAINT: '约束性', DEVELOPMENT: '发展性' },
@@ -99,6 +101,7 @@ export const FALLBACK_ENUM_LABELS: Record<string, Record<string, string>> = {
     TASK_DISTRIBUTED: '任务下发',
     DEADLINE_REMINDER: '截止提醒',
     REVIEW_RESULT: '审核结果',
+    REVIEW_TODO: '审核待办汇总',
     ADJUSTMENT_TODO: '调整待办',
     ADJUSTMENT_RESULT: '调整结果',
     WARNING: '预警',

@@ -473,7 +473,7 @@ useAutoRefresh(async () => {
           导出 PDF 报告
         </el-button>
       </el-tooltip>
-      <el-button v-if="!isUnitOwnerOnly" @click="openSettlement">年度核算结果</el-button>
+      <el-button v-if="!isUnitOwnerOnly" @click="openSettlement">历史核算结果</el-button>
     </div>
 
     <el-card shadow="never" class="filter-card">
@@ -846,7 +846,7 @@ useAutoRefresh(async () => {
 
     <el-empty v-else-if="!loading" :description="emptyDescription" />
 
-    <el-dialog v-model="settlementVisible" title="年度核算结果" width="min(880px, calc(100vw - 32px))">
+    <el-dialog v-model="settlementVisible" title="历史年度核算结果（只读）" width="min(880px, calc(100vw - 32px))">
       <el-form inline @submit.prevent>
         <el-form-item label="年度">
           <el-select v-model="settlementYear" style="width: 140px" @change="loadSettlement">

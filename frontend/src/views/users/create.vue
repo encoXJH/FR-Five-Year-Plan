@@ -4,7 +4,8 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import BackButton from '@/components/BackButton.vue'
-import { createUser } from '@/api/system'
+import UserImportDialog from './components/UserImportDialog.vue'
+import { createUser, downloadUserImportTemplate } from '@/api/system'
 import { listOrgUnits } from '@/api/orgUnit'
 import type { OrgUnit } from '@/api/orgUnit'
 import { useUserStore } from '@/stores/user'
@@ -16,6 +17,8 @@ import {
   normalizeCreationRoles,
 } from '@/utils/role'
 import type { Role } from '@/types/enums'
+import type { UserImportConfirmResult } from '@/types/system'
+import { triggerFileDownload } from '@/utils/file'
 
 const userStore = useUserStore()
 const route = useRoute()
@@ -25,6 +28,8 @@ const loadingUnits = ref(false)
 const allUnits = ref<OrgUnit[]>([])
 const successMessage = ref('')
 const previousRoles = ref<Role[]>([])
+const importVisible = ref(false)
+const templateDownloading = ref(false)
 
 const form = reactive({
   name: '',
@@ -106,6 +111,27 @@ function resetForm(): void {
   successMessage.value = ''
 }
 
+async function handleDownloadTemplate(): Promise<void> {
+  if (templateDownloading.value) return
+  templateDownloading.value = true
+  try {
+    const blob = await downloadUserImportTemplate()
+    const url = URL.createObjectURL(blob)
+    triggerFileDownload(url, '用户导入模板.xlsx')
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000)
+  } catch {
+    // 拦截器已提示
+  } finally {
+    templateDownloading.value = false
+  }
+}
+
+function handleImported(result: UserImportConfirmResult): void {
+  successMessage.value = staffOnly.value
+    ? `批量导入完成，共创建 ${result.createdCount} 个干事账号，新干事尚未分配任务`
+    : `批量导入完成，共创建 ${result.createdCount} 个用户`
+}
+
 async function submit(): Promise<void> {
   if (saving.value) return
   const valid = await formRef.value?.validate().catch(() => false)
@@ -157,8 +183,16 @@ onMounted(async () => {
   <div class="user-create-page">
     <BackButton :fallback="backFallback" />
     <div class="page-header">
-      <h1 class="page-title">用户添加</h1>
-      <p class="page-subtitle">按当前账号的可创建角色开通用户，学院干事由负责人自行管理。</p>
+      <div class="page-heading">
+        <h1 class="page-title">用户添加</h1>
+        <p class="page-subtitle">按当前账号的可创建角色开通用户，学院干事由负责人自行管理。</p>
+      </div>
+      <div class="header-actions">
+        <el-button :loading="templateDownloading" @click="handleDownloadTemplate">
+          下载 Excel 模板
+        </el-button>
+        <el-button type="primary" @click="importVisible = true">批量导入</el-button>
+      </div>
     </div>
 
     <el-card shadow="never" class="form-card">
@@ -245,6 +279,12 @@ onMounted(async () => {
         </div>
       </el-form>
     </el-card>
+
+    <UserImportDialog
+      v-model="importVisible"
+      :staff-context="staffOnly"
+      @imported="handleImported"
+    />
   </div>
 </template>
 
@@ -255,7 +295,26 @@ onMounted(async () => {
 }
 
 .page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
   margin-bottom: var(--space-4);
+}
+
+.page-heading {
+  min-width: 0;
+}
+
+.header-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.header-actions :deep(.el-button) {
+  margin-left: 0;
 }
 
 .page-title {
@@ -303,6 +362,21 @@ onMounted(async () => {
 }
 
 @media (max-width: 600px) {
+  .page-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .header-actions {
+    width: 100%;
+  }
+
+  .header-actions :deep(.el-button) {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 44px;
+  }
+
   .create-form :deep(.el-form-item) {
     display: block;
   }

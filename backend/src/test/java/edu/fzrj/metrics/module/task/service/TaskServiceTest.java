@@ -239,7 +239,7 @@ class TaskServiceTest {
     }
 
     @Test
-    void 非任务负责人分配干事返回20005() {
+    void 纯干事分配干事返回20005() {
         Task task = task(7L, "A01-01");
         task.setOwnerId(211L);
         task.setVersion(3);
@@ -258,7 +258,42 @@ class TaskServiceTest {
     }
 
     @Test
-    void 干事分配实际变化时任务版本仅推进一次() {
+    void 外院负责人分配干事返回20005() {
+        Task task = task(7L, "A01-01");
+        task.setVersion(3);
+        when(taskMapper.selectByIdForUpdate(7L)).thenReturn(task);
+        LoginUser outsider = new LoginUser(213L, "outsider", "外院负责人", 102L,
+                List.of("UNIT_OWNER"), List.of());
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(outsider, null, List.of()));
+        when(dataScopeService.isUnitScope(outsider)).thenReturn(true);
+        TaskDtos.StaffPutRequest request = new TaskDtos.StaffPutRequest();
+        request.setStaffIds(List.of(301L));
+        request.setVersion(3);
+
+        BizException error = assertThrows(BizException.class, () -> taskService.assignStaff(7L, request));
+
+        assertEquals(20005, error.getErrorCode().getCode());
+        verify(taskStaffService, never()).merge(any(), any(), any());
+    }
+
+    @Test
+    void 干事分配版本冲突返回10005() {
+        Task task = task(7L, "A01-01");
+        task.setVersion(3);
+        when(taskMapper.selectByIdForUpdate(7L)).thenReturn(task);
+        TaskDtos.StaffPutRequest request = new TaskDtos.StaffPutRequest();
+        request.setStaffIds(List.of(301L));
+        request.setVersion(2);
+
+        BizException error = assertThrows(BizException.class, () -> taskService.assignStaff(7L, request));
+
+        assertEquals(10005, error.getErrorCode().getCode());
+        verify(taskStaffService, never()).merge(any(), any(), any());
+    }
+
+    @Test
+    void 同学院非任务负责人分配实际变化时任务版本仅推进一次() {
         Task task = task(7L, "A01-01");
         task.setVersion(3);
         when(taskMapper.selectByIdForUpdate(7L)).thenReturn(task);
@@ -274,11 +309,11 @@ class TaskServiceTest {
         plan.setStartYear(2026);
         plan.setEndYear(2030);
         when(planMapper.selectById(10L)).thenReturn(plan);
-        LoginUser owner = new LoginUser(211L, "owner", "负责人", 101L,
+        LoginUser collaborator = new LoginUser(212L, "collaborator", "同学院负责人", 101L,
                 List.of("UNIT_OWNER"), List.of());
         SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(owner, null, List.of()));
-        when(dataScopeService.isUnitScope(owner)).thenReturn(true);
+                new UsernamePasswordAuthenticationToken(collaborator, null, List.of()));
+        when(dataScopeService.isUnitScope(collaborator)).thenReturn(true);
         when(taskStaffService.merge(any(), any(), any())).thenReturn(
                 new TaskStaffService.MergeResult(List.of(), List.of(301L), true));
         when(taskStaffService.staffOf(7L)).thenReturn(List.of());
@@ -295,6 +330,8 @@ class TaskServiceTest {
         TaskDtos.TaskDetail result = taskService.assignStaff(7L, request);
 
         assertEquals(4, result.version());
+        assertEquals(Boolean.TRUE, result.canAssignStaff());
+        verify(taskStaffService).merge(any(), any(), org.mockito.ArgumentMatchers.eq(212L));
         verify(taskMapper, times(1)).updateById(task);
     }
 

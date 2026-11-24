@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import StatusTag from '@/components/StatusTag.vue'
 import FilePreviewPane from '@/components/FilePreviewPane.vue'
 import SubmissionTimeline from '@/views/submission/components/SubmissionTimeline.vue'
+import ReviewHistoryDialog from './components/ReviewHistoryDialog.vue'
 import { batchReview, listPendingReviews, reviewSubmission } from '@/api/review'
+import { listPendingTrainingReviews } from '@/api/training'
 import { getSubmission, listSubmissions } from '@/api/submission'
-import { listIndicators } from '@/api/indicator'
+import { listPlans } from '@/api/plan'
+import type { PlanCard } from '@/types/plan'
 import { listOrgUnits } from '@/api/orgUnit'
 import type { OrgUnit } from '@/api/orgUnit'
+import type { TrainingSheetSummary } from '@/types/training'
 import { useUserStore } from '@/stores/user'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { getCurrentPlan } from '@/utils/currentPlan'
@@ -41,6 +45,7 @@ import type {
 } from '@/types/submission'
 
 const route = useRoute()
+const router = useRouter()
 const userStore = useUserStore()
 
 function allowedReviewNodes(): ReviewNode[] {
@@ -72,7 +77,6 @@ const initialReviewNode = requestedReviewNode && allowedReviewNodes().includes(r
 const filters = reactive({
   reviewNode: initialReviewNode as ReviewNode | '',
   planId: (typeof route.query.planId === 'string' ? route.query.planId : '') || getCurrentPlan()?.id || '',
-  indicatorId: '',
   unitId: '',
   keyword: '',
   dateRange: null as [string, string] | null,
@@ -85,46 +89,14 @@ const reviewNodeOptions = computed(() =>
 )
 
 const unitOptions = ref<OrgUnit[]>([])
-const indicatorOptions = ref<{ id: string; code: string; name: string; directionCode: string | null; directionName: string | null }[]>([])
-const indicatorGroups = computed(() => {
-  const groups = new Map<string, typeof indicatorOptions.value>()
-  for (const option of indicatorOptions.value) {
-    const name = option.directionName
-      ? option.directionName
-      : '未归入建设方向'
-    const list = groups.get(name) ?? []
-    list.push(option)
-    groups.set(name, list)
-  }
-  return [...groups.entries()].map(([name, items]) => ({ name, items }))
-})
-
-async function loadIndicatorOptions(): Promise<void> {
-  indicatorOptions.value = []
-  const linkedIndicatorId = filters.indicatorId
-  filters.indicatorId = ''
-  if (!filters.planId) return
-  try {
-    const tree = await listIndicators(filters.planId)
-    const legacyParent = tree.find((node) =>
-      node.children.some((child) => child.id === linkedIndicatorId),
-    )
-    if (legacyParent) filters.indicatorId = legacyParent.id
-    indicatorOptions.value = tree.map((node) => ({
-      id: node.id,
-      code: node.code,
-      name: node.name,
-      directionCode: node.directionCode ?? null,
-      directionName: node.directionName ?? null,
-    }))
-  } catch {
-    // 指标筛选不可用时忽略，保留其他筛选
-  }
-}
+const planOptions = ref<PlanCard[]>([])
 
 // ---------- 待审列表 ----------
 const listLoading = ref(false)
 const page = ref<PageResult<PendingReviewItem>>({ items: [], total: 0, page: 1, pageSize: 50 })
+const trainingPending = ref<TrainingSheetSummary[]>([])
+const trainingTotal = computed(() => trainingPending.value.length)
+const visibleTrainingItems = computed(() => page.value.page === 1 ? trainingPending.value : [])
 const checkedIds = ref<string[]>([])
 
 const selectedId = ref<string | null>(null)
@@ -134,7 +106,6 @@ function currentQuery() {
   return {
     reviewNode: filters.reviewNode || undefined,
     planId: filters.planId || undefined,
-    indicatorId: filters.indicatorId || undefined,
     unitId: filters.unitId || undefined,
     keyword: filters.keyword || undefined,
     submittedAtFrom: from ? `${from}T00:00:00+08:00` : undefined,
@@ -144,6 +115,19 @@ function currentQuery() {
   }
 }
 
+function filterTrainingItems(items: TrainingSheetSummary[]): TrainingSheetSummary[] {
+  const keyword = filters.keyword.trim().toLowerCase()
+  const [from, to] = filters.dateRange ?? [undefined, undefined]
+  return items.filter((item) => {
+    if (keyword && ![item.planName, item.unitName, item.submittedByName]
+      .some((value) => value?.toLowerCase().includes(keyword))) return false
+    const submittedDate = item.submittedAt?.slice(0, 10)
+    if (from && (!submittedDate || submittedDate < from)) return false
+    if (to && (!submittedDate || submittedDate > to)) return false
+    return true
+  })
+}
+
 let listLoadGeneration = 0
 
 async function loadList(keepSelection = false, autoSelect = true, silent = false): Promise<void> {
@@ -151,13 +135,23 @@ async function loadList(keepSelection = false, autoSelect = true, silent = false
   const selectionAtStart = selectedId.value
   if (!silent) listLoading.value = true
   try {
-    const result = await listPendingReviews(currentQuery())
+    const [result, trainingResult] = await Promise.all([
+      listPendingReviews(currentQuery()),
+      listPendingTrainingReviews({
+        reviewNode: filters.reviewNode || undefined,
+        planId: filters.planId || undefined,
+        unitId: filters.unitId || undefined,
+        page: 1,
+        pageSize: 100,
+      }),
+    ])
     if (!shouldApplyRefreshResponse({
       current: generation === listLoadGeneration && selectedId.value === selectionAtStart,
       silent,
       skipping: reviewFormDirty.value,
     })) return
     page.value = result
+    trainingPending.value = filterTrainingItems(trainingResult.items)
     const previous = keepSelection ? selectedId.value : null
     checkedIds.value = []
     const items = page.value.items
@@ -183,7 +177,7 @@ function applyFilters(): void {
 
 function resetFilters(): void {
   filters.reviewNode = defaultReviewNode()
-  filters.indicatorId = ''
+  filters.planId = ''
   filters.unitId = ''
   filters.keyword = ''
   filters.dateRange = null
@@ -262,6 +256,10 @@ async function loadDetail(id: string, silent = false): Promise<void> {
   } finally {
     if (!silent && generation === detailLoadGeneration) detailLoading.value = false
   }
+}
+
+function openTrainingReview(sheetId: string): void {
+  void router.push({ path: `/training/${sheetId}`, query: { from: 'reviews' } })
 }
 
 function selectItem(item: PendingReviewItem): void {
@@ -433,7 +431,8 @@ async function handleReject(): Promise<void> {
   }
 }
 
-// ---------- 批量通过 ----------
+// ---------- 批量通过与历史审核 ----------
+const historyVisible = ref(false)
 const batchVisible = ref(false)
 const batchComment = ref('')
 const batchReason = ref('')
@@ -648,7 +647,7 @@ onMounted(() => {
     .catch(() => {
       if (presetId) deepLinkMessage.value = { type: 'error', text: '待审核列表加载失败，暂时无法定位该填报' }
     })
-  void loadIndicatorOptions()
+  listPlans().then((list) => (planOptions.value = list)).catch(() => undefined)
   listOrgUnits().then((list) => (unitOptions.value = list)).catch(() => undefined)
 })
 
@@ -656,7 +655,10 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
 })
 
-useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.value })
+useAutoRefresh(
+  () => loadList(true, true, true),
+  { skip: () => reviewFormDirty.value },
+)
 </script>
 
 <template>
@@ -664,10 +666,13 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
     <div class="page-header">
       <div>
         <h1 class="page-title">审核中心</h1>
-        <p class="page-subtitle">待审核 {{ page.total }} 条 · ↑ / ↓ 切换上一条 / 下一条 · Ctrl + Enter 通过</p>
+        <p class="page-subtitle">
+          任务填报与职业培训统一审核 · 任务填报 {{ page.total }} 条 · 职业培训 {{ trainingTotal }} 条 · ↑ / ↓ 切换上一条 / 下一条 · Ctrl + Enter 通过
+        </p>
       </div>
     </div>
 
+    <section class="submission-review-area" aria-label="统一待办审核列表">
     <div class="app-action-row batch-actions">
       <el-button
         type="primary"
@@ -676,6 +681,7 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
       >
         批量通过{{ checkedIds.length > 0 ? `（已选 ${checkedIds.length}）` : '' }}
       </el-button>
+      <el-button @click="historyVisible = true">历史审核</el-button>
     </div>
 
     <el-card shadow="never" class="filter-card">
@@ -696,27 +702,21 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="指标">
+        <el-form-item label="计划">
           <el-select
-            v-model="filters.indicatorId"
+            v-model="filters.planId"
             clearable
             filterable
-            :disabled="!filters.planId"
-            popper-class="review-indicator-popper"
-            :placeholder="filters.planId ? '全部指标（可按编码或名称搜索）' : '请先选择计划'"
+            placeholder="全部计划"
             style="width: 280px"
             @change="applyFilters"
           >
-            <el-option-group v-for="group in indicatorGroups" :key="group.name" :label="group.name">
-              <el-option
-                v-for="option in group.items"
-                :key="option.id"
-                :label="`${option.code} ${option.name}`"
-                :value="option.id"
-              >
-                <span class="opt-code">{{ option.code }}</span><span class="opt-name" :title="option.name">{{ option.name }}</span>
-              </el-option>
-            </el-option-group>
+            <el-option
+              v-for="plan in planOptions"
+              :key="plan.id"
+              :label="plan.planType === 'TRAINING' ? `${plan.name}（职业培训）` : plan.name"
+              :value="plan.id"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="学院">
@@ -751,7 +751,7 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
           <el-input
             v-model="filters.keyword"
             clearable
-            placeholder="编号 / 指标名"
+            placeholder="编号 / 指标名 / 培训计划"
             style="width: 160px"
             @clear="applyFilters"
             @keyup.enter="applyFilters"
@@ -784,7 +784,28 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
             全选
           </el-checkbox>
         </div>
-        <ul v-if="page.items.length > 0" class="pending-list">
+        <ul v-if="page.items.length > 0 || visibleTrainingItems.length > 0" class="pending-list">
+          <li
+            v-for="sheet in visibleTrainingItems"
+            :key="`training-${sheet.id}`"
+            class="pending-item training-pending-item"
+            :data-training-sheet-id="sheet.id"
+            @click="openTrainingReview(sheet.id)"
+          >
+            <el-tag class="training-kind" size="small" type="warning">培训</el-tag>
+            <div class="pending-main">
+              <div class="pending-line">
+                <span class="training-pending-title">{{ sheet.planName }}</span>
+                <StatusTag kind="TrainingSheetStatus" :value="sheet.status" :review-node="sheet.currentReviewNode" />
+              </div>
+              <div class="pending-sub">{{ sheet.unitName ?? '—' }} · 职业培训</div>
+              <div class="pending-sub">
+                {{ sheet.projectCount }} 个项目
+                · {{ formatRelativeTime(sheet.submittedAt) }}
+                · 提交人 {{ sheet.submittedByName ?? '—' }}
+              </div>
+            </div>
+          </li>
           <li
             v-for="item in page.items"
             :key="item.id"
@@ -813,7 +834,7 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
             </div>
           </li>
         </ul>
-        <el-empty v-else-if="!listLoading" :image-size="120" description="太棒了，待审核的材料都处理完了" />
+        <el-empty v-else-if="!listLoading && visibleTrainingItems.length === 0" :image-size="120" description="太棒了，待审核的材料都处理完了" />
         <div v-if="page.total > page.pageSize" class="pager">
           <el-pagination
             :current-page="page.page"
@@ -998,6 +1019,9 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
         />
       </el-card>
     </div>
+    </section>
+
+    <ReviewHistoryDialog v-model="historyVisible" />
 
     <!-- 批量通过 -->
     <el-dialog
@@ -1067,30 +1091,6 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
 .filter-card {
   margin-bottom: var(--space-4);
   border-radius: var(--radius-card);
-}
-
-:global(.review-indicator-popper) {
-  max-width: 440px;
-}
-
-:global(.review-indicator-popper .el-select-dropdown__item) {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-:global(.review-indicator-popper .opt-code) {
-  flex: none;
-  color: var(--el-color-primary);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-:global(.review-indicator-popper .opt-name) {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .deep-link-alert {
@@ -1204,6 +1204,19 @@ useAutoRefresh(() => loadList(true, true, true), { skip: () => reviewFormDirty.v
 .pending-code {
   font-weight: 600;
   font-size: 13px;
+}
+
+.training-kind {
+  flex: none;
+  margin-top: 1px;
+}
+
+.training-pending-title {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  overflow-wrap: anywhere;
 }
 
 .pending-sub {

@@ -25,6 +25,9 @@ public class Plan {
     /** 计划名称，如 2026-2030 五年发展规划 */
     private String name;
 
+    /** 计划类型：INDICATOR 指标计划 / TRAINING 职业培训信息采集 */
+    private String planType;
+
     /** 起始年份 */
     private Integer startYear;
 

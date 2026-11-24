@@ -5,14 +5,22 @@ import type {
   BatchReviewRequest,
   PendingReviewItem,
   PendingReviewQuery,
+  ReviewHistoryQuery,
   ReviewRequest,
   SubmissionDetail,
+  SubmissionListItem,
 } from '@/types/submission'
 
 export function listPendingReviews(
   query: PendingReviewQuery = {},
 ): Promise<PageResult<PendingReviewItem>> {
   return http.get('/reviews/pending', { ...query })
+}
+
+export function listReviewHistory(
+  query: ReviewHistoryQuery = {},
+): Promise<PageResult<SubmissionListItem>> {
+  return http.get('/reviews/history', { ...query })
 }
 
 /** 审核（幂等，API 15.5 ⚡）：通过 / 驳回 / 核减 */

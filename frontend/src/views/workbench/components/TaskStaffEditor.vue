@@ -58,7 +58,7 @@ async function save(): Promise<void> {
       <el-alert
         type="info"
         :closable="false"
-        title="可添加或移除本人干事，保存后一次性生效；移除后该干事立即失去任务访问权限。"
+        title="同学院负责人均可添加或移除本学院干事，保存后一次性生效；移除后该干事立即失去任务访问权限。"
         class="staff-alert"
       />
       <div class="editor-label">已分配干事（{{ selectedStaffIds.length }} 人）</div>
@@ -80,7 +80,7 @@ async function save(): Promise<void> {
           :value="item.id"
         />
       </el-select>
-      <div class="field-tip">候选人仅包含您创建的、属于该任务学院的启用干事。</div>
+      <div class="field-tip">候选人包含属于该任务学院的全部启用纯干事，不受创建人限制。</div>
       <div class="staff-actions">
         <el-button :disabled="!dirty || saving" @click="reset">取消修改</el-button>
         <el-button type="primary" :disabled="!dirty" :loading="saving" @click="save">
@@ -102,7 +102,7 @@ async function save(): Promise<void> {
         </el-tag>
       </div>
       <el-empty v-else :image-size="72" description="该任务尚未分配干事" />
-      <div class="readonly-tip">当前任务仅可查看干事名单，任务分配仅限负责人本人。</div>
+      <div class="readonly-tip">当前任务仅可查看干事名单；同学院负责人可在可执行任务上分配干事。</div>
     </template>
   </section>
 </template>

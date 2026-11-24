@@ -39,7 +39,7 @@ export function creationUnitIds(
   selectedUnitIds: readonly string[],
   ownUnitIds: readonly string[],
 ): string[] {
-  if (targetRoles.includes('STAFF')) return [...new Set(ownUnitIds)]
+  if (targetRoles.includes('STAFF')) return []
   if (!creationNeedsOwnUnits(creatorRoles, targetRoles)) return [...new Set(selectedUnitIds)]
   const own = new Set(ownUnitIds)
   return [...new Set(selectedUnitIds.filter((unitId) => own.has(unitId)))]

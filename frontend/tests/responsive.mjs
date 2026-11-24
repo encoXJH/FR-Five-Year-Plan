@@ -177,7 +177,7 @@ try {
     await openPage(page, '/templates', '.page-title', `${viewport.name}-templates`)
     await openPage(page, '/logs', '.page-title', `${viewport.name}-logs`)
     await openPage(page, '/system', '.page-title', `${viewport.name}-system`)
-    for (const tab of ['执行单元', '主要建设方向', '专业群', '用户与角色', '字典', '参数配置', '飞书集成']) {
+    for (const tab of ['执行单元', '主要建设方向', '专业群', '用户与角色', '字典', '参数配置', '飞书集成', '双高管理平台机器人']) {
       const tabButton = page.getByRole('tab', { name: tab, exact: true })
       if (await tabButton.count()) {
         await tabButton.click()

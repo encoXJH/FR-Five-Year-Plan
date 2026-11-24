@@ -14,8 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * task_year 年度状态统一维护：计划年度已激活时，已下发的非历史任务年度应为 IN_PROGRESS。
- * 下发、计划启动、年度激活、调整自动建任务等写入路径统一调用，避免“任务已下发但年度未激活”。
+ * task_year 年度状态统一维护：全部规划年度激活后，已下发的非历史任务各年均为 IN_PROGRESS。
+ * 五年任务一次下发，后续自然年由填报校验自动接续，无需重复下发；写入路径统一同步，避免历史遗漏。
  */
 @Service
 public class TaskYearActivationService {

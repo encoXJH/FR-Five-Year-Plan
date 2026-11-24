@@ -28,7 +28,13 @@ public final class NotifyDtos {
             String detail,
             LocalDateTime todoSince,
             /** 填报截止日（YYYY-MM-DD，仅 FILL / REVIEW 有值，系统参数 plan.fillDeadline 拼年度） */
-            String deadline) {
+            String deadline,
+            String bizType,
+            String link) {
+        public TodoItem(String type, Long bizId, Long planId, Integer year, String bizCode,
+                        String detail, LocalDateTime todoSince, String deadline) {
+            this(type, bizId, planId, year, bizCode, detail, todoSince, deadline, null, null);
+        }
     }
 
     /** 待办响应：items 按 todoSince 升序；summary 为各类型计数 */
