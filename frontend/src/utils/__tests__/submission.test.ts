@@ -13,6 +13,7 @@ import {
   parseSubmissionRemark,
   projectAnnualCompletionRate,
   reviewInitialValue,
+  resolveSubmissionYear,
   serializeSubmissionRemark,
   submitterRoleForRoles,
 } from '../submission'
@@ -286,5 +287,21 @@ describe('formatMetricValue 按口径展示（UI 规范 3.4）', () => {
   it('空值显示 —', () => {
     expect(formatMetricValue(null, 'INCREMENT')).toBe('—')
     expect(formatMetricValue({ amount: null }, 'INCREMENT')).toBe('—')
+  })
+})
+
+describe('飞书任务年度深链', () => {
+  const years = [{ year: 2025 }, { year: 2026 }, { year: 2027 }]
+
+  it('仅选择任务中实际存在的请求年度', () => {
+    expect(resolveSubmissionYear(years, '2025', 2026)).toBe(2025)
+    expect(resolveSubmissionYear(years, '2027', 2026)).toBe(2027)
+  })
+
+  it('非法、重复或不存在的年度回退当前自然年', () => {
+    expect(resolveSubmissionYear(years, '2030', 2026)).toBe(2026)
+    expect(resolveSubmissionYear(years, 'abc', 2026)).toBe(2026)
+    expect(resolveSubmissionYear(years, ['2025', '2027'], 2026)).toBe(2026)
+    expect(resolveSubmissionYear(years, undefined, 2026)).toBe(2026)
   })
 })

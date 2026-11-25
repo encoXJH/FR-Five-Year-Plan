@@ -19,7 +19,7 @@ import {
   formatRelativeTime,
   EMPTY_DISPLAY,
 } from '@/utils/format'
-import { resolveNotificationLink, resolveTodoLink, todoGroupLabel } from '@/utils/todo'
+import { NOTIFICATIONS_CHANGED_EVENT, resolveNotificationLink, resolveTodoLink, todoGroupLabel } from '@/utils/todo'
 import { useAutoRefresh } from '@/utils/autoRefresh'
 import { clearCurrentPlan, getCurrentPlan, setCurrentPlan } from '@/utils/currentPlan'
 import type { CreatePlanRequest, PlanCard, PlanTemplate } from '@/types/plan'
@@ -396,20 +396,21 @@ async function loadNotifications(): Promise<void> {
 }
 
 async function openNotification(item: NotificationItem): Promise<void> {
+  if (!item.readAt) {
+    try {
+      const updated = await markNotificationRead(item.id)
+      item.readAt = updated.readAt
+      window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
+    } catch {
+      // 拦截器已提示
+    }
+  }
   const link = resolveNotificationLink(item)
   if (!link) {
     ElMessage.info('该通知暂无可跳转页面')
     return
   }
-  if (!item.readAt) {
-    try {
-      const updated = await markNotificationRead(item.id)
-      item.readAt = updated.readAt
-    } catch {
-      // 拦截器已提示
-    }
-  }
-  router.push(link)
+  await router.push(link)
 }
 
 useAutoRefresh(() => Promise.all([loadPlans(true), loadTodos(), loadNotifications()]))

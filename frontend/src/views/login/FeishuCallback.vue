@@ -1,19 +1,18 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { ApiError } from '@/utils/request'
 import {
+  consumeFeishuOAuthContext,
   detectClientEnv,
-  FEISHU_OAUTH_STATE_KEY,
-  isFeishuOAuthStateValid,
   parseFeishuCallbackSearch,
 } from '@/utils/feishu'
+import { resolveSafeInternalRedirect } from '@/utils/navigation'
 import FeishuBindForm from './components/FeishuBindForm.vue'
 import type { FeishuBindingChallenge } from '@/types/auth'
 
 /** 飞书 OAuth 回调：已绑定直接登录，首次绑定进入校内姓名和工号核验。 */
-const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
@@ -21,11 +20,17 @@ const status = ref<'loading' | 'binding' | 'error'>('loading')
 const errorMessage = ref('')
 const bindingChallenge = ref<FeishuBindingChallenge | null>(null)
 const clientEnv = detectClientEnv(window.navigator.userAgent)
+let safeReturnTo: string | null = null
 
 function redirectTarget(): string {
+  if (safeReturnTo) return safeReturnTo
   if (userStore.isTaskExecutorOnly) return userStore.homePath
   if (userStore.roles.includes('ADMIN')) return '/plans'
-  return typeof route.query.redirect === 'string' ? route.query.redirect : '/'
+  return '/'
+}
+
+function returnToLogin(): void {
+  router.replace(safeReturnTo ? { path: '/login', query: { redirect: safeReturnTo } } : '/login')
 }
 
 function handleBindSuccess(): void {
@@ -35,16 +40,16 @@ function handleBindSuccess(): void {
 
 onMounted(async () => {
   const query = parseFeishuCallbackSearch(window.location.search)
-  const expectedState = sessionStorage.getItem(FEISHU_OAUTH_STATE_KEY)
-  sessionStorage.removeItem(FEISHU_OAUTH_STATE_KEY)
+  const context = consumeFeishuOAuthContext(query.state)
   // 尽早从地址栏移除一次性 code 和 state，绑定表单停留期间不再暴露它们
   window.history.replaceState(null, '', window.location.pathname)
 
-  if (!isFeishuOAuthStateValid(query.state, expectedState)) {
-    errorMessage.value = '飞书登录状态校验失败，请返回登录页重新发起'
+  if (!context) {
+    errorMessage.value = '飞书登录状态校验失败或已过期，请返回登录页重新发起'
     status.value = 'error'
     return
   }
+  safeReturnTo = resolveSafeInternalRedirect(router, context.returnTo)
   if (query.error) {
     errorMessage.value = query.errorDescription || `飞书授权失败（${query.error}）`
     status.value = 'error'
@@ -84,11 +89,11 @@ onMounted(async () => {
         :binding-ticket-expires-at="bindingChallenge.bindingTicketExpiresAt"
         :client-type="clientEnv"
         @success="handleBindSuccess"
-        @cancel="router.replace('/login')"
+        @cancel="returnToLogin"
       />
       <el-result v-else icon="error" title="飞书登录失败" :sub-title="errorMessage">
         <template #extra>
-          <el-button type="primary" @click="router.replace('/login')">返回登录页</el-button>
+          <el-button type="primary" @click="returnToLogin">返回登录页</el-button>
         </template>
       </el-result>
     </el-card>

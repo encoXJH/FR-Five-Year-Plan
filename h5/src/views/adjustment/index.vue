@@ -26,6 +26,7 @@ import {
   isPendingStatus,
   isTransferType,
   nodeOfStatus,
+  resolveAdjustmentScope,
   summarizeItems,
 } from '@/utils/adjustment'
 import { formatTargetValue } from '@/utils/indicator'
@@ -38,8 +39,9 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const canUseOwnerActions = computed(() => canPerformOwnerOnlyActions(userStore.roles))
+const defaultScope = !canUseOwnerActions.value ? 'ALL' : userStore.can('adjustment:decide') ? 'TODO' : 'MINE'
 const scope = ref<'TODO' | 'MINE' | 'ALL'>(
-  !canUseOwnerActions.value ? 'ALL' : userStore.can('adjustment:decide') ? 'TODO' : 'MINE',
+  canUseOwnerActions.value ? resolveAdjustmentScope(route.query.scope, defaultScope) : 'ALL',
 )
 const loading = ref(false)
 const page = ref<PageResult<AdjustmentListItem>>({ items: [], total: 0, page: 1, pageSize: 10 })

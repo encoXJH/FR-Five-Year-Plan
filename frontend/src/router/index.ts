@@ -220,7 +220,8 @@ router.beforeEach(async (to) => {
   const userStore = useUserStore()
 
   if (to.path === '/login' || to.path === '/login/feishu-callback') {
-    return userStore.isLoggedIn ? '/' : true
+    // 网络失败时尚无 userInfo，允许停留登录页，避免仅凭本地 Token 循环跳回首页
+    return userStore.isLoggedIn && userStore.userInfo ? '/' : true
   }
   // 路径中的 ID 参数必须是雪花 ID（纯数字）；含占位符（如 {planId}）等非法值直接回首页，避免后端 400/500
   const hasBadIdParam = Object.entries(to.params).some(([key, value]) => {
@@ -241,7 +242,7 @@ router.beforeEach(async (to) => {
     try {
       await userStore.fetchMe()
     } catch {
-      return '/login'
+      return { path: '/login', query: { redirect: to.fullPath } }
     }
   }
   if (to.path === '/') return userStore.homePath

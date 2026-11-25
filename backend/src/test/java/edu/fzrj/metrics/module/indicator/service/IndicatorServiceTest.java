@@ -26,6 +26,8 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -225,10 +227,11 @@ class IndicatorServiceTest {
         verify(yearTargetMapper, never()).selectList(any());
     }
 
-    @Test
-    void 草稿指标变更建设方向后自动按新方向取号() {
-        LoginUser user = new LoginUser(99L, "admin", "管理员", null,
-                List.of("ADMIN"), List.of());
+    @ParameterizedTest
+    @ValueSource(strings = {"ADMIN", "LEADER"})
+    void 管理员或校级负责人变更建设方向后自动按新方向取号(String role) {
+        LoginUser user = new LoginUser(99L, role.toLowerCase(), "方向管理员", null,
+                List.of(role), List.of());
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(user, null, List.of()));
         try {
@@ -259,6 +262,27 @@ class IndicatorServiceTest {
             assertEquals("B02", detail.code());
             assertEquals("B", detail.directionCode());
             assertEquals(50L, indicator.getDirectionId());
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    @Test
+    void 其他角色不能变更指标建设方向() {
+        LoginUser user = new LoginUser(99L, "owner", "建设方向负责人", null,
+                List.of("SCHOOL_OWNER"), List.of());
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(user, null, List.of()));
+        try {
+            IndicatorDtos.DirectionAssignRequest request = new IndicatorDtos.DirectionAssignRequest();
+            request.setDirectionId(50L);
+            request.setVersion(1);
+
+            BizException error = assertThrows(BizException.class,
+                    () -> indicatorService.assignDirection(1L, request));
+
+            assertEquals(20004, error.getErrorCode().getCode());
+            verifyNoInteractions(indicatorMapper);
         } finally {
             SecurityContextHolder.clearContext();
         }

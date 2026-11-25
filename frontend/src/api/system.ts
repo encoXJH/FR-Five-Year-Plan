@@ -72,7 +72,7 @@ export type SystemUserQuery = {
   pageSize?: number
 }
 
-/** GET /users（system:manage；分页） */
+/** GET /users（system:manage 或 user:create；全校只读人员目录，分页） */
 export function listUsers(params: SystemUserQuery): Promise<PageResult<SystemUser>> {
   return http.get('/users', params)
 }

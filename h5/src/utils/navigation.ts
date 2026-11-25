@@ -39,6 +39,19 @@ function hasInvalidIds(route: Pick<RouteLocationNormalizedLoaded, 'params' | 'qu
   )
 }
 
+export function resolveSafeInternalRedirect(router: Router, value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim() !== value || !value.startsWith('/')
+    || value.startsWith('//') || value.includes('\\') || /[\u0000-\u001F\u007F]/.test(value)) return null
+  try {
+    const resolved = router.resolve(value)
+    if (!resolved.name || ['Login', 'FeishuCallback', 'Forbidden', 'Root'].includes(String(resolved.name))) return null
+    if (hasInvalidIds(resolved)) return null
+    return resolved.fullPath
+  } catch {
+    return null
+  }
+}
+
 function validFrom(route: RouteLocationNormalizedLoaded, router: Router, allowed?: string[]): string | null {
   const from = route.query.from
   if (!allowed || typeof from !== 'string' || !from.startsWith('/') || from.startsWith('//') || from.includes('\\')) return null

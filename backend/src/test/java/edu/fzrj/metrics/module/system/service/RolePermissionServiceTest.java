@@ -147,7 +147,7 @@ class RolePermissionServiceTest {
     @Test
     void 用户添加默认授权且三类角色允许管理员取消() {
         assertEquals(19, RolePermissions.defaultPermissions("ADMIN").size());
-        assertEquals(7, RolePermissions.defaultPermissions("LEADER").size());
+        assertEquals(8, RolePermissions.defaultPermissions("LEADER").size());
         assertEquals(9, RolePermissions.defaultPermissions("SCHOOL_OWNER").size());
         assertEquals(8, RolePermissions.defaultPermissions("UNIT_OWNER").size());
         RolePermissions.PermissionDefinition definition = RolePermissions.definitions().stream()
@@ -155,6 +155,16 @@ class RolePermissionServiceTest {
         assertEquals(Set.of("LEADER", "SCHOOL_OWNER", "UNIT_OWNER"), definition.configurableRoles());
         assertEquals(Set.of("ADMIN"), definition.lockedRoles());
         assertFalse(RolePermissions.ROLE_ORDER.contains("STAFF"));
+    }
+
+    @Test
+    void 校级系统管理默认授权且核心权限锁定() {
+        assertTrue(RolePermissions.defaultPermissions("LEADER").contains(RolePermissions.SYSTEM_MANAGE));
+        RolePermissions.PermissionDefinition definition = RolePermissions.definitions().stream()
+                .filter(item -> item.code().equals(RolePermissions.SYSTEM_MANAGE)).findFirst().orElseThrow();
+        assertTrue(definition.lockedRoles().contains("LEADER"));
+        assertTrue(definition.lockedRoles().contains("ADMIN"));
+        assertFalse(definition.configurableRoles().contains("LEADER"));
     }
 
     @Test

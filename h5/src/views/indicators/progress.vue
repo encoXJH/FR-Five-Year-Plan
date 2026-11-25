@@ -86,7 +86,7 @@ let loadSeq = 0
 
 async function loadPlans(): Promise<void> {
   try {
-    plans.value = await listPlans()
+    plans.value = (await listPlans()).filter((item) => item.planType !== 'TRAINING')
   } catch {
     // 拦截器已提示
   }

@@ -14,7 +14,7 @@ import { useUserStore } from '@/stores/user'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { formatDate, formatPercent } from '@/utils/format'
 import { enumOptions } from '@/utils/enumLabels'
-import { setCurrentPlan } from '@/utils/currentPlan'
+import { clearCurrentPlan, setCurrentPlan } from '@/utils/currentPlan'
 import type { PlanDetail, PlanYear } from '@/types/plan'
 import type { Milestone } from '@/types/milestone'
 import type { MilestoneStatus } from '@/types/enums'
@@ -43,6 +43,11 @@ async function loadPlan(): Promise<void> {
   loading.value = true
   try {
     plan.value = await getPlan(planId.value)
+    if (plan.value?.planType === 'TRAINING') {
+      clearCurrentPlan()
+      await router.replace('/plans')
+      return
+    }
     if (plan.value) setCurrentPlan(plan.value)
   } finally {
     loading.value = false

@@ -417,7 +417,7 @@ onMounted(() => {
   loadKpi()
   listPlans()
     .then((list) => {
-      planOptions.value = list
+      planOptions.value = list.filter((item) => item.planType !== 'TRAINING')
     })
     .catch(() => undefined)
   if (isAdminView.value) {

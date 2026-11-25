@@ -86,6 +86,12 @@ describe('TrainingProjectEditor schema 渲染', () => {
     expect(html).toContain('到账经费（万元，财政资金 + 非财政资金）')
     expect(html).toMatch(/<strong[^>]*>4<\/strong>/)
     expect(html).toContain('保存后由系统填写')
+    expect((html.match(/人数单位：人/g) ?? [])).toHaveLength(3)
+    expect(html).toContain('placeholder="请输入培训对象字段c18（人）"')
+    expect(html).toContain('placeholder="请输入重点行业字段c33（人）"')
+    expect(html).toContain('placeholder="请输入区域战略字段c45（人）"')
+    expect(html).toContain('model-value="5 人"')
+    expect(html).toContain('model-value="4 人"')
     expect((html.match(/readonly/g) ?? []).length).toBeGreaterThanOrEqual(4)
   })
 

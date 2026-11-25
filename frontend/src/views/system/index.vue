@@ -15,7 +15,7 @@ import FeishuBotPanel from './components/FeishuBotPanel.vue'
 const userStore = useUserStore()
 const activeTab = ref('orgUnits')
 const isAdmin = computed(() => userStore.roles.includes('ADMIN'))
-const canManageDirections = computed(() => isAdmin.value && userStore.can('system:manage'))
+const canManageDirections = computed(() => userStore.can('system:manage'))
 </script>
 
 <template>
@@ -30,11 +30,11 @@ const canManageDirections = computed(() => isAdmin.value && userStore.can('syste
         <el-tab-pane v-if="canManageDirections" label="主要建设方向" name="directions" lazy><DirectionPanel /></el-tab-pane>
         <el-tab-pane label="专业群" name="majorGroups" lazy><MajorGroupPanel /></el-tab-pane>
         <el-tab-pane label="用户与角色" name="users" lazy><UserPanel /></el-tab-pane>
-        <el-tab-pane label="角色权限设置" name="rolePermissions" lazy><RolePermissionPanel /></el-tab-pane>
-        <el-tab-pane label="字典" name="dicts" lazy><DictPanel /></el-tab-pane>
-        <el-tab-pane label="参数配置" name="settings" lazy><SettingsPanel /></el-tab-pane>
-        <el-tab-pane label="飞书集成" name="feishu" lazy><FeishuPanel /></el-tab-pane>
-        <el-tab-pane label="双高管理平台机器人" name="feishuBot" lazy><FeishuBotPanel /></el-tab-pane>
+        <el-tab-pane v-if="isAdmin" label="角色权限设置" name="rolePermissions" lazy><RolePermissionPanel /></el-tab-pane>
+        <el-tab-pane v-if="isAdmin" label="字典" name="dicts" lazy><DictPanel /></el-tab-pane>
+        <el-tab-pane v-if="isAdmin" label="参数配置" name="settings" lazy><SettingsPanel /></el-tab-pane>
+        <el-tab-pane v-if="isAdmin" label="飞书集成" name="feishu" lazy><FeishuPanel /></el-tab-pane>
+        <el-tab-pane v-if="isAdmin" label="双高管理平台机器人" name="feishuBot" lazy><FeishuBotPanel /></el-tab-pane>
       </el-tabs>
     </el-card>
   </div>

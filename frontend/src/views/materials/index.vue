@@ -427,7 +427,9 @@ async function exportSelectedZip(): Promise<void> {
 onMounted(async () => {
   const routePlanId = queryString(route.query.planId)
   const requests: Promise<unknown>[] = [
-    listPlans().then((data) => { plans.value = data }).catch(() => undefined),
+    listPlans().then((data) => {
+      plans.value = data.filter((item) => item.planType !== 'TRAINING')
+    }).catch(() => undefined),
   ]
   if (!userStore.isUnitOwnerOnly) {
     requests.push(listOrgUnits().then((data) => { units.value = data }))

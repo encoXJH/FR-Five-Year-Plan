@@ -90,6 +90,7 @@ public class UserDeletionService {
 
     @Transactional
     public void delete(Long userId, SystemDtos.UserDeleteRequest request) {
+        userAdminService.requireAdmin();
         SysUser user = userAdminService.requireUser(userId);
         if (!user.getVersion().equals(request.getVersion())) {
             throw new BizException(ErrorCode.VERSION_CONFLICT,

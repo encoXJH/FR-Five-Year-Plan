@@ -8,6 +8,7 @@ import { getUnreadNotificationCount } from '@/api/todo'
 import { changePassword as changePasswordApi } from '@/api/auth'
 import { detectClientEnv } from '@/utils/feishu'
 import { INITIAL_PASSWORD, passwordChangeError } from '@/utils/password'
+import { NOTIFICATIONS_CHANGED_EVENT } from '@/utils/todo'
 import { acknowledgeInitialPasswordReminder, shouldShowInitialPasswordReminder } from '@/utils/initialPasswordReminder'
 
 const router = useRouter()
@@ -33,16 +34,18 @@ async function refreshUnread(): Promise<void> {
 }
 
 function goTodos(): void {
-  router.push('/todos')
+  void router.push({ path: '/todos', query: { tab: 'notifications' } })
 }
 
 onMounted(() => {
-  refreshUnread()
+  void refreshUnread()
+  window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, refreshUnread)
   timer = setInterval(refreshUnread, POLL_INTERVAL_MS)
 })
 
 onBeforeUnmount(() => {
   if (timer !== null) clearInterval(timer)
+  window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, refreshUnread)
 })
 
 const passwordDialogVisible = ref(false)

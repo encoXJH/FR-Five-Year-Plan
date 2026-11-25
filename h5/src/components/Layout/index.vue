@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
+import { resolveBackTarget } from '@/utils/navigation'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,8 +22,8 @@ const title = computed(() => {
 })
 
 function goBack(): void {
-  if (window.history.length > 1) router.back()
-  else router.push(userStore.homePath)
+  const target = resolveBackTarget(route, router, userStore.homePath)
+  router.replace(target.href)
 }
 
 function openNotifications(): void {

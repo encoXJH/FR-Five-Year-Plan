@@ -170,7 +170,7 @@ function chooseDirection(id: string | null): void {
 onMounted(async () => {
   await loadLeaders()
   try {
-    plans.value = await listPlans()
+    plans.value = (await listPlans()).filter((item) => item.planType !== 'TRAINING')
     planId.value = (plans.value.find((item) => item.status === 'ACTIVE') ?? plans.value[0])?.id ?? ''
   } catch {
     // 忽略

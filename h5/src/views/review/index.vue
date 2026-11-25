@@ -55,8 +55,11 @@ const indicatorGroups = computed(() => {
   return [...groups.entries()].map(([name, items]) => ({ name, items }))
 })
 
+const reviewDeepLink = route.query.reviewNode === 'UNIT_REVIEW' || route.query.reviewNode === 'LEADER_REVIEW'
+  || typeof route.query.submissionId === 'string'
+const cachedPlanId = reviewDeepLink ? '' : getCurrentPlan()?.id || ''
 const filters = reactive({
-  planId: (typeof route.query.planId === 'string' ? route.query.planId : '') || getCurrentPlan()?.id || '',
+  planId: (typeof route.query.planId === 'string' ? route.query.planId : '') || cachedPlanId,
   indicatorId: '',
   unitId: '',
   reviewNode: (route.query.reviewNode === 'UNIT_REVIEW' || route.query.reviewNode === 'LEADER_REVIEW'

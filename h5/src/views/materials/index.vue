@@ -353,7 +353,7 @@ onMounted(async () => {
   const routePlanId = typeof route.query.planId === 'string' ? route.query.planId : ''
   const requests: Promise<unknown>[] = [
     listPlans().then((data) => {
-      plans.value = data
+      plans.value = data.filter((item) => item.planType !== 'TRAINING')
     }).catch(() => undefined),
   ]
   if (!userStore.isTaskExecutorOnly) {

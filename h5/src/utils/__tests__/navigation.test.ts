@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
-import { resolveBackTarget } from '../navigation'
+import { resolveBackTarget, resolveSafeInternalRedirect } from '../navigation'
 
 const routes = [
   ['Plans', '/plans'], ['PlanOverview', '/plans/:planId'], ['PlanIndicators', '/plans/:planId/indicators'],
@@ -10,7 +10,8 @@ const routes = [
   ['Workbench', '/workbench'], ['TaskSubmit', '/tasks/:taskId/submit'], ['Adjustments', '/adjustments'],
   ['AdjustmentApply', '/adjustments/apply'], ['IndicatorDetail', '/indicators/:id'], ['Stats', '/stats'],
   ['Materials', '/materials'], ['Reviews', '/reviews'], ['AuditLogs', '/logs'], ['Todos', '/todos'],
-  ['System', '/system'], ['Screen', '/screen/:planId?'], ['Login', '/login'], ['Forbidden', '/403'],
+  ['System', '/system'], ['Screen', '/screen/:planId?'], ['Login', '/login'],
+  ['FeishuCallback', '/login/feishu-callback'], ['Forbidden', '/403'],
 ] as const
 const router = createRouter({ history: createMemoryHistory(), routes: routes.map(([name, path]) => ({ name, path, component: {} })) })
 
@@ -57,5 +58,28 @@ describe('全站返回导航', () => {
   it('数组from和当前路由自引用均回退', () => {
     expect(target('/indicators/123?from=/stats&from=/plans', '/plans', '/plans/456/indicators').href).toBe('/plans/456/indicators')
     expect(target('/tasks/123/submit?from=/tasks/123/submit').href).toBe('/workbench')
+  })
+})
+
+describe('飞书登录安全业务回跳', () => {
+  it('保留任务、审核和调整的完整站内地址', () => {
+    expect(resolveSafeInternalRedirect(router, '/tasks/123/submit?year=2026')).toBe('/tasks/123/submit?year=2026')
+    expect(resolveSafeInternalRedirect(router, '/reviews?reviewNode=LEADER_REVIEW&planId=123'))
+      .toBe('/reviews?reviewNode=LEADER_REVIEW&planId=123')
+    expect(resolveSafeInternalRedirect(router, '/adjustments?scope=TODO&adjustmentId=456'))
+      .toBe('/adjustments?scope=TODO&adjustmentId=456')
+  })
+
+  it.each([
+    'https://example.com/tasks/123/submit', '//example.com/reviews', '/tasks\\123/submit',
+    '/login', '/login/feishu-callback', '/403', '/tasks/not-a-number/submit',
+    '/reviews?planId=abc', '/unknown',
+  ])('拒绝外部、异常或自循环地址：%s', (value) => {
+    expect(resolveSafeInternalRedirect(router, value)).toBeNull()
+  })
+
+  it('数组 redirect 和非字符串值均拒绝', () => {
+    expect(resolveSafeInternalRedirect(router, ['/plans', '/reviews'])).toBeNull()
+    expect(resolveSafeInternalRedirect(router, null)).toBeNull()
   })
 })

@@ -72,11 +72,13 @@ const requestedReviewNode = route.query.reviewNode === 'UNIT_REVIEW' || route.qu
 const initialReviewNode = requestedReviewNode && allowedReviewNodes().includes(requestedReviewNode)
   ? requestedReviewNode
   : defaultReviewNode()
+const reviewDeepLink = requestedReviewNode !== null || typeof route.query.submissionId === 'string'
+const cachedPlanId = reviewDeepLink ? '' : getCurrentPlan()?.id || ''
 
 // ---------- 筛选 ----------
 const filters = reactive({
   reviewNode: initialReviewNode as ReviewNode | '',
-  planId: (typeof route.query.planId === 'string' ? route.query.planId : '') || getCurrentPlan()?.id || '',
+  planId: (typeof route.query.planId === 'string' ? route.query.planId : '') || cachedPlanId,
   unitId: '',
   keyword: '',
   dateRange: null as [string, string] | null,

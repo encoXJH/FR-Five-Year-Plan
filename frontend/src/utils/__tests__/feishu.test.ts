@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
+  consumeFeishuOAuthContext,
   detectClientEnv,
   extractAppIdFromUrl,
+  FEISHU_OAUTH_CONTEXT_KEY,
+  FEISHU_OAUTH_CONTEXT_MAX_AGE_MS,
+  FEISHU_OAUTH_STATE_KEY,
   formatFeishuBotSchedule,
   isFeishuOAuthStateValid,
   isFeishuUnavailableCode,
   isFeishuUA,
   normalizeAuthorizeInfo,
   parseFeishuCallbackSearch,
+  saveFeishuOAuthContext,
 } from '../feishu'
 
 describe('formatFeishuBotSchedule', () => {
@@ -156,5 +161,47 @@ describe('normalizeAuthorizeInfo', () => {
     expect(normalizeAuthorizeInfo(null)).toBeNull()
     expect(normalizeAuthorizeInfo('x')).toBeNull()
     expect(normalizeAuthorizeInfo({ url: '' })).toBeNull()
+  })
+})
+
+describe('飞书 OAuth 一次性业务回跳上下文', () => {
+  function memoryStorage() {
+    const values = new Map<string, string>()
+    return {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value) },
+      removeItem: (key: string) => { values.delete(key) },
+    }
+  }
+
+  it('state 匹配时恢复完整目标且只能消费一次', () => {
+    const storage = memoryStorage()
+    const now = 1_800_000_000_000
+    const returnTo = '/reviews?reviewNode=LEADER_REVIEW&planId=123'
+    saveFeishuOAuthContext('state-1', returnTo, storage, now)
+    expect(consumeFeishuOAuthContext('state-1', storage, now + 1000)).toEqual({
+      state: 'state-1', returnTo, createdAt: now,
+    })
+    expect(storage.getItem(FEISHU_OAUTH_STATE_KEY)).toBeNull()
+    expect(storage.getItem(FEISHU_OAUTH_CONTEXT_KEY)).toBeNull()
+    expect(consumeFeishuOAuthContext('state-1', storage, now + 1000)).toBeNull()
+  })
+
+  it('state 不符或上下文损坏时拒绝并清理', () => {
+    const storage = memoryStorage()
+    const now = 1_800_000_000_000
+    saveFeishuOAuthContext('state-1', '/tasks/123/submit?year=2026', storage, now)
+    expect(consumeFeishuOAuthContext('state-2', storage, now)).toBeNull()
+    expect(storage.getItem(FEISHU_OAUTH_CONTEXT_KEY)).toBeNull()
+    storage.setItem(FEISHU_OAUTH_STATE_KEY, 'state-3')
+    storage.setItem(FEISHU_OAUTH_CONTEXT_KEY, '{bad-json')
+    expect(consumeFeishuOAuthContext('state-3', storage, now)).toBeNull()
+  })
+
+  it('超过 10 分钟的上下文不可使用', () => {
+    const storage = memoryStorage()
+    const now = 1_800_000_000_000
+    saveFeishuOAuthContext('state-1', '/adjustments?scope=TODO', storage, now)
+    expect(consumeFeishuOAuthContext('state-1', storage, now + FEISHU_OAUTH_CONTEXT_MAX_AGE_MS + 1)).toBeNull()
   })
 })

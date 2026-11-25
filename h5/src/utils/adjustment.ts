@@ -9,6 +9,12 @@ export const ADJUSTMENT_TYPE_CALIBERS: Record<AdjustmentType, StatCaliber[]> = {
   TARGET_CHANGE: ['INCREMENT', 'STOCK', 'GROWTH', 'RATIO', 'DIRECT_PERCENT', 'BOOLEAN'],
 }
 
+export type AdjustmentScope = 'TODO' | 'MINE' | 'ALL'
+
+export function resolveAdjustmentScope(value: unknown, fallback: AdjustmentScope): AdjustmentScope {
+  return value === 'TODO' || value === 'MINE' || value === 'ALL' ? value : fallback
+}
+
 export interface AdjustmentTypeOption {
   type: AdjustmentType
   enabled: boolean

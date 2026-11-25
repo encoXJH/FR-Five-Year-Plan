@@ -29,6 +29,7 @@ import {
   initialReviewNodeForRoles,
   parseSubmissionRemark,
   projectAnnualCompletionRate,
+  resolveSubmissionYear,
   serializeSubmissionRemark,
 } from '@/utils/submission'
 import { canWriteTask, formatDeadline, primaryTaskIndicator, progressPercentage } from '@/utils/task'
@@ -69,19 +70,19 @@ const submitButtonText = computed(() =>
 // ---------- 年度上下文 ----------
 const currentYear = new Date().getFullYear()
 
+const year = computed(() => resolveSubmissionYear(task.value?.years ?? [], route.query.year, currentYear))
 const yearItem = computed<TaskYearItem | null>(() =>
-  (task.value?.years ?? []).find((item) => item.year === currentYear) ?? null,
+  (task.value?.years ?? []).find((item) => item.year === year.value) ?? null,
 )
-
-const year = computed(() => yearItem.value?.year ?? currentYear)
 
 /** 提交遇 60003 时置位：年度已锁定（整页只读） */
 const lockedByError = ref(false)
 
-/** 已达标或年度核算后的状态只读；提交遇 60003 同样锁定。 */
+/** 非当前自然年、已达标或年度核算后的状态只读；提交遇 60003 同样锁定。 */
 const yearLocked = computed(() => {
   const status = yearItem.value?.yearStatus
   return (
+    year.value !== currentYear ||
     lockedByError.value ||
     status === 'ACHIEVED' ||
     status === 'NOT_ACHIEVED' ||
@@ -90,6 +91,9 @@ const yearLocked = computed(() => {
   )
 })
 const yearLockedText = computed(() => {
+  if (year.value !== currentYear) {
+    return `${year.value} 年度仅支持查看；只有当前自然年 ${currentYear} 年可填报`
+  }
   if (!lockedByError.value && yearItem.value?.yearStatus === 'ACHIEVED') {
     return `${year.value} 年度已达标，不能再次填报`
   }
@@ -125,7 +129,9 @@ const yearSubmissions = computed(() =>
 
 const latestSubmission = computed(() => yearSubmissions.value[0] ?? null)
 const canSubmitAgain = computed(() =>
-  latestSubmission.value?.status === 'APPROVED' && yearItem.value?.yearStatus === 'IN_PROGRESS',
+  year.value === currentYear
+  && latestSubmission.value?.status === 'APPROVED'
+  && yearItem.value?.yearStatus === 'IN_PROGRESS',
 )
 
 /** 存在待审核填报：表单只读 + 可撤回（P08 状态约束） */

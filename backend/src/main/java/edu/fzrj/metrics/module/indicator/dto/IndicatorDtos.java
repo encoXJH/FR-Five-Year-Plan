@@ -122,7 +122,7 @@ public final class IndicatorDtos {
         private List<YearTargetItem> yearTargets;
     }
 
-    /** ADMIN 设置草稿 A 的 S 归属 */
+    /** ADMIN / LEADER 设置草稿 A 的 S 归属 */
     @Data
     public static class DirectionAssignRequest {
         @NotNull(message = "缺少 version（乐观锁版本号）")

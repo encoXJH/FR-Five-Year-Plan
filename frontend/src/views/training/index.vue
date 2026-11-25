@@ -134,6 +134,13 @@ watch(sheetId, () => {
 }, { immediate: true })
 
 function backToList(): void {
+  if (route.query.from === 'plans' && route.query.source === 'h5') {
+    const h5Base = import.meta.env.DEV
+      ? `${window.location.protocol}//${window.location.hostname}:5174`
+      : '/h5'
+    window.location.assign(`${h5Base}/plans`)
+    return
+  }
   const target = route.query.from === 'reviews'
     ? '/reviews'
     : route.query.from === 'plans'

@@ -96,7 +96,7 @@ function renderCharts(): void {
 
 async function loadPlans(): Promise<void> {
   try {
-    plans.value = await listPlans()
+    plans.value = (await listPlans()).filter((item) => item.planType !== 'TRAINING')
     if (!planId.value) {
       planId.value = plans.value.find((item) => item.status === 'ACTIVE')?.id ?? plans.value[0]?.id ?? ''
     }

@@ -131,4 +131,14 @@ describe('干事与用户添加路由权限', () => {
 
     expect(router.currentRoute.value.path).toBe('/workbench')
   })
+
+  it('后端离线导致 auth/me 失败时停留登录页，不循环跳转', async () => {
+    userStore.userInfo = null
+    userStore.fetchMe.mockRejectedValueOnce(new Error('ECONNREFUSED'))
+
+    await router.push('/workbench')
+
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(userStore.fetchMe).toHaveBeenCalledTimes(1)
+  })
 })

@@ -36,6 +36,19 @@ const data = ref<TrainingProjectData>(emptyTrainingProjectData())
 const rowNo = ref(1)
 const groups = computed(() => groupTrainingFields(props.fields))
 const funding = computed(() => calculateTrainingFunding(data.value))
+const peopleGroups = new Set(['AUDIENCE', 'INDUSTRY', 'REGION'])
+
+function isPeopleGroup(group: string): boolean {
+  return peopleGroups.has(group)
+}
+
+function readonlyDisplayValue(group: string, key: string): unknown {
+  const value = data.value[key] ?? ''
+  if (value !== '' && isPeopleGroup(group) && ['c32', 'c44', 'c54'].includes(key)) {
+    return `${value} 人`
+  }
+  return value
+}
 const title = computed(() => {
   if (props.readonly) return '查看培训项目'
   return props.isNew ? '新增培训项目' : '编辑培训项目'
@@ -107,7 +120,10 @@ function confirm(): void {
         class="training-field-group"
         :aria-label="group.groupLabel"
       >
-        <h2 class="training-field-group__title">{{ group.groupLabel }}</h2>
+        <div class="training-field-group__heading">
+          <h2 class="training-field-group__title">{{ group.groupLabel }}</h2>
+          <span v-if="isPeopleGroup(group.group)" class="training-field-group__unit">人数单位：人</span>
+        </div>
         <div class="training-field-grid">
           <el-form-item
             v-for="field in group.fields"
@@ -118,7 +134,7 @@ function confirm(): void {
           >
             <el-input
               v-if="isTrainingReadonlyField(field.key)"
-              :model-value="data[field.key] ?? ''"
+              :model-value="readonlyDisplayValue(group.group, field.key)"
               readonly
               :placeholder="field.key === 'c57' ? '保存后由系统填写' : '自动计算'"
             />
@@ -155,7 +171,7 @@ function confirm(): void {
               :min="0"
               :precision="field.type === 'INTEGER' ? 0 : undefined"
               :controls="false"
-              :placeholder="`请输入${field.label}`"
+              :placeholder="isPeopleGroup(group.group) ? `请输入${field.label}（人）` : `请输入${field.label}`"
               @update:model-value="setValue(field.key, $event)"
             />
             <el-input
@@ -211,11 +227,26 @@ function confirm(): void {
   border-bottom: 0;
 }
 
-.training-field-group__title {
+.training-field-group__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin: 0 0 16px;
+}
+
+.training-field-group__title {
+  margin: 0;
   color: var(--el-text-color-primary);
   font-size: 16px;
   font-weight: 600;
+}
+
+.training-field-group__unit {
+  flex: none;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .training-field-grid {

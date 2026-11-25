@@ -16,6 +16,7 @@ const responseItem = {
   endYear: 2030,
   baselineYear: 2025,
   status: 'ACTIVE',
+  planType: 'TRAINING',
   completionRate: 0.5,
   createdAt: '2026-01-01T08:00:00+08:00',
   updatedAt: null,
@@ -40,6 +41,7 @@ describe('计划列表卡片映射', () => {
       indicatorCountA: 1,
       indicatorCountAPlus: 2,
       taskCountB: 3,
+      planType: 'TRAINING',
       updatedAt: responseItem.createdAt,
     })
   })

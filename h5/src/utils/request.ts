@@ -90,8 +90,15 @@ async function refreshAccessToken(): Promise<string> {
 
 function redirectToLogin(): void {
   clearTokens()
-  if (window.location.pathname !== '/login') {
-    window.location.assign('/login')
+  const base = import.meta.env.BASE_URL
+  const loginPath = base === '/' ? '/login' : `${base}login`
+  if (window.location.pathname !== loginPath) {
+    const pathname = window.location.pathname
+    const routePath = base !== '/' && pathname.startsWith(base)
+      ? pathname.slice(base.length - 1)
+      : pathname === base.slice(0, -1) ? '/' : pathname
+    const current = routePath + window.location.search + window.location.hash
+    window.location.assign(`${loginPath}?redirect=${encodeURIComponent(current)}`)
   }
 }
 

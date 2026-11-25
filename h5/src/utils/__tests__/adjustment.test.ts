@@ -12,6 +12,7 @@ import {
   isPendingStatus,
   isTransferType,
   nodeOfStatus,
+  resolveAdjustmentScope,
   summarizeItems,
 } from '../adjustment'
 import type { AdjustmentSnapshotRow } from '@/types/adjustment'
@@ -242,5 +243,19 @@ describe('isPendingStatus / canWithdraw / nodeOfStatus', () => {
     expect(nodeOfStatus('PENDING_RECEIVER_CONFIRM')).toBe('RECEIVER_CONFIRM')
     expect(nodeOfStatus('PENDING_LEADER_APPROVAL')).toBe('LEADER_APPROVAL')
     expect(nodeOfStatus('APPROVED')).toBeNull()
+  })
+})
+
+describe('飞书调整列表 scope 深链', () => {
+  it('支持 TODO / MINE / ALL', () => {
+    expect(resolveAdjustmentScope('TODO', 'ALL')).toBe('TODO')
+    expect(resolveAdjustmentScope('MINE', 'ALL')).toBe('MINE')
+    expect(resolveAdjustmentScope('ALL', 'TODO')).toBe('ALL')
+  })
+
+  it('非法、数组和空值使用角色默认范围', () => {
+    expect(resolveAdjustmentScope('INVALID', 'ALL')).toBe('ALL')
+    expect(resolveAdjustmentScope(['TODO', 'ALL'], 'MINE')).toBe('MINE')
+    expect(resolveAdjustmentScope(undefined, 'TODO')).toBe('TODO')
   })
 })

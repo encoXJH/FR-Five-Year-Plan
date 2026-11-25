@@ -91,7 +91,8 @@ async function refreshAccessToken(): Promise<string> {
 function redirectToLogin(): void {
   clearTokens()
   if (window.location.pathname !== '/login') {
-    window.location.assign('/login')
+    const current = window.location.pathname + window.location.search + window.location.hash
+    window.location.assign(`/login?redirect=${encodeURIComponent(current)}`)
   }
 }
 

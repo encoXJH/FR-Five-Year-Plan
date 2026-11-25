@@ -11,7 +11,8 @@ function deviceRedirectPlugin(): Plugin {
       server.middlewares.use((req, res, next) => {
         const isNavigation = (req.method === 'GET' || req.method === 'HEAD')
           && (req.headers.accept ?? '').includes('text/html')
-        if (!isNavigation || !mobileUserAgent.test(req.headers['user-agent'] ?? '')) {
+        const isTraining = /^\/training(?:\/|\?|$)/.test(req.url ?? '')
+        if (!isNavigation || isTraining || !mobileUserAgent.test(req.headers['user-agent'] ?? '')) {
           next()
           return
         }

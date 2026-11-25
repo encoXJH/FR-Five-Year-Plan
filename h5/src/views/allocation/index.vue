@@ -265,7 +265,7 @@ async function loadAll(): Promise<void> {
 
 async function loadPlans(): Promise<void> {
   try {
-    plans.value = await listPlans()
+    plans.value = (await listPlans()).filter((item) => item.planType !== 'TRAINING')
     if (!planId.value) {
       const active = plans.value.find((item) => item.status === 'ACTIVE') ?? plans.value[0]
       if (active) await router.replace(`/plans/${active.id}/allocation`)

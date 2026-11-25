@@ -28,6 +28,7 @@ import {
   formatMetricValue,
   parseSubmissionRemark,
   projectAnnualCompletionRate,
+  resolveSubmissionYear,
   serializeSubmissionRemark,
 } from '@/utils/submission'
 import { canWriteTask, formatDeadline, primaryTaskIndicator, progressPercentage } from '@/utils/task'
@@ -63,20 +64,24 @@ const submitFlowHint = computed(() => submitterRole.value === 'STAFF'
   : '提交后将由校级负责人终审')
 
 const currentYear = new Date().getFullYear()
+const year = computed(() => resolveSubmissionYear(task.value?.years ?? [], route.query.year, currentYear))
 const yearItem = computed<TaskYearItem | null>(
-  () => (task.value?.years ?? []).find((item) => item.year === currentYear) ?? null,
+  () => (task.value?.years ?? []).find((item) => item.year === year.value) ?? null,
 )
-const year = computed(() => yearItem.value?.year ?? currentYear)
 const lockedByError = ref(false)
 const yearLocked = computed(() => {
   const status = yearItem.value?.yearStatus
-  return lockedByError.value
+  return year.value !== currentYear
+    || lockedByError.value
     || status === 'ACHIEVED'
     || status === 'NOT_ACHIEVED'
     || status === 'MAKEUP_PENDING'
     || status === 'MADE_UP'
 })
 const yearLockedText = computed(() => {
+  if (year.value !== currentYear) {
+    return `${year.value} 年度仅支持查看；只有当前自然年 ${currentYear} 年可填报`
+  }
   if (!lockedByError.value && yearItem.value?.yearStatus === 'ACHIEVED') {
     return `${year.value} 年度已达标，不能再次填报`
   }
@@ -102,7 +107,9 @@ const yearSubmissions = computed(() =>
 )
 const latestSubmission = computed(() => yearSubmissions.value[0] ?? null)
 const canSubmitAgain = computed(() =>
-  latestSubmission.value?.status === 'APPROVED' && yearItem.value?.yearStatus === 'IN_PROGRESS',
+  year.value === currentYear
+  && latestSubmission.value?.status === 'APPROVED'
+  && yearItem.value?.yearStatus === 'IN_PROGRESS',
 )
 const pendingSubmission = computed(() =>
   latestSubmission.value?.status === 'PENDING_REVIEW' ? latestSubmission.value : null,

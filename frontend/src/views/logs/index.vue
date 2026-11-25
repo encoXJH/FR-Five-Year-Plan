@@ -13,7 +13,14 @@ import { enumLabel, enumOptions } from '@/utils/enumLabels'
 import { formatDateTimeFull } from '@/utils/format'
 import { useAutoRefresh } from '@/utils/autoRefresh'
 import { newIdempotencyKey } from '@/utils/idempotency'
-import { buildAuditDetail } from '@/utils/auditDetail'
+import {
+  buildAuditDetail,
+  compactRequestId,
+  formatAuditObject,
+  formatAuditObjectTitle,
+  formatAuditRoles,
+  formatAuditTerminal,
+} from '@/utils/auditDetail'
 
 const userStore = useUserStore()
 const loading = ref(false)
@@ -84,11 +91,6 @@ function changePageSize(value: number): void {
   void loadLogs()
 }
 
-function roleText(roles: string | null): string {
-  if (!roles) return '—'
-  return roles.split(',').map((role) => enumLabel('Role', role, userStore.enums)).join('、')
-}
-
 function logDetail(row: AuditLogItem) {
   return buildAuditDetail(row)
 }
@@ -96,7 +98,7 @@ function logDetail(row: AuditLogItem) {
 async function copyRequestId(requestId: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(requestId)
-    ElMessage.success('requestId 已复制')
+    ElMessage.success('请求编号已复制')
   } catch {
     ElMessage.warning('复制失败，请手动选择复制')
   }
@@ -277,7 +279,7 @@ useAutoRefresh(() => loadLogs(true), { intervalMs: 60_000 })
         <template #default="{ row }">{{ row.operator?.name ?? '—' }}</template>
       </el-table-column>
       <el-table-column label="角色" min-width="150" show-overflow-tooltip>
-        <template #default="{ row }">{{ roleText(row.roles) }}</template>
+        <template #default="{ row }">{{ formatAuditRoles(row.roles) }}</template>
       </el-table-column>
       <el-table-column label="所属单元" min-width="160" show-overflow-tooltip>
         <template #default="{ row }">{{ row.unit ? `${row.unit.code} ${row.unit.name}` : '—' }}</template>
@@ -289,21 +291,22 @@ useAutoRefresh(() => loadLogs(true), { intervalMs: 60_000 })
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="对象" min-width="170" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.resourceCode ?? row.resourceId ?? '—' }}</template>
-      </el-table-column>
-      <el-table-column label="摘要" min-width="180" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.reason ?? row.resourceCode ?? '—' }}</template>
-      </el-table-column>
-      <el-table-column label="终端 / IP" min-width="160">
+      <el-table-column label="对象" min-width="170">
         <template #default="{ row }">
-          {{ row.clientType ? enumLabel('ClientType', row.clientType, userStore.enums) : '—' }}
-          <span v-if="row.ip"> / {{ row.ip }}</span>
+          <span class="object-cell" :title="formatAuditObjectTitle(row)">{{ formatAuditObject(row) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="requestId" min-width="190">
+      <el-table-column label="摘要" min-width="220" show-overflow-tooltip>
+        <template #default="{ row }">{{ logDetail(row).summary }}</template>
+      </el-table-column>
+      <el-table-column label="终端 / IP" min-width="150">
         <template #default="{ row }">
-          <span class="mono request-id">{{ row.requestId }}</span>
+          <span :title="row.ip ?? ''">{{ formatAuditTerminal(row) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="请求编号" min-width="170">
+        <template #default="{ row }">
+          <span class="mono request-id" :title="row.requestId">{{ compactRequestId(row.requestId) }}</span>
           <el-button link type="primary" @click="copyRequestId(row.requestId)">复制</el-button>
         </template>
       </el-table-column>
@@ -448,6 +451,13 @@ useAutoRefresh(() => loadLogs(true), { intervalMs: 60_000 })
   margin-top: var(--space-3);
 }
 
+.object-cell {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mono {
   font-family: var(--app-font-mono);
 }
@@ -455,6 +465,7 @@ useAutoRefresh(() => loadLogs(true), { intervalMs: 60_000 })
 .request-id {
   margin-right: var(--space-2);
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .pagination-bar {

@@ -15,6 +15,18 @@ export const CALIBER_INPUT_FIELDS: Record<StatCaliber, MetricInputField[]> = {
   BOOLEAN: ['achieved'],
 }
 
+export function resolveSubmissionYear(
+  years: readonly { year: number }[],
+  requested: unknown,
+  currentYear: number,
+): number {
+  if (typeof requested === 'string' && /^\d{4}$/.test(requested)) {
+    const year = Number(requested)
+    if (years.some((item) => item.year === year)) return year
+  }
+  return currentYear
+}
+
 export interface ReviewGuardSubmission {
   status: SubmissionStatus
   currentReviewNode: ReviewNode | null

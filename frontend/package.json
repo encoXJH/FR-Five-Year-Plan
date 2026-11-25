@@ -13,6 +13,9 @@
     "test:allocation-modal": "node tests/task-allocation-modal.mjs",
     "test:gantt": "node tests/indicator-gantt.mjs",
     "test:navigation": "node tests/navigation.mjs",
+    "test:feishu-deep-link": "node tests/feishu-deep-link.mjs",
+    "test:training-people-unit": "node tests/training-people-unit.mjs",
+    "test:leader-training-context": "node tests/leader-system-training-context.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

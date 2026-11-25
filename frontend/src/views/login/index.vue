@@ -7,14 +7,16 @@ import { useUserStore } from '@/stores/user'
 import { fetchFeishuAuthorizeUrl } from '@/api/auth'
 import { ApiError } from '@/utils/request'
 import {
+  clearFeishuOAuthContext,
   detectClientEnv,
-  FEISHU_OAUTH_STATE_KEY,
   isFeishuUnavailableCode,
   normalizeAuthorizeInfo,
+  saveFeishuOAuthContext,
   type ClientEnv,
   type FeishuAuthorizeInfo,
 } from '@/utils/feishu'
 import { createUuid } from '@/utils/uuid'
+import { resolveSafeInternalRedirect } from '@/utils/navigation'
 import type { LoginRequest } from '@/types/auth'
 
 const router = useRouter()
@@ -43,24 +45,26 @@ const feishuAuth = ref<FeishuAuthorizeInfo | null>(null)
 const autoLoginPending = ref(clientEnv !== 'WEB')
 const feishuLoginLoading = ref(false)
 function redirectTarget(): string {
+  const explicit = resolveSafeInternalRedirect(router, route.query.redirect)
+  if (explicit) return explicit
   if (userStore.isTaskExecutorOnly) return userStore.homePath
   if (userStore.roles.includes('ADMIN')) return '/plans'
-  return typeof route.query.redirect === 'string' ? route.query.redirect : '/'
+  return '/'
 }
 
-/** 生成并保存 OAuth state，再跳转飞书授权页 */
+/** 生成并保存一次性 OAuth 上下文，再跳转飞书授权页 */
 async function goFeishuAuthorize(): Promise<boolean> {
   if (!feishuAuth.value) return false
   feishuLoginLoading.value = true
   const state = createUuid()
   try {
-    sessionStorage.setItem(FEISHU_OAUTH_STATE_KEY, state)
+    saveFeishuOAuthContext(state, resolveSafeInternalRedirect(router, route.query.redirect))
     const info = normalizeAuthorizeInfo(await fetchFeishuAuthorizeUrl(state))
     if (!info?.url) throw new Error('飞书授权地址不可用')
     window.location.assign(info.url)
     return true
   } catch {
-    sessionStorage.removeItem(FEISHU_OAUTH_STATE_KEY)
+    clearFeishuOAuthContext()
     feishuLoginLoading.value = false
     ElMessage.error('暂时无法发起飞书登录，请稍后重试')
     return false

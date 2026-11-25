@@ -19,6 +19,10 @@ import ReasonDialog from '@/components/ReasonDialog.vue'
 import type { Role } from '@/types/enums'
 import type { SystemUser } from '@/types/system'
 
+const props = withDefaults(
+  defineProps<{ readonly?: boolean; unitOwnerDirectory?: boolean }>(),
+  { readonly: false, unitOwnerDirectory: false },
+)
 const userStore = useUserStore()
 const router = useRouter()
 
@@ -31,11 +35,18 @@ const filters = reactive({
   keyword: '',
   unitId: '' as string,
   role: '' as string,
+  isEnabled: '' as '' | boolean,
   page: 1,
   pageSize: 20,
 })
 
-const roleOptions = computed(() => enumOptions('Role', userStore.enums))
+const roleOptions = computed(() => {
+  const options = enumOptions('Role', userStore.enums)
+  return props.unitOwnerDirectory
+    ? options.filter((option) => ['UNIT_OWNER', 'STAFF'].includes(option.value))
+    : options
+})
+const isAdmin = computed(() => !props.readonly && userStore.roles.includes('ADMIN'))
 
 let loadSequence = 0
 
@@ -47,6 +58,7 @@ async function load(silent = false): Promise<void> {
       keyword: filters.keyword.trim() || undefined,
       unitId: filters.unitId || undefined,
       role: filters.role || undefined,
+      isEnabled: filters.isEnabled === '' ? undefined : filters.isEnabled,
       page: filters.page,
       pageSize: filters.pageSize,
     })
@@ -246,6 +258,14 @@ useAutoRefresh(() => load(true))
 
 <template>
   <div>
+    <el-alert
+      v-if="!isAdmin"
+      class="directory-alert"
+      type="info"
+      :closable="false"
+      title="全校人员查询"
+      description="可按姓名、工号、所属单元、角色和状态查找全校人员，人员信息仅支持查看。"
+    />
     <div class="panel-toolbar">
       <el-input
         v-model="filters.keyword"
@@ -253,8 +273,15 @@ useAutoRefresh(() => load(true))
         clearable
         style="width: 200px"
         @keyup.enter="search"
+        @clear="search"
       />
-      <el-select v-model="filters.unitId" clearable placeholder="所属单元" style="width: 180px">
+      <el-select
+        v-model="filters.unitId"
+        clearable
+        placeholder="所属单元"
+        style="width: 180px"
+        @change="search"
+      >
         <el-option v-for="u in units" :key="u.id" :label="`${u.code} ${u.name}`" :value="u.id" />
       </el-select>
       <el-select
@@ -267,9 +294,20 @@ useAutoRefresh(() => load(true))
       >
         <el-option v-for="o in roleOptions" :key="o.value" :label="o.label" :value="o.value" />
       </el-select>
+      <el-select
+        v-model="filters.isEnabled"
+        clearable
+        placeholder="全部状态"
+        aria-label="按状态筛选"
+        style="width: 140px"
+        @change="search"
+      >
+        <el-option label="启用" :value="true" />
+        <el-option label="停用" :value="false" />
+      </el-select>
       <el-button type="primary" @click="search">查询</el-button>
     </div>
-    <div class="app-action-row panel-actions">
+    <div v-if="isAdmin" class="app-action-row panel-actions">
       <el-button type="primary" @click="openCreate">新增用户</el-button>
     </div>
 
@@ -306,7 +344,7 @@ useAutoRefresh(() => load(true))
       <el-table-column label="最近登录" width="150">
         <template #default="{ row }">{{ formatDateTime(row.lastLoginAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="180" fixed="right">
+      <el-table-column v-if="isAdmin" label="操作" width="180" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
           <el-button link type="primary" size="small" @click="openSetRoles(row)">设置角色</el-button>
@@ -349,7 +387,8 @@ useAutoRefresh(() => load(true))
       />
     </div>
 
-    <el-dialog v-model="dialogVisible" title="编辑用户" width="480px">
+    <template v-if="isAdmin">
+      <el-dialog v-model="dialogVisible" title="编辑用户" width="480px">
       <el-form label-width="90px">
         <el-form-item label="姓名" required>
           <el-input v-model="form.name" />
@@ -410,10 +449,15 @@ useAutoRefresh(() => load(true))
       :loading="deleteSaving"
       @confirm="submitDelete"
     />
+    </template>
   </div>
 </template>
 
 <style scoped>
+.directory-alert {
+  margin-bottom: var(--space-4);
+}
+
 .panel-toolbar {
   display: flex;
   flex-wrap: wrap;

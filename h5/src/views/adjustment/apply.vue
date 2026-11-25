@@ -440,7 +440,7 @@ onMounted(async () => {
     unitOptions.value = list
   }).catch(() => undefined)
   try {
-    const plans = await listPlans()
+    const plans = (await listPlans()).filter((item) => item.planType !== 'TRAINING')
     planOptions.value = plans
     const presetTask = presetTaskId ? await getTask(presetTaskId) : null
     const presetIndicator = !presetTask && presetIndicatorId ? await getIndicator(presetIndicatorId) : null

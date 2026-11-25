@@ -1,6 +1,9 @@
 import type { NotificationItem } from '@/types/notification'
 import type { TodoGroup, TodoItem } from '@/types/todo'
 
+/** 站内消息已读状态变化后，顶栏立即重新获取未读数 */
+export const NOTIFICATIONS_CHANGED_EVENT = 'fzsu.notifications-changed'
+
 /** 待办分组展示顺序与中文名（UI 规范 P16） */
 export const TODO_GROUPS: { value: TodoGroup; label: string }[] = [
   { value: 'FILL', label: '待填报' },
@@ -48,7 +51,7 @@ export function resolveTodoLink(todo: TodoItem): string | null {
   }
 }
 
-/** 通知优先使用后端深链；历史空链接按业务对象回退，无法定位时由调用方阻止仅标记已读。 */
+/** 通知优先使用后端深链；历史空链接按业务对象回退，无法定位时仅提示无跳转页面。 */
 export function resolveNotificationLink(notification: NotificationItem): string | null {
   if (notification.link?.trim()) return notification.link
   if (!notification.bizId) return null

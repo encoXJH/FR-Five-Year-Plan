@@ -232,7 +232,7 @@ B 的层级枚举、DTO 字段和统计叶节点只使用上述命名，不提�
 
 | 场景 | 方式 | 接口 |
 | --- | --- | --- |
-| 飞书内打开（PC / 移动端） | 飞书 H5 免登：前端通过飞书 JSAPI 取得临时授权码 `code`，交给后端换取平台 Token | `POST /auth/feishu/login` |
+| 飞书内打开（PC / 移动端） | 客户端内自动发起飞书 OAuth，授权后由后端 `/api/callback` 接收并跳转免登页，再用一次性 `code` 换取 Token | `GET /auth/feishu/authorize-url` → `GET /api/callback` → `POST /auth/feishu/login` |
 | 普通浏览器 | 跳转到飞书 OAuth 授权页，授权后由后端完整路径 `/api/callback` 接收并跳转免登页，再用 `code` 换取 Token | `GET /auth/feishu/authorize-url` → `GET /api/callback` → `POST /auth/feishu/login` |
 | 备用 | 账号密码 + 图形验证码 | `POST /auth/login` |
 
@@ -241,14 +241,18 @@ sequenceDiagram
     participant H as 飞书 H5 前端
     participant F as 飞书客户端/开放平台
     participant S as 平台后端
-    H->>F: JSAPI 请求免登授权码
-    F-->>H: code（一次性，短时有效）
+    H->>F: 发起 OAuth（随机 state）
+    F-->>H: /api/callback?code=一次性授权码&state=原值
+    H->>H: 校验 state，一次性消费 returnTo 上下文并清除 code/state
     H->>S: POST /auth/feishu/login { code }
     S->>F: 用 code 换取飞书用户身份
     F-->>S: open_id / user_id
     S->>S: 匹配平台用户，校验账号状态
     S-->>H: accessToken + refreshToken + 用户信息
+    H->>H: 恢复合法站内业务 fullPath；无目标时进入角色首页
 ```
+
+机器人卡片“查看详情”不增加专用认证接口：卡片仍指向原业务地址，未登录或会话失效时按上述 OAuth 流程完成登录并恢复完整 path/query。前端以 sessionStorage 保存 10 分钟有效、一次性消费的 `{state, returnTo, createdAt}`，returnTo 仅允许已知站内路由，首次绑定成功后使用同一目标。Token、refreshToken 和 bindingTicket 不得进入 URL。任务 `year`、审核 `reviewNode/planId/submissionId`、调整 `scope/adjustmentId` 属于页面定位参数，不构成授权依据；非当前自然年任务只读，其他数据访问仍执行第 4.3 节校验。H5 业务页顶部返回按钮不使用浏览器历史进入 Login / FeishuCallback 或外部授权页，应按既有路由父级规则安全返回，避免重复触发 OAuth。
 
 ### 4.2 Token
 
@@ -270,12 +274,13 @@ sequenceDiagram
   - 学院项目负责人：本单元的 B 任务、这些任务关联的 A / A+ 及父 A，以及所属计划；无关兄弟指标和其他学院任务不可见；
   - 干事：`ASSIGNED` 范围，仅实时 `task_staff` 分配给本人的 B 任务及其必要关联数据；不能因所属单元看到全院任务，移除分配后立即失效。
 - 多角色的数据范围同样取并集。计划详情和指标树必须在服务端校验可见范围，不能只依赖前端过滤，也不能从可见 A 带出其他不可见兄弟 B。
-- S 总负责人只是 `direction.leaderId` 的责任关联，不新增角色或数据范围，不改变 LEADER 全校可见规则及既有调整审批链；S 配置仅限 ADMIN 的 `system:manage`。
+- S 总负责人只是 `direction.leaderId` 的责任关联，不新增角色或数据范围，不改变 LEADER 全校可见规则及既有调整审批链；S 配置使用 ADMIN / LEADER 的 `system:manage`，并由服务层复核角色。
 - 前端通过 `GET /auth/me` 获取 `roles`、`permissions`（权限码）和 `dataScope`，用来控制菜单和按钮的显示；**服务端必须对每个请求重新校验**。
 - 角色功能权限由 ADMIN 在 `GET /PUT /role-permissions` 中按四类固定角色配置。权限目录使用服务端白名单：`configurableRoles` 允许开关，`lockedRoles` 必须保留，其他角色组合禁止授予；ADMIN 的全部权限锁定。`user:create` 允许 ADMIN 取消 LEADER / SCHOOL_OWNER / UNIT_OWNER 的授权，取消后菜单、路由、`POST /users` 及 `/users/staff` 管理接口均失效。多角色仍取配置后的权限并集，服务端每次认证时重新读取，相关用户刷新页面或重新登录后更新前端展示。
+- LEADER 自 V43 起默认获得 `system:manage`，该权限为其核心锁定权限；V43 仅对既有数据库幂等补授权，不改变角色编码、数据范围或其他权限。PC 对 LEADER 只显示五个指定系统管理页签，具体清单见 15.10；该展示约束不替代服务端鉴权，主要建设方向、总负责人及 A 归属由 ADMIN / LEADER 配置。
 - STAFF 不作为第五类独立配置角色，动态继承 UNIT_OWNER 当前生效权限并排除 `user:create`、`submission:review`，再与本人其他角色权限取并集；STAFF + UNIT_OWNER 时保留 UNIT_OWNER 自身的上述权限。`training:fill` 可由纯 STAFF 继承并限同学院培训采集，仍不获得审核权限。任务分配不新增权限码，同学院任一 UNIT_OWNER 均可操作，候选人覆盖本学院全部启用纯 STAFF，不受任务负责人和干事创建人限制。
 - UNIT_OWNER 的 `/users/staff` 管理范围不是 `createdBy` 或 `owner_user_id`，而是当前负责人 `unitIds` 与目标用户 `user_unit` 的交集，并且目标用户必须仅具有 STAFF 一个角色。跨创建人同学院干事可见可管，多角色、外院和无学院关系账号排除；角色、创建人及干事归属不可通过该组接口修改。
-- `DELETE /users/{userId}` 仅限 `system:manage`，必须携带 `version + reason`。逻辑删除后清理当前 `user_role`、`user_unit`、`task_staff` 并吊销 refreshToken，历史业务外键及姓名展示保留；当前有效负责人引用、未删除下属干事、草稿/待审填报和在途调整必须阻断，禁止删除本人及最后一名启用 ADMIN。
+- `DELETE /users/{userId}` 仅限 ADMIN 的 `system:manage`，必须携带 `version + reason`。逻辑删除后清理当前 `user_role`、`user_unit`、`task_staff` 并吊销 refreshToken，历史业务外键及姓名展示保留；当前有效负责人引用、未删除下属干事、草稿/待审填报和在途调整必须阻断，禁止删除本人及最后一名启用 ADMIN。
 - 角色权限配置只改变功能权限，不改变角色编码、数据范围、资源归属、固定调整审批链以及目标调整、材料绑定等专属业务规则。`submission:review` 授予 LEADER 和 UNIT_OWNER，UNIT_OWNER 初审归属干事填报、LEADER 终审全校填报；SCHOOL_OWNER 不参与新审核链，STAFF 不继承审核权限。
 - 访问超出数据范围的资源时，返回 `403` + `20005`。
 
@@ -295,7 +300,7 @@ sequenceDiagram
 | `settlement:manage` | 年度核算、解锁、五年核算 |
 | `screen:view` / `stats:view` | 查看大屏 / 统计报表 |
 | `audit-log:view` / `audit-log:export` | 查看 / 导出日志 |
-| `system:manage` | 系统管理 |
+| `system:manage` | 系统管理；LEADER 自 V43 起默认授予并作为核心权限锁定，PC 仅展示指定的五个页签，其他系统管理页签仅 ADMIN 显示 |
 | `user:create` | 按创建人角色矩阵分级创建用户；UNIT_OWNER 还可管理本学院全部纯 STAFF 账号，其他角色的用户管理仍使用 `system:manage` |
 | `material:view` / `material:upload` | 查看材料 / 上传业务材料（直接绑定材料库仍受业务角色限制） |
 
@@ -977,16 +982,18 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 
 ### 15.10 系统管理（M12）与文件
 
+LEADER 持有 `system:manage` 时，PC 只显示“执行单元、组织架构、主要建设方向、专业群、用户与角色”五个页签；角色权限设置、字典、参数配置、飞书集成和双高管理平台机器人页签仅 ADMIN 显示。多角色包含 ADMIN 时显示全部页签。LEADER 的“用户与角色”以及 UNIT_OWNER 的独立“用户管理”均为全校人员只读目录，`GET /users` 允许 `system:manage` 或 `user:create`，支持姓名/工号关键字、单元、角色、启停状态和分页；该只读人员目录不改变任务、指标和填报的业务数据范围。调用人具有 UNIT_OWNER 且不同时具有 ADMIN/LEADER 时，目录仅返回 UNIT_OWNER/STAFF 人员，指定其他角色筛选直接返回空页，多角色人员的返回角色标签同步过滤为这两类。非 ADMIN 调用 `GET /users` 和 `GET /users/options` 时，服务端强制过滤 `directory_visible=false` 的目录隐藏账号，任何筛选参数均不能绕过；ADMIN 不附加该条件。隐藏仅影响人员目录和人员选项，不影响账号密码/飞书登录、令牌刷新、角色权限和历史业务引用。通用用户修改、删除、角色设置和密码重置仅 ADMIN 可执行，并在服务层再次校验角色。独立“用户添加”继续按 `user:create` 和原分级矩阵执行，`/users/staff` 写接口仅保留兼容，不在独立用户管理页面展示。
+
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
-| GET / POST | `/plans/{planId}/directions` | 系统管理“S 级任务”面板的 S 列表 / 新增；列表和详情 DTO 同时返回 `leaderId` 与 `leader`（UserRef / null），新增时传 `leaderId` | `system:manage`（仅 ADMIN） |
-| PATCH / DELETE | `/directions/{directionId}` | 修改 S 名称、排序、`leaderId` / 删除 S；负责人须具有 LEADER 角色；关联指标已下发后仅可更换总负责人 | `system:manage`（仅 ADMIN） |
-| PUT | `/indicators/{indicatorId}/direction` | 设置未下发 A 的 S 归属 `{ directionId, version }`；归属变化时按新方向自动生成 A01、B01…等编码，未分配方向暂用 A 系列；自身或下属已下发后禁止，历史 A+ 仅同步归属、不改编码 | `system:manage`（仅 ADMIN） |
+| GET / POST | `/plans/{planId}/directions` | 系统管理“主要建设方向”面板的列表 / 新增；列表和详情 DTO 同时返回 `leaderId` 与 `leader`（UserRef / null），新增时传 `leaderId` | `system:manage`（ADMIN / LEADER） |
+| PATCH / DELETE | `/directions/{directionId}` | 修改 S 名称、排序、`leaderId` / 删除 S；负责人须具有 LEADER 角色；关联指标已下发后仅可更换总负责人 | `system:manage`（ADMIN / LEADER） |
+| PUT | `/indicators/{indicatorId}/direction` | 设置未下发 A 的 S 归属 `{ directionId, version }`；归属变化时按新方向自动生成 A01、B01…等编码，未分配方向暂用 A 系列；自身或下属已下发后禁止，历史 A+ 仅同步归属、不改编码 | `system:manage`（ADMIN / LEADER） |
 | GET / POST | `/org-units` | 执行单元列表 / 新增；资源包含 `isEnabled`、`isBAssignable`。V17 将现有单元统一迁移为 `01`、`02`…；新增无需传编码，服务端按包含软删除记录在内的纯数字编码最大值 +1 生成；V21 将新 A→B 任务编号统一为当前指标编码 + 数字单元编码，历史 A+ 任务编号保持不变 | 已登录 / `system:manage` |
 | PATCH | `/org-units/{unitId}` | 修改、停用或配置“可承接新 B”（`isBAssignable`）；既有历史任务不受影响 | `system:manage` |
 | GET / POST | `/major-groups` | 专业群列表 / 新增 | 已登录 / `system:manage` |
 | PATCH | `/major-groups/{majorGroupId}` | 修改专业群 | `system:manage` |
-| GET | `/users` | 用户列表 | `system:manage` |
+| GET | `/users` | 全校只读人员目录，支持 unitId / role / keyword / isEnabled / 分页；手机号脱敏，不改变其他业务数据范围。非 ADMIN 强制排除 directory_visible=false；UNIT_OWNER 且非 ADMIN/LEADER 时仅返回 UNIT_OWNER/STAFF，其他角色筛选返回空页，展示角色标签同步过滤 | `system:manage` 或 `user:create` |
 | POST | `/users` | 分级新增用户。创建矩阵：ADMIN → ADMIN/LEADER/SCHOOL_OWNER/UNIT_OWNER；LEADER → LEADER/SCHOOL_OWNER/UNIT_OWNER；SCHOOL_OWNER → SCHOOL_OWNER/UNIT_OWNER；UNIT_OWNER → UNIT_OWNER/STAFF。创建 STAFF 时请求角色只能为 STAFF，单元字段必须留空，服务端强制 `owner_user_id=当前创建人` 并继承创建人全部学院；UNIT_OWNER 创建 UNIT_OWNER 时目标单元必须非空且为本人单元子集。新干事不生成任务分配 | `user:create` |
 | GET | `/users/import-template` | 下载用户 Excel 导入模板；含填写说明、当前可创建角色及动态单元字典，输入列为文本格式，记录 FILE_DOWNLOAD 审计 | `user:create` |
 | POST | `/users/import-preview` | multipart `file` 上传 `.xlsx≤10MB`，最多 200 个非空数据行；返回 `{ importId, totalRows, validRows, invalidRows, rows[] }`，逐行含 rowNum、六个字段、valid、errors，手机号脱敏。预览批次绑定创建人并暂存 30 分钟，不保存密码 | `user:create` |
@@ -994,13 +1001,13 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | GET | `/users/staff` | UNIT_OWNER 查询本学院全部纯 STAFF 账号（含其他创建人），支持 unitId / keyword / isEnabled / 分页；多角色、外院及无学院关系账号排除 | `user:create` + UNIT_OWNER |
 | PATCH | `/users/staff/{userId}` | 编辑本学院纯干事的 name / phone / unitId / isEnabled，必须带 version；unitId 仅限负责人当前学院，保留负责人范围外学院关系，角色、创建人及 owner_user_id 不变；停用吊销 refreshToken | `user:create` + UNIT_OWNER |
 | POST | `/users/staff/{userId}/password-reset` | 重置本学院纯干事密码，必须带 password / version，清除登录锁定并吊销全部 refreshToken | `user:create` + UNIT_OWNER |
-| GET | `/users/options` | 用户选项（负责人选择等轻量场景，返回启用用户的 id/name/username） | 已登录 |
-| PATCH | `/users/{userId}` | 修改或停用用户 | `system:manage` |
-| DELETE | `/users/{userId}` | 逻辑删除用户，请求体 `{ version, reason }`；禁止删除本人和最后一名启用 ADMIN，有效负责人引用、未删除下属干事、草稿/待审填报及在途调整须先处理。清理当前角色、学院、任务分配并吊销 refreshToken，保留历史业务字段及姓名 | `system:manage` |
-| PUT | `/users/{userId}/roles` | 设置用户角色（必须带 `reason`） | `system:manage` |
-| GET | `/role-permissions` | 查询四类固定角色的功能权限矩阵、权限目录和各角色 `version`；`configurableRoles` 为可配置组合，`lockedRoles` 为锁定组合 | `system:manage`（仅 ADMIN） |
-| PUT | `/role-permissions/{role}` | 整体设置指定角色的功能权限 `{ permissions, reason, version }`；核心权限不可移除、未开放组合不可授予，冲突返回 `10005`，前后快照写入 `PERMISSION_CHANGE` 审计 | `system:manage`（仅 ADMIN） |
-| POST | `/users/{userId}/password-reset` | 重置用户密码（重置后吊销该用户全部 refreshToken） | `system:manage` |
+| GET | `/users/options` | 用户选项（负责人选择等轻量场景，返回启用用户的 id/name/username）；非 ADMIN 强制排除 directory_visible=false，ADMIN 可查看全部启用用户 | 已登录 |
+| PATCH | `/users/{userId}` | 修改或停用用户 | `system:manage`（仅 ADMIN，服务层复核） |
+| DELETE | `/users/{userId}` | 逻辑删除用户，请求体 `{ version, reason }`；禁止删除本人和最后一名启用 ADMIN，有效负责人引用、未删除下属干事、草稿/待审填报及在途调整须先处理。清理当前角色、学院、任务分配并吊销 refreshToken，保留历史业务字段及姓名 | `system:manage`（仅 ADMIN，服务层复核） |
+| PUT | `/users/{userId}/roles` | 设置用户角色（必须带 `reason`） | `system:manage`（仅 ADMIN，服务层复核） |
+| GET | `/role-permissions` | 查询四类固定角色的功能权限矩阵、权限目录和各角色 `version`；`configurableRoles` 为可配置组合，`lockedRoles` 为锁定组合 | `system:manage`（ADMIN / LEADER） |
+| PUT | `/role-permissions/{role}` | 整体设置指定角色的功能权限 `{ permissions, reason, version }`；核心权限不可移除、未开放组合不可授予，冲突返回 `10005`，前后快照写入 `PERMISSION_CHANGE` 审计 | `system:manage`（ADMIN / LEADER） |
+| POST | `/users/{userId}/password-reset` | 重置用户密码（重置后吊销该用户全部 refreshToken） | `system:manage`（仅 ADMIN，服务层复核） |
 | GET | `/dicts/enums` | 全部枚举的中文名称 | 已登录 |
 | GET / PUT | `/dicts/{dictType}` | 字典（计量单位等） | 已登录 / `system:manage` |
 | GET / PATCH | `/settings` | 系统参数；消息推送与机器人调度分别通过 `feishu.pushEnabled`、`feishu.botEnabled` 修改，必须携带各项当前 version，冲突返回 10005 | `system:manage` |
@@ -1042,6 +1049,8 @@ GET /api/v1/tasks?sort=dueDate:asc,code:asc
 | GET | `/training-sheets/{sheetId}/export` | 按原模板导出 57 列、四行复合表头，从第 5 行写项目；后端仅导出 APPROVED 项目，无已通过项目返回 60001，记录导出和下载审计 | `training:fill` 或 `submission:review`，逐 ID 校验范围 |
 
 > 项目状态为 DRAFT / PENDING_REVIEW / APPROVED / REJECTED，待审节点为 UNIT_REVIEW / LEADER_REVIEW。PENDING_REVIEW 和 APPROVED 项目只读，REJECTED 项目可修改重提并重新走完整审核链；未选中或其他状态项目不受本次提交影响。sheet.status 仅为汇总：任一项目待审为 PENDING_REVIEW，非空且全部通过为 APPROVED，无待审且存在驳回为 REJECTED，其他为 DRAFT；待审项目节点不一致时 sheet.currentReviewNode=null。培训审核记录关联 projectId 并写入只追加 training_review，不写普通 submission。项目数据使用 c01–c57 稳定键，`c14=c32=Σ(c18:c31)`、`c44=Σ(c33:c43)`、`c54=Σ(c45:c53)`，合计及到账经费由后端 BigDecimal 重算，填报人取当前用户。保存、提交和审核带 version，创建、提交和审核必须幂等；越权返回 20005，版本冲突返回 10005。TRAINING 不进入指标计划或年度核算流程。
+
+> 客户端计划上下文必须隔离：PC/H5 的 `metrics:current-plan` 只允许保存显式 `planType=INDICATOR` 的 `{ id, name, planType }`；TRAINING 不得写入，尝试写入时清除旧缓存，缺少 `planType` 的历史缓存按无效处理。材料库、统计报表、大屏、主要建设方向、指标总表、分解下发、调整申请、学院工作台和模板的计划候选及默认回退必须排除 TRAINING；直接以 TRAINING planId 打开计划概览时，PC 回到通用 INDICATOR 概览入口，H5 回到计划首页。培训页面只调用本节接口，不得在页面切换后把 TRAINING planId 传给指标、任务、普通填报、统计或年度核算接口。计划首页和统一审核中心可按既有培训业务规则保留培训计划。
 
 ---
 

@@ -55,7 +55,7 @@ public class IndicatorController {
     }
 
     @Operation(summary = "新增 A 或 A+（A+ 必须带 parentId 且父 A 可量化，否则 40006）",
-            description = "权限：indicator:edit；A 的 code 为空时按所属方向生成 A01、B01…，未分配方向暂用 A 系列；草稿 A 的 S 归属可暂空，仅 ADMIN 可在创建时指定")
+            description = "权限：indicator:edit；A 的 code 为空时按所属方向生成 A01、B01…，未分配方向暂用 A 系列；草稿 A 的 S 归属可暂空，ADMIN / LEADER 可在创建时指定")
     @PostMapping("/api/v1/plans/{planId}/indicators")
     @PreAuthorize("hasAuthority('indicator:edit')")
     @AuditLog(action = "CREATE", resourceType = "indicator", resourceId = "#result.id", after = "#result")
@@ -94,7 +94,7 @@ public class IndicatorController {
     }
 
     @Operation(summary = "配置或清除未下发 A 的 S 归属（同步下属 A+）",
-            description = "仅 ADMIN；带 version（冲突 10005）；自身或下属已下发后不可修改")
+            description = "ADMIN / LEADER；带 version（冲突 10005）；自身或下属已下发后不可修改")
     @PutMapping("/api/v1/indicators/{indicatorId}/direction")
     @PreAuthorize("hasAuthority('system:manage')")
     @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId",

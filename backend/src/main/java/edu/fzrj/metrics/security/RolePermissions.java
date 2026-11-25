@@ -42,7 +42,7 @@ public final class RolePermissions {
     private static final Map<String, Set<String>> ROLE_MAP = Map.of(
             "ADMIN", ALL,
             "LEADER", Set.of(SUBMISSION_REVIEW, ADJUSTMENT_DECIDE, SCREEN_VIEW, STATS_VIEW,
-                    AUDIT_LOG_VIEW, USER_CREATE, MATERIAL_VIEW),
+                    AUDIT_LOG_VIEW, SYSTEM_MANAGE, USER_CREATE, MATERIAL_VIEW),
             "SCHOOL_OWNER", Set.of(INDICATOR_EDIT, ALLOCATION_EDIT, TASK_DISTRIBUTE,
                     ADJUSTMENT_APPLY, ADJUSTMENT_DECIDE, STATS_VIEW,
                     USER_CREATE, MATERIAL_VIEW, MATERIAL_UPLOAD),
@@ -100,7 +100,8 @@ public final class RolePermissions {
             new PermissionDefinition(AUDIT_LOG_EXPORT, "操作日志导出", "统计与审计",
                     "导出全校操作日志", Set.of(), ADMIN_ONLY),
             new PermissionDefinition(SYSTEM_MANAGE, "系统管理", "系统与材料",
-                    "管理组织、用户、角色权限、字典、参数和集成", Set.of(), ADMIN_ONLY),
+                    "管理组织、建设方向、专业群和用户；角色权限、字典、参数和集成仅管理员可见",
+                    Set.of(), Set.of("ADMIN", "LEADER")),
             new PermissionDefinition(USER_CREATE, "用户添加", "系统与材料",
                     "按创建人角色矩阵创建用户，其他用户管理仍需要系统管理权限",
                     Set.of("LEADER", "SCHOOL_OWNER", "UNIT_OWNER"), ADMIN_ONLY),

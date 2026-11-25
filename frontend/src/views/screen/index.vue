@@ -397,7 +397,7 @@ onMounted(async () => {
 
   if (!kiosk.value || !planId.value) {
     try {
-      plans.value = await listPlans()
+      plans.value = (await listPlans()).filter((item) => item.planType !== 'TRAINING')
     } catch {
       plans.value = []
     }

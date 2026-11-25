@@ -49,12 +49,14 @@ class FeishuBotMySqlIT {
     }
 
     @Test
-    void 全新库迁移到V42并保证通知唯一键与推送抢占原子性() throws Exception {
+    void 全新库迁移到V43并保证通知唯一键与推送抢占原子性() throws Exception {
         String database = createDatabase();
         migrate(database, null);
 
-        assertEquals("42", schemaVersion(database));
+        assertEquals("43", schemaVersion(database));
         try (Connection connection = connection(database)) {
+            assertEquals(1, count(connection, "SELECT COUNT(*) FROM role_permission "
+                    + "WHERE role='LEADER' AND permission='system:manage'"));
             assertEquals(1, count(connection, "SELECT COUNT(*) FROM sys_setting WHERE setting_key='feishu.pushEnabled' "
                     + "AND setting_value='false' AND value_type='BOOLEAN' AND version=0 AND deleted=0"));
             assertEquals(1, count(connection, "SELECT COUNT(*) FROM sys_setting WHERE setting_key='feishu.botEnabled' "
@@ -213,6 +215,25 @@ class FeishuBotMySqlIT {
             insertNotification(connection, 920000000000000031L, "BOT:LOG:AFTER_CLEAR", "REVIEW_TODO");
             assertEquals(1, count(connection, "SELECT COUNT(*) FROM notification WHERE id=920000000000000030"));
             assertEquals(1, countVisibleAfterClear(connection));
+        }
+    }
+
+    @Test
+    void V42升级到V43仅补充校级系统管理权限() throws Exception {
+        String database = createDatabase();
+        migrate(database, "42");
+        int before;
+        try (Connection connection = connection(database)) {
+            before = count(connection, "SELECT COUNT(*) FROM role_permission");
+        }
+
+        migrate(database, "43");
+
+        assertEquals("43", schemaVersion(database));
+        try (Connection connection = connection(database)) {
+            assertEquals(before + 1, count(connection, "SELECT COUNT(*) FROM role_permission"));
+            assertEquals(1, count(connection, "SELECT COUNT(*) FROM role_permission "
+                    + "WHERE role='LEADER' AND permission='system:manage'"));
         }
     }
 

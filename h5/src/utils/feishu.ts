@@ -70,6 +70,59 @@ export function normalizeAuthorizeInfo(raw: unknown): FeishuAuthorizeInfo | null
 
 /** OAuth state 的会话存储键；仅用于防止回调 CSRF，不保存 Token 或绑定票据 */
 export const FEISHU_OAUTH_STATE_KEY = 'fzsu.feishu.oauthState'
+export const FEISHU_OAUTH_CONTEXT_KEY = 'fzsu.feishu.oauthContext'
+export const FEISHU_OAUTH_CONTEXT_MAX_AGE_MS = 10 * 60 * 1000
+
+export interface FeishuOAuthStorage {
+  getItem(key: string): string | null
+  setItem(key: string, value: string): void
+  removeItem(key: string): void
+}
+
+export interface FeishuOAuthContext {
+  state: string
+  returnTo: string | null
+  createdAt: number
+}
+
+export function clearFeishuOAuthContext(storage: FeishuOAuthStorage = sessionStorage): void {
+  storage.removeItem(FEISHU_OAUTH_STATE_KEY)
+  storage.removeItem(FEISHU_OAUTH_CONTEXT_KEY)
+}
+
+export function saveFeishuOAuthContext(
+  state: string,
+  returnTo: string | null,
+  storage: FeishuOAuthStorage = sessionStorage,
+  now = Date.now(),
+): void {
+  const context: FeishuOAuthContext = { state, returnTo, createdAt: now }
+  storage.setItem(FEISHU_OAUTH_STATE_KEY, state)
+  storage.setItem(FEISHU_OAUTH_CONTEXT_KEY, JSON.stringify(context))
+}
+
+/** 回调只允许消费一次；state 不符、上下文损坏或超过 10 分钟均拒绝。 */
+export function consumeFeishuOAuthContext(
+  actualState: string | null,
+  storage: FeishuOAuthStorage = sessionStorage,
+  now = Date.now(),
+): FeishuOAuthContext | null {
+  const expectedState = storage.getItem(FEISHU_OAUTH_STATE_KEY)
+  const raw = storage.getItem(FEISHU_OAUTH_CONTEXT_KEY)
+  clearFeishuOAuthContext(storage)
+  if (!raw || !isFeishuOAuthStateValid(actualState, expectedState)) return null
+  try {
+    const context = JSON.parse(raw) as Partial<FeishuOAuthContext>
+    if (typeof context.state !== 'string' || context.state !== actualState || typeof context.createdAt !== 'number'
+      || !Number.isFinite(context.createdAt)) return null
+    const age = now - context.createdAt
+    if (age < 0 || age > FEISHU_OAUTH_CONTEXT_MAX_AGE_MS) return null
+    if (context.returnTo !== null && typeof context.returnTo !== 'string') return null
+    return { state: context.state, returnTo: context.returnTo ?? null, createdAt: context.createdAt }
+  } catch {
+    return null
+  }
+}
 
 export function isFeishuOAuthStateValid(actual: string | null, expected: string | null): boolean {
   return actual !== null && expected !== null && actual.length > 0 && actual === expected

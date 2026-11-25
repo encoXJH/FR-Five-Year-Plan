@@ -25,6 +25,7 @@ import {
   isPendingStatus,
   isTransferType,
   nodeOfStatus,
+  resolveAdjustmentScope,
   summarizeItems,
 } from '@/utils/adjustment'
 import type { PageResult } from '@/types/api'
@@ -39,6 +40,7 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
+const scope = ref(resolveAdjustmentScope(route.query.scope, 'ALL'))
 const loading = ref(false)
 const page = ref<PageResult<AdjustmentListItem>>({ items: [], total: 0, page: 1, pageSize: 10 })
 
@@ -46,7 +48,7 @@ async function loadList(silent = false): Promise<void> {
   if (!silent) loading.value = true
   try {
     page.value = await listAdjustments({
-      scope: 'ALL',
+      scope: scope.value,
       page: page.value.page,
       pageSize: page.value.pageSize,
     })

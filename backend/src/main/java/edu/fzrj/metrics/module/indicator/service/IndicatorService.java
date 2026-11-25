@@ -189,7 +189,7 @@ public class IndicatorService {
             indicator.setIsQuantifiable(request.getIsQuantifiable());
             Direction direction = null;
             if (request.getDirectionId() != null) {
-                requireAdmin();
+                requireDirectionManager();
                 direction = requireDirectionInPlan(request.getDirectionId(), planId);
                 indicator.setDirectionId(direction.getId());
             }
@@ -401,7 +401,7 @@ public class IndicatorService {
 
     @Transactional
     public IndicatorDtos.Detail assignDirection(Long indicatorId, IndicatorDtos.DirectionAssignRequest request) {
-        requireAdmin();
+        requireDirectionManager();
         Indicator indicator = requireIndicator(indicatorId);
         if (!IndicatorRules.LEVEL_A.equals(indicator.getLevel()) || indicator.getParentId() != null) {
             throw new BizException(ErrorCode.LEVEL_INVALID, "只能配置 指标的 S 归属");
@@ -915,9 +915,9 @@ public class IndicatorService {
         }
     }
 
-    private void requireAdmin() {
-        if (!SecurityUtils.hasRole("ADMIN")) {
-            throw new BizException(ErrorCode.FORBIDDEN, "只有 ADMIN 能配置 A 的 S 归属");
+    private void requireDirectionManager() {
+        if (!SecurityUtils.hasRole("ADMIN") && !SecurityUtils.hasRole("LEADER")) {
+            throw new BizException(ErrorCode.FORBIDDEN, "只有 ADMIN 或 LEADER 能配置 A 的 S 归属");
         }
     }
 

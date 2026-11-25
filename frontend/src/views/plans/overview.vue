@@ -7,7 +7,7 @@ import { getPlan, listPlans } from '@/api/plan'
 import { getStatsByIndicator, getStatsByUnit, getStatsOverview } from '@/api/stats'
 import { useAutoRefresh } from '@/utils/autoRefresh'
 import { formatPercent } from '@/utils/format'
-import { getCurrentPlan, setCurrentPlan } from '@/utils/currentPlan'
+import { clearCurrentPlan, getCurrentPlan, setCurrentPlan } from '@/utils/currentPlan'
 import type { PlanDetail } from '@/types/plan'
 import type { IndicatorStat, StatsOverview, UnitStatItem } from '@/types/stats'
 
@@ -54,6 +54,11 @@ async function loadPlan(silent = false): Promise<void> {
   if (!silent) loading.value = true
   try {
     const result = await getPlan(planId.value)
+    if (result.planType === 'TRAINING') {
+      clearCurrentPlan()
+      await router.replace('/plan-overview')
+      return
+    }
     plan.value = result
     setCurrentPlan(result)
     const years = result.years.map((item) => item.year)

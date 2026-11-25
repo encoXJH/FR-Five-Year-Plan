@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { buildAuditDetail, parseAuditSnapshot } from '../auditDetail'
+import {
+  buildAuditDetail,
+  compactRequestId,
+  formatAuditObject,
+  formatAuditObjectTitle,
+  formatAuditRoles,
+  formatAuditTerminal,
+  parseAuditSnapshot,
+} from '../auditDetail'
 import type { AuditLogItem } from '@/types/audit'
 
 function row(overrides: Partial<AuditLogItem>): AuditLogItem {
@@ -138,5 +146,31 @@ describe('buildAuditDetail 无快照与批量快照', () => {
       { label: '移除', value: 'A01-C04 任务二' },
       { label: '变更', value: 'A01-C03 任务一：年度目标' },
     ])
+  })
+})
+
+describe('操作日志列表可读性', () => {
+  it('角色 JSON 数组和早期逗号文本都显示中文', () => {
+    expect(formatAuditRoles('["ADMIN"]')).toBe('平台管理员')
+    expect(formatAuditRoles('["UNIT_OWNER","STAFF"]')).toBe('学院项目负责人、干事')
+    expect(formatAuditRoles('LEADER')).toBe('校级负责人')
+    expect(formatAuditRoles(null)).toBe('—')
+  })
+
+  it('对象优先显示编号或名称，长 ID 缩短且保留完整悬停文本', () => {
+    expect(formatAuditObject(row({ resourceType: 'auth', resourceId: '202', resourceCode: null }))).toBe('管理员')
+    expect(formatAuditObject(row({ resourceCode: null, after: '{"name":"新指标"}' }))).toBe('新指标')
+    const plan = row({ resourceType: 'plan', resourceId: '2118569405779599618', resourceCode: null })
+    expect(formatAuditObject(plan)).toBe('计划 21185694…9618')
+    expect(formatAuditObjectTitle(plan)).toContain('2118569405779599618')
+  })
+
+  it('终端使用中文，本机 IPv4 和 IPv6 地址统一显示为本机', () => {
+    expect(formatAuditTerminal(row({ clientType: 'WEB', ip: '0:0:0:0:0:0:0:1' }))).toBe('网页端 / 本机')
+    expect(formatAuditTerminal(row({ clientType: 'FEISHU_MOBILE', ip: '10.0.0.2' }))).toBe('飞书移动端 / 10.0.0.2')
+  })
+
+  it('请求编号缩短展示但保留复制所需的原值', () => {
+    expect(compactRequestId('6f93e7fd-2e1b-4fb6-bf47-4c0aada3f03e')).toBe('6f93e7fd…f03e')
   })
 })

@@ -13,6 +13,7 @@ import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.service.UserAdminService;
 import edu.fzrj.metrics.module.system.service.UserDeletionService;
 import edu.fzrj.metrics.module.system.service.UserImportService;
+import edu.fzrj.metrics.security.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -39,7 +40,7 @@ import java.util.List;
 
 /**
  * 用户（API 约定 15.10）：options 已登录即可；新增为 user:create；
- * 列表 / 修改 / 停用 / 角色 / 重置密码为 system:manage
+ * 列表为 system:manage；修改 / 停用 / 删除 / 角色 / 重置密码仅 ADMIN
  */
 @Tag(name = "用户")
 @RestController
@@ -68,6 +69,7 @@ public class UserController {
         return sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
                         .eq(SysUser::getDeleted, 0L)
                         .eq(SysUser::getIsEnabled, true)
+                        .eq(!SecurityUtils.hasRole("ADMIN"), SysUser::getDirectoryVisible, true)
                         .orderByAsc(SysUser::getId))
                 .stream()
                 .map(u -> new OptionItem(u.getId(), u.getName(), u.getUsername()))
@@ -75,9 +77,9 @@ public class UserController {
     }
 
     @Operation(summary = "用户列表",
-            description = "权限：system:manage；过滤：unitId / role / keyword（登录名、姓名）/ isEnabled；手机号脱敏返回")
+            description = "权限：system:manage 或 user:create；全校只读人员目录；过滤：unitId / role / keyword（登录名、姓名）/ isEnabled；手机号脱敏返回")
     @GetMapping
-    @PreAuthorize("hasAuthority('system:manage')")
+    @PreAuthorize("hasAnyAuthority('system:manage', 'user:create')")
     public PageResult<SystemDtos.UserItem> page(@ModelAttribute SystemDtos.UserQuery query) {
         return userAdminService.page(query);
     }
@@ -156,7 +158,7 @@ public class UserController {
     }
 
     @Operation(summary = "修改或停用用户",
-            description = "权限：system:manage；可改 name / phone / email / unitId / isEnabled；登录名不可改；"
+            description = "权限：system:manage（仅 ADMIN）；可改 name / phone / email / unitId / isEnabled；登录名不可改；"
                     + "不能停用当前登录的管理员账号；停用时吊销全部 refreshToken；必须带 version")
     @PatchMapping("/{userId}")
     @PreAuthorize("hasAuthority('system:manage')")
@@ -166,7 +168,7 @@ public class UserController {
     }
 
     @Operation(summary = "删除用户（逻辑删除）",
-            description = "权限：system:manage；必须带 version 和 1–500 字 reason；禁止删除本人、最后一名启用管理员及仍存在有效业务引用的用户；"
+            description = "权限：system:manage（仅 ADMIN）；必须带 version 和 1–500 字 reason；禁止删除本人、最后一名启用管理员及仍存在有效业务引用的用户；"
                     + "清理角色、学院关系、干事分配并吊销全部 refreshToken，保留业务历史字段")
     @DeleteMapping("/{userId}")
     @PreAuthorize("hasAuthority('system:manage')")
@@ -178,7 +180,7 @@ public class UserController {
     }
 
     @Operation(summary = "设置用户角色（敏感操作）",
-            description = "权限：system:manage；必须带 reason（≤500 字，落审计）与 version；整体替换用户角色集；"
+            description = "权限：system:manage（仅 ADMIN）；必须带 reason（≤500 字，落审计）与 version；整体替换用户角色集；"
                     + "响应为 { user }；审计记录变更前后角色（PERMISSION_CHANGE）")
     @PutMapping("/{userId}/roles")
     @PreAuthorize("hasAuthority('system:manage')")
@@ -190,7 +192,7 @@ public class UserController {
     }
 
     @Operation(summary = "重置用户密码",
-            description = "权限：system:manage；新密码 8–64 位；重置后清除登录锁定并吊销全部 refreshToken（强制重新登录）")
+            description = "权限：system:manage（仅 ADMIN）；新密码 8–64 位；重置后清除登录锁定并吊销全部 refreshToken（强制重新登录）")
     @PostMapping("/{userId}/password-reset")
     @PreAuthorize("hasAuthority('system:manage')")
     @AuditLog(action = "UPDATE", resourceType = "user", resourceId = "#userId")

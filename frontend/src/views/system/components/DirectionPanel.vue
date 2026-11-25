@@ -13,7 +13,8 @@ import type { IndicatorTreeNode } from '@/types/indicator'
 import type { SystemUser } from '@/types/system'
 
 const userStore = useUserStore()
-const canManage = computed(() => userStore.roles.includes('ADMIN') && userStore.can('system:manage'))
+const canManage = computed(() => userStore.can('system:manage')
+  && (userStore.roles.includes('ADMIN') || userStore.roles.includes('LEADER')))
 
 const plans = ref<PlanCard[]>([])
 const planId = ref('')
@@ -77,8 +78,8 @@ onMounted(async () => {
   if (!canManage.value) return
   try {
     const [planList] = await Promise.all([listPlans(), loadLeaders()])
-    plans.value = planList
-    planId.value = (planList.find((item) => item.status === 'ACTIVE') ?? planList[0])?.id ?? ''
+    plans.value = planList.filter((item) => item.planType !== 'TRAINING')
+    planId.value = (plans.value.find((item) => item.status === 'ACTIVE') ?? plans.value[0])?.id ?? ''
   } catch {
     // 拦截器已提示
   }
@@ -186,7 +187,7 @@ useAutoRefresh(() => loadAll(true), {
 </script>
 
 <template>
-  <el-alert v-if="!canManage" type="warning" :closable="false" title="仅具有 system:manage 权限的管理员可配置 主要建设方向" />
+  <el-alert v-if="!canManage" type="warning" :closable="false" title="仅平台管理员或校级负责人可配置主要建设方向" />
   <div v-else v-loading="loading">
     <div class="panel-toolbar">
       <el-select v-model="planId" placeholder="请选择计划" style="width: 320px">

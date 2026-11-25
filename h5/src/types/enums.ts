@@ -2,6 +2,8 @@
 
 export type PlanStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED'
 
+export type PlanType = 'INDICATOR' | 'TRAINING'
+
 export type PlanSource = 'BLANK' | 'TEMPLATE' | 'COPY'
 
 export type SubjectType = 'SCHOOL' | 'MAJOR_GROUP'

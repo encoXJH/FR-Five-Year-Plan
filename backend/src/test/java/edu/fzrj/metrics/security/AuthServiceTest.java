@@ -115,8 +115,9 @@ class AuthServiceTest {
     }
 
     @Test
-    void 登录响应返回主学院和全部关联学院() {
+    void 目录隐藏账号仍可正常登录并返回主学院和全部关联学院() {
         SysUser user = user();
+        user.setDirectoryVisible(false);
         user.setUnitId(103L);
         when(sysUserMapper.selectOne(any())).thenReturn(user);
         when(passwordEncoder.matches("password", "hash")).thenReturn(true);

@@ -47,6 +47,7 @@ public class UserAdminService {
 
     private static final List<String> ROLE_ORDER = List.of("ADMIN", "LEADER", "SCHOOL_OWNER", "UNIT_OWNER", "STAFF");
     private static final Set<String> ROLES = Set.copyOf(ROLE_ORDER);
+    private static final List<String> UNIT_OWNER_DIRECTORY_ROLES = List.of("UNIT_OWNER", "STAFF");
     private static final Map<String, Set<String>> CREATABLE_ROLES = Map.of(
             "ADMIN", Set.of("ADMIN", "LEADER", "SCHOOL_OWNER", "UNIT_OWNER"),
             "LEADER", Set.of("LEADER", "SCHOOL_OWNER", "UNIT_OWNER"),
@@ -82,8 +83,16 @@ public class UserAdminService {
         if (StringUtils.hasText(query.getRole()) && !ROLES.contains(query.getRole())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "角色取值不合法：" + query.getRole());
         }
+        boolean admin = SecurityUtils.hasRole("ADMIN");
+        boolean unitOwnerDirectory = SecurityUtils.hasRole("UNIT_OWNER")
+                && !admin && !SecurityUtils.hasRole("LEADER");
+        if (unitOwnerDirectory && StringUtils.hasText(query.getRole())
+                && !UNIT_OWNER_DIRECTORY_ROLES.contains(query.getRole())) {
+            return new PageResult<>(List.of(), 0L, query.getPage(), query.getPageSize());
+        }
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<SysUser>()
                 .eq(SysUser::getDeleted, 0L)
+                .eq(!admin, SysUser::getDirectoryVisible, true)
                 .eq(query.getIsEnabled() != null, SysUser::getIsEnabled, query.getIsEnabled())
                 .and(StringUtils.hasText(query.getKeyword()), w -> w
                         .like(SysUser::getUsername, query.getKeyword())
@@ -95,9 +104,11 @@ public class UserAdminService {
             }
             wrapper.in(SysUser::getId, unitUserIds);
         }
-        if (StringUtils.hasText(query.getRole())) {
+        if (unitOwnerDirectory || StringUtils.hasText(query.getRole())) {
+            List<String> directoryRoles = unitOwnerDirectory && !StringUtils.hasText(query.getRole())
+                    ? UNIT_OWNER_DIRECTORY_ROLES : List.of(query.getRole());
             List<Long> userIds = userRoleMapper.selectList(new LambdaQueryWrapper<UserRole>()
-                            .eq(UserRole::getRole, query.getRole())
+                            .in(UserRole::getRole, directoryRoles)
                             .select(UserRole::getUserId))
                     .stream().map(UserRole::getUserId).toList();
             if (userIds.isEmpty()) {
@@ -110,7 +121,7 @@ public class UserAdminService {
             page.addOrder(com.baomidou.mybatisplus.core.metadata.OrderItem.asc("id"));
         }
         Page<SysUser> result = sysUserMapper.selectPage(page, wrapper);
-        return new PageResult<>(toItems(result.getRecords()), result.getTotal(),
+        return new PageResult<>(toItems(result.getRecords(), unitOwnerDirectory), result.getTotal(),
                 query.getPage(), query.getPageSize());
     }
 
@@ -193,6 +204,7 @@ public class UserAdminService {
 
     @Transactional
     public SystemDtos.UserItem patch(Long userId, JsonNode body) {
+        requireAdmin();
         PatchHelper patch = new PatchHelper(body);
         SysUser user = requireUser(userId);
         int version = patch.versionRequired();
@@ -317,6 +329,7 @@ public class UserAdminService {
 
     @Transactional
     public SystemDtos.RoleChangeView updateRoles(Long userId, SystemDtos.RolesRequest request) {
+        requireAdmin();
         SysUser user = requireUser(userId);
         if (!user.getVersion().equals(request.getVersion())) {
             throw new BizException(ErrorCode.VERSION_CONFLICT,
@@ -341,6 +354,7 @@ public class UserAdminService {
 
     @Transactional
     public void resetPassword(Long userId, String newPassword) {
+        requireAdmin();
         SysUser user = requireUser(userId);
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.setLoginFailCount(0);
@@ -381,6 +395,12 @@ public class UserAdminService {
             throw new BizException(ErrorCode.NOT_FOUND, "用户不存在");
         }
         return user;
+    }
+
+    void requireAdmin() {
+        if (!SecurityUtils.hasRole("ADMIN")) {
+            throw new BizException(ErrorCode.FORBIDDEN, "仅平台管理员可以修改用户");
+        }
     }
 
     private LoginUser requireUnitOwner() {
@@ -567,6 +587,10 @@ public class UserAdminService {
     }
 
     List<SystemDtos.UserItem> toItems(List<SysUser> users) {
+        return toItems(users, false);
+    }
+
+    private List<SystemDtos.UserItem> toItems(List<SysUser> users, boolean unitOwnerDirectory) {
         if (users.isEmpty()) {
             return List.of();
         }
@@ -584,7 +608,9 @@ public class UserAdminService {
                         u.getUnitId(),
                         u.getUnitId() == null || unitMap.get(u.getUnitId()) == null
                                 ? null : unitMap.get(u.getUnitId()).getName(),
-                        roleMap.getOrDefault(u.getId(), List.of()),
+                        roleMap.getOrDefault(u.getId(), List.of()).stream()
+                                .filter(role -> !unitOwnerDirectory || UNIT_OWNER_DIRECTORY_ROLES.contains(role))
+                                .toList(),
                         u.getIsEnabled(), u.getLastLoginAt(), u.getVersion(),
                         unitIdsByUser.getOrDefault(u.getId(), List.of()), u.getOwnerUserId()))
                 .toList();

@@ -160,7 +160,7 @@ async function openSaveAs(): Promise<void> {
   saveAsForm.name = ''
   saveAsVisible.value = true
   try {
-    planOptions.value = await listPlans()
+    planOptions.value = (await listPlans()).filter((item) => item.planType !== 'TRAINING')
   } catch {
     // 拦截器已提示
   }

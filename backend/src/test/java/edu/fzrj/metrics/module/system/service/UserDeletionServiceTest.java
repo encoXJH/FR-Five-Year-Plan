@@ -113,6 +113,7 @@ class UserDeletionServiceTest {
         target.setDeleted(0L);
         target.setIsEnabled(true);
         security = Mockito.mockStatic(SecurityUtils.class);
+        security.when(() -> SecurityUtils.hasRole("ADMIN")).thenReturn(true);
         security.when(SecurityUtils::getUserId).thenReturn(OPERATOR_ID);
     }
 
@@ -129,6 +130,7 @@ class UserDeletionServiceTest {
 
         userDeletionService.delete(USER_ID, request(1));
 
+        verify(userAdminService).requireAdmin();
         assertEquals(USER_ID, target.getDeleted());
         assertEquals(false, target.getIsEnabled());
         assertEquals(OPERATOR_ID, target.getUpdatedBy());

@@ -6,6 +6,7 @@ import ReasonDialog from '@/components/ReasonDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import PageState from '@/components/PageState.vue'
 import { archivePlan, createPlan, deletePlan, getPlan, listPlans, savePlanAsTemplate } from '@/api/plan'
+import { listTrainingSheets } from '@/api/training'
 import { listTemplates } from '@/api/template'
 import { getTodos, listNotifications, markNotificationRead } from '@/api/todo'
 import { useUserStore } from '@/stores/user'
@@ -53,7 +54,29 @@ async function loadPlans(silent = false): Promise<void> {
   }
 }
 
-function enterPlan(plan: PlanCard): void {
+async function enterPlan(plan: PlanCard): Promise<void> {
+  if (plan.planType === 'TRAINING') {
+    try {
+      const sheets = await listTrainingSheets(plan.id)
+      if (sheets.length === 0) {
+        showToast('该计划尚未初始化培训采集表')
+        return
+      }
+      if (currentPlanId.value === plan.id) {
+        clearCurrentPlan()
+        currentPlanId.value = ''
+        appStore.setLastPlan(null)
+      }
+      const target = `/training/${sheets[0].id}?from=plans&source=h5`
+      const pcBase = import.meta.env.DEV
+        ? `${window.location.protocol}//${window.location.hostname}:5173`
+        : ''
+      window.location.assign(pcBase + target)
+    } catch {
+      // 拦截器已提示
+    }
+    return
+  }
   setCurrentPlan(plan)
   currentPlanId.value = plan.id
   appStore.setLastPlan(plan.id)
@@ -81,8 +104,10 @@ const actionItems = computed<{ name: string; key: string; color?: string }[]>(()
   if (!plan) return []
   const items: { name: string; key: string; color?: string }[] = [
     { name: '进入计划', key: 'enter' },
-    { name: plan.id === currentPlanId.value ? '当前项目（已设）' : '设为当前项目', key: 'current' },
   ]
+  if (plan.planType !== 'TRAINING') {
+    items.push({ name: plan.id === currentPlanId.value ? '当前项目（已设）' : '设为当前项目', key: 'current' })
+  }
   if (canManage.value) {
     items.push({ name: '复制计划', key: 'copy' })
     items.push({ name: '另存为模板', key: 'template' })

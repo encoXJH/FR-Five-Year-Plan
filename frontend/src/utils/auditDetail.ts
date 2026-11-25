@@ -30,6 +30,7 @@ export interface AuditDetail {
 
 const RESOURCE_LABELS: Record<string, string> = {
   plan: '计划',
+  auth: '账号',
   indicator: '指标',
   direction: '建设方向',
   task: '任务',
@@ -164,6 +165,63 @@ export function parseAuditSnapshot(raw: string | null | undefined): unknown {
   } catch {
     return raw
   }
+}
+
+/** 角色字段同时兼容 JSON 数组和早期逗号文本，列表只展示中文名 */
+export function formatAuditRoles(roles: string | null | undefined): string {
+  if (!roles?.trim()) return '—'
+  const parsed = parseAuditSnapshot(roles)
+  const items = Array.isArray(parsed) ? parsed : String(parsed ?? roles).split(/[,，]/)
+  const labels = Array.from(new Set(items.map((item) => String(item).trim()).filter(Boolean)))
+    .map((role) => enumLabel('Role', role))
+  return labels.length > 0 ? labels.join('、') : '—'
+}
+
+function compactIdentifier(value: string): string {
+  const text = value.trim()
+  return text.length > 16 ? `${text.slice(0, 8)}…${text.slice(-4)}` : text
+}
+
+function snapshotObjectName(raw: string | null): string | null {
+  const snapshot = parseAuditSnapshot(raw)
+  if (!isPlainObject(snapshot)) return null
+  for (const key of ['name', 'code', 'fileName', 'taskCode']) {
+    const value = snapshot[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return null
+}
+
+export function formatAuditObject(row: AuditLogItem): string {
+  if (row.resourceCode?.trim()) return row.resourceCode.trim()
+  const snapshotName = snapshotObjectName(row.after) ?? snapshotObjectName(row.before)
+  if (snapshotName) return snapshotName
+  if (row.resourceType === 'auth') return row.operator?.name || '当前账号'
+  if (!row.resourceId) return '—'
+  const label = RESOURCE_LABELS[row.resourceType ?? ''] ?? row.resourceType ?? '对象'
+  return `${label} ${compactIdentifier(row.resourceId)}`
+}
+
+export function formatAuditObjectTitle(row: AuditLogItem): string {
+  const object = formatAuditObject(row)
+  return row.resourceId && !object.includes(row.resourceId) ? `${object}（ID：${row.resourceId}）` : object
+}
+
+export function formatAuditIp(ip: string | null | undefined): string {
+  const value = ip?.trim() ?? ''
+  if (!value) return ''
+  const loopback = new Set(['127.0.0.1', '::1', '0:0:0:0:0:0:0:1', '::ffff:127.0.0.1'])
+  return loopback.has(value.toLowerCase()) ? '本机' : value
+}
+
+export function formatAuditTerminal(row: AuditLogItem): string {
+  const client = row.clientType ? enumLabel('ClientType', row.clientType) : '—'
+  const ip = formatAuditIp(row.ip)
+  return ip ? `${client} / ${ip}` : client
+}
+
+export function compactRequestId(requestId: string): string {
+  return compactIdentifier(requestId)
 }
 
 function flatten(value: Record<string, unknown>, prefix = ''): Record<string, unknown> {

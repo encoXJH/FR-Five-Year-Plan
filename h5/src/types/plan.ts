@@ -1,5 +1,5 @@
 import type { UserRef } from './api'
-import type { PlanSource, PlanStatus, PlanYearStatus } from './enums'
+import type { PlanSource, PlanStatus, PlanType, PlanYearStatus } from './enums'
 
 /** 计划（PRD FR-M1-03） */
 export interface Plan {
@@ -11,6 +11,7 @@ export interface Plan {
   /** 年度核算截止日（如 01-15，具体格式以后端返回为准） */
   settleDeadline: string | null
   status: PlanStatus
+  planType?: PlanType
   /** 指标体系是否已定稿 */
   indicatorsFinalized: boolean
   finalizedAt: string | null
@@ -27,6 +28,7 @@ export interface PlanCard {
   endYear: number
   baselineYear: number
   status: PlanStatus
+  planType?: PlanType
   /** 五年累计完成率（小数），null 显示 — */
   overallCompletionRate: number | null
   /** 本年度完成率（小数） */

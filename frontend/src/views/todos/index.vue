@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   getTodos,
@@ -14,6 +14,7 @@ import { formatRelativeTime } from '@/utils/format'
 import { formatDeadline } from '@/utils/task'
 import { useAutoRefresh } from '@/utils/autoRefresh'
 import {
+  NOTIFICATIONS_CHANGED_EVENT,
   TODO_GROUPS,
   resolveNotificationLink,
   resolveTodoLink,
@@ -24,9 +25,18 @@ import type { TodoGroup, TodoItem, TodosResult } from '@/types/todo'
 import type { NotificationItem } from '@/types/notification'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 
-const activeTab = ref('todos')
+const activeTab = computed({
+  get: () => route.query.tab === 'notifications' ? 'notifications' : 'todos',
+  set: (value: string) => {
+    const query = { ...route.query }
+    if (value === 'notifications') query.tab = 'notifications'
+    else delete query.tab
+    void router.replace({ path: '/todos', query })
+  },
+})
 
 // ---------- 待办 ----------
 const todosLoading = ref(false)
@@ -77,6 +87,10 @@ const unreadCount = ref(0)
 const notifFilter = reactive({ type: '', page: 1, pageSize: 20 })
 const notificationTypeOptions = computed(() => enumOptions('NotificationType', userStore.enums))
 
+function notifyUnreadChanged(): void {
+  window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
+}
+
 async function loadNotifications(silent = false): Promise<void> {
   if (!silent) notificationsLoading.value = true
   try {
@@ -94,21 +108,22 @@ async function loadNotifications(silent = false): Promise<void> {
 }
 
 async function handleRead(item: NotificationItem): Promise<void> {
-  const link = resolveNotificationLink(item)
-  if (!link) {
-    ElMessage.info('该通知暂无可跳转页面')
-    return
-  }
   if (!item.readAt) {
     try {
       const updated = await markNotificationRead(item.id)
       item.readAt = updated.readAt
       unreadCount.value = Math.max(0, unreadCount.value - 1)
+      notifyUnreadChanged()
     } catch {
       // 拦截器已提示
     }
   }
-  router.push(link)
+  const link = resolveNotificationLink(item)
+  if (!link) {
+    ElMessage.info('该通知暂无可跳转页面')
+    return
+  }
+  await router.push(link)
 }
 
 const markingAll = ref(false)
@@ -122,6 +137,7 @@ async function handleReadAll(): Promise<void> {
       n.readAt = n.readAt ?? now
     })
     unreadCount.value = 0
+    notifyUnreadChanged()
     ElMessage.success('已全部标记为已读')
   } catch {
     // 拦截器已提示

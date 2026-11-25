@@ -15,7 +15,14 @@ beforeAll(() => {
 })
 
 beforeEach(() => {
-  ;((globalThis as Record<string, unknown>).__mockStore as Map<string, string>).clear()
+  const store = (globalThis as Record<string, unknown>).__mockStore as Map<string, string>
+  store.clear()
+  ;(globalThis as Record<string, unknown>).localStorage = {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => void store.set(key, value),
+    removeItem: (key: string) => void store.delete(key),
+    clear: () => store.clear(),
+  }
 })
 
 describe('currentPlan 上下文', () => {
@@ -25,13 +32,13 @@ describe('currentPlan 上下文', () => {
 
   it('setCurrentPlan 后 getCurrentPlan 返回对应上下文', () => {
     setCurrentPlan({ id: '1', name: '规划' })
-    expect(getCurrentPlan()).toEqual({ id: '1', name: '规划' })
+    expect(getCurrentPlan()).toEqual({ id: '1', name: '规划', planType: 'INDICATOR' })
   })
 
   it('后设置的计划覆盖先前计划', () => {
     setCurrentPlan({ id: '1', name: '规划 A' })
     setCurrentPlan({ id: '2', name: '规划 B' })
-    expect(getCurrentPlan()).toEqual({ id: '2', name: '规划 B' })
+    expect(getCurrentPlan()).toEqual({ id: '2', name: '规划 B', planType: 'INDICATOR' })
   })
 
   it('clearCurrentPlan 清空上下文', () => {
@@ -59,5 +66,18 @@ describe('currentPlan 上下文', () => {
     }
     expect(getCurrentPlan()).toBeNull()
     expect(() => setCurrentPlan({ id: '1', name: '规划' })).not.toThrow()
+  })
+
+  it('培训计划不能写入指标当前项目并会清除旧选择', () => {
+    setCurrentPlan({ id: '1', name: '指标计划', planType: 'INDICATOR' })
+    setCurrentPlan({ id: '2', name: '培训计划', planType: 'TRAINING' })
+
+    expect(getCurrentPlan()).toBeNull()
+  })
+
+  it('没有计划类型的历史缓存按无效处理', () => {
+    localStorage.setItem('metrics:current-plan', JSON.stringify({ id: '2', name: '历史培训缓存' }))
+
+    expect(getCurrentPlan()).toBeNull()
   })
 })

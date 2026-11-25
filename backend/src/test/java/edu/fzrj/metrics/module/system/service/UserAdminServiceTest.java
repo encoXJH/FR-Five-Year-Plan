@@ -277,6 +277,108 @@ class UserAdminServiceTest {
     }
 
     @Test
+    void 非管理员人员目录强制排除目录隐藏账号() {
+        security = Mockito.mockStatic(SecurityUtils.class);
+        security.when(() -> SecurityUtils.hasRole("ADMIN")).thenReturn(false);
+        doAnswer(invocation -> {
+            Page<SysUser> page = invocation.getArgument(0);
+            page.setRecords(List.of());
+            page.setTotal(0);
+            return page;
+        }).when(sysUserMapper).selectPage(any(), any());
+
+        userAdminService.page(new SystemDtos.UserQuery());
+
+        ArgumentCaptor<LambdaQueryWrapper> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(sysUserMapper).selectPage(any(), captor.capture());
+        assertTrue(captor.getValue().getSqlSegment().contains("directory_visible"));
+        assertTrue(captor.getValue().getParamNameValuePairs().containsValue(true));
+    }
+
+    @Test
+    void 管理员人员目录不附加目录可见性限制() {
+        security = Mockito.mockStatic(SecurityUtils.class);
+        security.when(() -> SecurityUtils.hasRole("ADMIN")).thenReturn(true);
+        doAnswer(invocation -> {
+            Page<SysUser> page = invocation.getArgument(0);
+            page.setRecords(List.of());
+            page.setTotal(0);
+            return page;
+        }).when(sysUserMapper).selectPage(any(), any());
+
+        userAdminService.page(new SystemDtos.UserQuery());
+
+        ArgumentCaptor<LambdaQueryWrapper> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(sysUserMapper).selectPage(any(), captor.capture());
+        assertFalse(captor.getValue().getSqlSegment().contains("directory_visible"));
+    }
+
+    @Test
+    void 学院负责人目录仅包含学院项目负责人和干事并过滤展示角色() {
+        security = Mockito.mockStatic(SecurityUtils.class);
+        security.when(() -> SecurityUtils.hasRole("UNIT_OWNER")).thenReturn(true);
+        security.when(() -> SecurityUtils.hasRole("ADMIN")).thenReturn(false);
+        security.when(() -> SecurityUtils.hasRole("LEADER")).thenReturn(false);
+        List<UserRole> candidateRoles = List.of(role(1L, "UNIT_OWNER"), role(2L, "STAFF"));
+        List<UserRole> itemRoles = List.of(
+                role(1L, "ADMIN"), role(1L, "UNIT_OWNER"),
+                role(2L, "LEADER"), role(2L, "STAFF"));
+        when(userRoleMapper.selectList(any())).thenReturn(candidateRoles, itemRoles);
+        doAnswer(invocation -> {
+            Page<SysUser> page = invocation.getArgument(0);
+            page.setRecords(List.of(user(1L, 103L), user(2L, 104L)));
+            page.setTotal(2);
+            return page;
+        }).when(sysUserMapper).selectPage(any(), any());
+
+        PageResult<SystemDtos.UserItem> result = userAdminService.page(new SystemDtos.UserQuery());
+
+        assertEquals(2, result.getTotal());
+        assertEquals(List.of("UNIT_OWNER"), result.getItems().get(0).roles());
+        assertEquals(List.of("STAFF"), result.getItems().get(1).roles());
+        ArgumentCaptor<LambdaQueryWrapper> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(userRoleMapper, Mockito.times(2)).selectList(captor.capture());
+        assertTrue(captor.getAllValues().get(0).getSqlSegment().contains("IN"));
+        assertTrue(captor.getAllValues().get(0).getParamNameValuePairs().containsValue("UNIT_OWNER"));
+        assertTrue(captor.getAllValues().get(0).getParamNameValuePairs().containsValue("STAFF"));
+    }
+
+    @Test
+    void 学院负责人按其他角色筛选时返回空结果() {
+        security = Mockito.mockStatic(SecurityUtils.class);
+        security.when(() -> SecurityUtils.hasRole("UNIT_OWNER")).thenReturn(true);
+        security.when(() -> SecurityUtils.hasRole("ADMIN")).thenReturn(false);
+        security.when(() -> SecurityUtils.hasRole("LEADER")).thenReturn(false);
+        SystemDtos.UserQuery query = new SystemDtos.UserQuery();
+        query.setRole("ADMIN");
+
+        PageResult<SystemDtos.UserItem> result = userAdminService.page(query);
+
+        assertEquals(0, result.getTotal());
+        assertTrue(result.getItems().isEmpty());
+        verify(sysUserMapper, never()).selectPage(any(), any());
+        verify(userRoleMapper, never()).selectList(any());
+    }
+
+    @Test
+    void 校级负责人只能查询不能修改用户() throws Exception {
+        security = Mockito.mockStatic(SecurityUtils.class);
+        security.when(() -> SecurityUtils.hasRole("ADMIN")).thenReturn(false);
+
+        BizException patchError = assertThrows(BizException.class, () -> userAdminService.patch(
+                1L, new ObjectMapper().readTree("{\"version\":1}")));
+        BizException rolesError = assertThrows(BizException.class, () -> userAdminService.updateRoles(
+                1L, rolesRequest(List.of("LEADER"), 1)));
+        BizException resetError = assertThrows(BizException.class,
+                () -> userAdminService.resetPassword(1L, "newPassword"));
+
+        assertEquals(20004, patchError.getErrorCode().getCode());
+        assertEquals(20004, rolesError.getErrorCode().getCode());
+        assertEquals(20004, resetError.getErrorCode().getCode());
+        verify(sysUserMapper, never()).selectOne(any());
+    }
+
+    @Test
     void 普通账号不能通过角色替换追加干事() {
         mockOperator();
         SysUser user = user(1L, 101L);
@@ -314,6 +416,7 @@ class UserAdminServiceTest {
     @Test
     void 角色替换后用户版本更新冲突时抛出10005() {
         security = Mockito.mockStatic(SecurityUtils.class);
+        security.when(() -> SecurityUtils.hasRole("ADMIN")).thenReturn(true);
         security.when(SecurityUtils::getUserId).thenReturn(99L);
         SysUser user = new SysUser();
         user.setId(1L);
@@ -597,6 +700,7 @@ class UserAdminServiceTest {
 
     private void mockOperator() {
         security = Mockito.mockStatic(SecurityUtils.class);
+        security.when(() -> SecurityUtils.hasRole("ADMIN")).thenReturn(true);
         security.when(SecurityUtils::getUserId).thenReturn(99L);
     }
 

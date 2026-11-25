@@ -344,7 +344,7 @@ async function loadAll(): Promise<void> {
 
 async function redirectToActivePlan(): Promise<void> {
   try {
-    const plans = await listPlans()
+    const plans = (await listPlans()).filter((item) => item.planType !== 'TRAINING')
     const active = plans.find((p) => p.status === 'ACTIVE') ?? plans[0]
     if (active) await router.replace(`/plans/${active.id}/allocation`)
   } catch {

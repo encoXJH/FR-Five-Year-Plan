@@ -64,7 +64,7 @@ public class IndicatorExcelController {
     }
 
     @Operation(summary = "确认导入 { importId }（事务内批量写入指标与量化年度目标）",
-            description = "必须带 Idempotency-Key；存在校验失败的行时返回 40001；导入不创建或分配 S，A 的 S 归属由 ADMIN 另行配置")
+            description = "必须带 Idempotency-Key；存在校验失败的行时返回 40001；导入不创建或分配 S，A 的 S 归属由 ADMIN / LEADER 另行配置")
     @PostMapping("/api/v1/plans/{planId}/indicators/import-confirm")
     @Idempotent
     @AuditLog(action = "IMPORT", resourceType = "plan", resourceId = "#planId")

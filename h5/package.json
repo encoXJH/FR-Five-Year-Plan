@@ -11,7 +11,9 @@
     "test:e2e": "node tests/e2e/mobile.e2e.mjs",
     "test:e2e:deep": "node tests/e2e/deep.e2e.mjs",
     "test:e2e:workflow": "node tests/e2e/workflow.e2e.mjs",
-    "test:e2e:upload": "node tests/e2e/upload.e2e.mjs"
+    "test:e2e:upload": "node tests/e2e/upload.e2e.mjs",
+    "test:e2e:feishu": "node tests/e2e/feishu-deep-link.e2e.mjs",
+    "test:e2e:training": "node tests/e2e/training-entry.e2e.mjs"
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",

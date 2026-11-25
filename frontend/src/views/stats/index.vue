@@ -409,7 +409,9 @@ let plansRequestSequence = 0
 async function loadPlanOptions(): Promise<void> {
   const sequence = ++plansRequestSequence
   const result = await listPlans()
-  if (sequence === plansRequestSequence) plans.value = result
+  if (sequence === plansRequestSequence) {
+    plans.value = result.filter((item) => item.planType !== 'TRAINING')
+  }
 }
 
 function handlePlanDropdownChange(visible: boolean): void {

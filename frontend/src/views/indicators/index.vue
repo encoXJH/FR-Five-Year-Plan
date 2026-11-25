@@ -938,7 +938,7 @@ async function handleExport(): Promise<void> {
 
 async function redirectToActivePlan(): Promise<void> {
   try {
-    const plans = await listPlans()
+    const plans = (await listPlans()).filter((item) => item.planType !== 'TRAINING')
     const active = plans.find((item) => item.status === 'ACTIVE') ?? plans[0]
     if (active) await router.replace(`/plans/${active.id}/indicators`)
   } catch {

@@ -54,6 +54,9 @@ public class SysUser {
     /** 是否启用 */
     private Boolean isEnabled;
 
+    /** 是否在人员目录和人员选项中对非管理员可见 */
+    private Boolean directoryVisible;
+
     /** 连续登录失败次数 */
     private Integer loginFailCount;
 
