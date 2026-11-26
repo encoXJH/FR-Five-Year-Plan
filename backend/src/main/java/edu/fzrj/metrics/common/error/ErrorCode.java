@@ -62,6 +62,7 @@ public enum ErrorCode {
     CONFIRMED_EXCEEDS_SUBMITTED(60005, 422, "认定值不能大于填报值"),
     VALUE_CALIBER_MISMATCH(60006, 422, "填报值与统计口径不匹配"),
     ANNUAL_TARGET_EXCEEDED(60007, 422, "提交或审核后年度完成值将超过年度目标"),
+    BUDGET_EXCEEDED(60008, 422, "支出金额超过指标总预算"),
 
     // 7xxxx 调整审批
     ADJUST_AMOUNT_EXCEEDED(70001, 422, "调整数量超过尚未完成的量"),

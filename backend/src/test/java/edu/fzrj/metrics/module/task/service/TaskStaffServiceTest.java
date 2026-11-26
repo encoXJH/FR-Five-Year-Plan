@@ -9,6 +9,7 @@ import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskStaff;
 import edu.fzrj.metrics.module.task.mapper.TaskStaffMapper;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -143,6 +144,24 @@ class TaskStaffServiceTest {
         verify(notificationService, times(2)).insertOnce(notifications.capture());
         assertEquals("TASK_STAFF_ASSIGNED:10:902:1902", notifications.getAllValues().get(0).getDedupKey());
         assertEquals("TASK_STAFF_ASSIGNED:10:901:1901", notifications.getAllValues().get(1).getDedupKey());
+    }
+
+    @Test
+    void 管理员创建的纯干事进入任务候选且不按创建人过滤() throws Exception {
+        SysUser staff = user(903L);
+        staff.setOwnerUserId(88L);
+        staff.setCreatedBy(99L);
+        when(taskStaffMapper.selectAssignableStaff(31L)).thenReturn(List.of(staff));
+
+        var candidates = taskStaffService.assignableStaffOf(task());
+
+        assertEquals(List.of(903L), candidates.stream().map(candidate -> candidate.id()).toList());
+        String sql = TaskStaffMapper.class.getMethod("selectAssignableStaff", Long.class)
+                .getAnnotation(Select.class).value()[0];
+        assertTrue(sql.contains("ur.role = 'STAFF'"));
+        assertTrue(sql.contains("other.role <> 'STAFF'"));
+        assertFalse(sql.contains("created_by"));
+        assertFalse(sql.contains("owner_user_id"));
     }
 
     private void mockInsertIds() {

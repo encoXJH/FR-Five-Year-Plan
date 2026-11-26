@@ -57,7 +57,10 @@ public class UserImportService {
 
     public byte[] buildImportTemplate() {
         LoginUser creator = SecurityUtils.getLoginUser();
-        List<String> roles = userAdminService.creatableRoles(creator.getRoles());
+        boolean admin = creator.getRoles().contains("ADMIN");
+        List<String> roles = userAdminService.creatableRoles(creator.getRoles()).stream()
+                .filter(role -> !admin || !"STAFF".equals(role))
+                .toList();
         List<OrgUnit> units = loadUnits();
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (ExcelWriter writer = EasyExcel.write(out).build()) {
@@ -68,7 +71,9 @@ public class UserImportService {
                     List.of("在“用户导入”工作表填写，姓名和工号必填；工号、手机号、角色及单元编码均按文本填写。"),
                     List.of("多角色、其他单元编码可用中文或英文逗号分隔；角色编码见“可创建角色”工作表。"),
                     List.of("主单元编码填写一个单元，其他单元编码可留空；单元字典动态读取当前执行单元。"),
-                    List.of("STAFF 干事只能单角色，主单元和其他单元必须留空，服务端自动继承创建人全部学院。"),
+                    List.of(admin
+                            ? "管理员创建干事请在用户添加页选择归属负责人，批量导入不支持 STAFF。"
+                            : "STAFF 干事只能单角色，主单元和其他单元必须留空，服务端自动继承创建人全部学院。"),
                     List.of("统一初始密码在确认导入时输入，长度 8–64 位，不写入 Excel、预览或导入批次。"),
                     List.of("仅支持 .xlsx，文件不超过 10MB，单次最多 200 行；任一预检错误都会禁止确认。"),
                     List.of("确认导入整批成功或整批回滚；工号重复、角色越权或学院越权均需先修正。"));
@@ -160,6 +165,11 @@ public class UserImportService {
             } catch (BizException e) {
                 errors.add(e.getMessage());
             }
+            boolean adminStaffImport = validRoles != null && validRoles.contains("STAFF")
+                    && creator.getRoles().contains("ADMIN");
+            if (adminStaffImport) {
+                errors.add("管理员创建干事请在用户添加页选择归属负责人，批量导入不支持 STAFF");
+            }
             List<String> unknownUnits = new ArrayList<>();
             if (primaryUnitCode != null && !unitByCode.containsKey(primaryUnitCode)) {
                 unknownUnits.add(primaryUnitCode);
@@ -170,7 +180,7 @@ public class UserImportService {
             }
 
             UserAdminService.UnitSelection selection = null;
-            if (validRoles != null && unknownUnits.isEmpty()) {
+            if (validRoles != null && unknownUnits.isEmpty() && !adminStaffImport) {
                 Long primaryUnitId = primaryUnitCode == null ? null : unitByCode.get(primaryUnitCode).getId();
                 List<Long> otherUnitIds = otherUnitCodes.stream().map(code -> unitByCode.get(code).getId()).toList();
                 try {
@@ -217,6 +227,13 @@ public class UserImportService {
         }
         if (!StringUtils.hasText(initialPassword) || initialPassword.length() < 8 || initialPassword.length() > 64) {
             throw new BizException(ErrorCode.PARAM_INVALID, "统一初始密码长度必须为 8–64 位");
+        }
+
+        boolean adminStaffImport = SecurityUtils.getLoginUser().getRoles().contains("ADMIN")
+                && batch.getRows().stream().anyMatch(row -> row.getRoles().contains("STAFF"));
+        if (adminStaffImport) {
+            throw new BizException(ErrorCode.PARAM_INVALID,
+                    "管理员创建干事请在用户添加页选择归属负责人，批量导入不支持 STAFF");
         }
 
         List<Long> userIds = new ArrayList<>();

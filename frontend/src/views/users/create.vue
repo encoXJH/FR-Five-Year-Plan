@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import BackButton from '@/components/BackButton.vue'
 import UserImportDialog from './components/UserImportDialog.vue'
-import { createUser, downloadUserImportTemplate } from '@/api/system'
+import { createUser, downloadUserImportTemplate, listUsers } from '@/api/system'
 import { listOrgUnits } from '@/api/orgUnit'
 import type { OrgUnit } from '@/api/orgUnit'
 import { useUserStore } from '@/stores/user'
@@ -17,7 +17,7 @@ import {
   normalizeCreationRoles,
 } from '@/utils/role'
 import type { Role } from '@/types/enums'
-import type { UserImportConfirmResult } from '@/types/system'
+import type { SystemUser, UserImportConfirmResult } from '@/types/system'
 import { triggerFileDownload } from '@/utils/file'
 
 const userStore = useUserStore()
@@ -25,7 +25,10 @@ const route = useRoute()
 const formRef = ref<FormInstance>()
 const saving = ref(false)
 const loadingUnits = ref(false)
+const loadingOwners = ref(false)
+const ownersLoaded = ref(false)
 const allUnits = ref<OrgUnit[]>([])
+const ownerOptions = ref<SystemUser[]>([])
 const successMessage = ref('')
 const previousRoles = ref<Role[]>([])
 const importVisible = ref(false)
@@ -38,6 +41,7 @@ const form = reactive({
   phone: '',
   roles: [] as Role[],
   unitIds: [] as string[],
+  ownerUserId: '',
 })
 
 const rules: FormRules = {
@@ -63,6 +67,13 @@ const rules: FormRules = {
 const staffOnly = computed(() => route.query.role === 'STAFF' && userStore.roles.includes('UNIT_OWNER'))
 const roleOptions = computed(() => staffOnly.value ? ['STAFF'] as Role[] : creatableRoles(userStore.roles))
 const isStaffCreation = computed(() => form.roles.includes('STAFF'))
+const adminStaffCreation = computed(() => isStaffCreation.value && userStore.roles.includes('ADMIN'))
+const unitNameById = computed(() => {
+  const names = new Map<string, string>()
+  for (const unit of userStore.userInfo?.units ?? []) names.set(unit.id, unit.name)
+  for (const unit of allUnits.value) names.set(unit.id, unit.name)
+  return names
+})
 const ownUnitIds = computed(() => {
   const ids = userStore.userInfo?.unitIds ?? userStore.dataScope?.unitIds
   if (ids && ids.length > 0) return ids
@@ -83,6 +94,50 @@ const backFallback = computed(() => route.query.from === 'manage'
   ? '/users'
   : userStore.can('system:manage') ? '/system' : userStore.homePath)
 
+function ownerOptionLabel(owner: SystemUser): string {
+  const unitNames = (owner.unitIds ?? [])
+    .map((unitId) => unitNameById.value.get(unitId))
+    .filter((name): name is string => Boolean(name))
+    .join('、')
+  return `${owner.name}（${owner.username}） · ${unitNames || '未配置学院'}`
+}
+
+async function loadOwnerOptions(): Promise<void> {
+  if (loadingOwners.value || ownersLoaded.value) return
+  loadingOwners.value = true
+  try {
+    const items: SystemUser[] = []
+    let page = 1
+    let total = 0
+    do {
+      const result = await listUsers({
+        role: 'UNIT_OWNER',
+        isEnabled: true,
+        page,
+        pageSize: 100,
+      })
+      items.push(...result.items)
+      total = result.total
+      page += 1
+      if (result.items.length === 0) break
+    } while (items.length < total)
+    ownerOptions.value = items.filter((owner) => (owner.unitIds?.length ?? 0) > 0)
+    ownersLoaded.value = true
+  } catch {
+    ownerOptions.value = []
+  } finally {
+    loadingOwners.value = false
+  }
+}
+
+watch(adminStaffCreation, (required) => {
+  if (required) {
+    void loadOwnerOptions()
+  } else {
+    form.ownerUserId = ''
+  }
+}, { immediate: true })
+
 function handleRolesChange(selected: Role[]): void {
   if (staffOnly.value) {
     form.roles = ['STAFF']
@@ -102,6 +157,7 @@ function clearForm(): void {
   form.phone = ''
   form.roles = staffOnly.value ? ['STAFF'] : []
   form.unitIds = []
+  form.ownerUserId = ''
   previousRoles.value = staffOnly.value ? ['STAFF'] : []
   formRef.value?.clearValidate()
 }
@@ -151,6 +207,7 @@ async function submit(): Promise<void> {
       phone: form.phone.trim() || undefined,
       unitId: unitIds[0] ?? null,
       unitIds,
+      ownerUserId: adminStaffCreation.value ? form.ownerUserId : undefined,
       roles: [...form.roles],
     })
     successMessage.value = staff ? '账号已创建，尚未分配任务' : '账号已创建'
@@ -185,7 +242,7 @@ onMounted(async () => {
     <div class="page-header">
       <div class="page-heading">
         <h1 class="page-title">用户添加</h1>
-        <p class="page-subtitle">按当前账号的可创建角色开通用户，学院干事由负责人自行管理。</p>
+        <p class="page-subtitle">按当前账号的可创建角色开通用户，干事须明确学院归属。</p>
       </div>
       <div class="header-actions">
         <el-button :loading="templateDownloading" @click="handleDownloadTemplate">
@@ -208,7 +265,9 @@ onMounted(async () => {
         v-if="isStaffCreation"
         type="info"
         :closable="false"
-        title="干事自动归属当前负责人及本人学院，创建后可在任务详情中分配任务。"
+        :title="adminStaffCreation
+          ? '干事继承所选归属负责人的全部学院并由其初审，创建后可在任务详情中分配任务。'
+          : '干事自动归属当前负责人及本人学院，创建后可在任务详情中分配任务。'"
         class="form-alert"
       />
 
@@ -251,6 +310,29 @@ onMounted(async () => {
             />
           </el-select>
           <div class="field-tip">干事不能与其他角色同时创建，且不能由纯干事账号创建。</div>
+        </el-form-item>
+        <el-form-item
+          v-if="adminStaffCreation"
+          label="归属负责人"
+          prop="ownerUserId"
+          required
+          :rules="[{ required: true, message: '请选择归属负责人', trigger: 'change' }]"
+        >
+          <el-select
+            v-model="form.ownerUserId"
+            filterable
+            :loading="loadingOwners"
+            placeholder="请选择启用的学院项目负责人"
+            class="full-width"
+          >
+            <el-option
+              v-for="owner in ownerOptions"
+              :key="owner.id"
+              :label="ownerOptionLabel(owner)"
+              :value="owner.id"
+            />
+          </el-select>
+          <div class="field-tip">干事继承该负责人的全部学院，提交后由该负责人进行学院初审。</div>
         </el-form-item>
         <el-form-item v-if="!isStaffCreation" label="所属单元" prop="unitIds">
           <el-select

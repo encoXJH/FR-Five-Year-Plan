@@ -35,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -378,6 +379,39 @@ public class ReviewService {
                 throw new BizException(ErrorCode.CONFIRMED_EXCEEDS_SUBMITTED);
             }
         }
+        // 支出认定：默认继承填报值（终审继承院审认定值），任一级均可核减、不能调高（60005）
+        BigDecimal requestedExpense = request.getApprovedExpenseAmount();
+        if (requestedExpense != null && (requestedExpense.signum() < 0 || requestedExpense.scale() > 2)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "认定支出必须为非负数且最多两位小数（万元）");
+        }
+        boolean inheritUnitExpense = "LEADER_REVIEW".equals(reviewNode)
+                && submission.getApprovedExpenseAmount() != null;
+        if ("APPROVED".equals(result) && requestedExpense != null) {
+            BigDecimal ceiling = inheritUnitExpense
+                    ? submission.getApprovedExpenseAmount() : submission.getExpenseAmount();
+            if (ceiling == null) {
+                throw new BizException(ErrorCode.CONFIRMED_EXCEEDS_SUBMITTED, "填报未填写支出金额，不能认定支出");
+            }
+            if (requestedExpense.compareTo(ceiling) > 0) {
+                throw new BizException(ErrorCode.CONFIRMED_EXCEEDS_SUBMITTED,
+                        inheritUnitExpense ? "认定支出不能大于院审认定支出" : "认定支出不能大于填报支出");
+            }
+        }
+        BigDecimal effectiveExpense = null;
+        if ("APPROVED".equals(result)) {
+            effectiveExpense = requestedExpense;
+            if (effectiveExpense == null && "LEADER_REVIEW".equals(reviewNode)) {
+                effectiveExpense = submission.getApprovedExpenseAmount();
+            }
+            if (effectiveExpense == null) {
+                effectiveExpense = submission.getExpenseAmount();
+            }
+            if ("LEADER_REVIEW".equals(reviewNode) && effectiveExpense != null && effectiveExpense.signum() > 0) {
+                submissionService.checkBudgetLimit(taskService.requireTask(submission.getTaskId()),
+                        submission.getIndicatorId(), effectiveExpense);
+            }
+        }
+
         SubmissionDtos.MetricValue effective = null;
         if ("APPROVED".equals(result)) {
             effective = requested;
@@ -406,6 +440,8 @@ public class ReviewService {
         review.setResult(result);
         review.setComment(request.getComment());
         review.setApprovedValueJson(effective == null ? null : submissionService.writeJson(effective));
+        review.setExpenseAmount(submission.getExpenseAmount());
+        review.setApprovedExpenseAmount(effectiveExpense);
         review.setIsProxy(proxy);
         review.setProxyReason(proxy ? request.getReason() : null);
         review.setCreatedAt(now);
@@ -419,6 +455,7 @@ public class ReviewService {
         submission.setUpdatedBy(userId);
         if ("APPROVED".equals(result)) {
             applyApprovedValue(submission, effective);
+            submission.setApprovedExpenseAmount(effectiveExpense);
         }
         if (submissionMapper.updateById(submission) == 0) {
             throw new BizException(ErrorCode.VERSION_CONFLICT,

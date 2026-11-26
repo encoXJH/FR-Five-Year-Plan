@@ -5,6 +5,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import {
   createIndicator,
   getIndicator,
+  putIndicatorBudget,
   updateIndicator,
   updateIndicatorDirection,
   updateYearTargets,
@@ -13,7 +14,9 @@ import { getUserOptions } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 import { enumLabel, enumOptions } from '@/utils/enumLabels'
 import { CALIBER_BY_MEASURE, isPercentCaliber, sumYearTargets } from '@/utils/indicator'
-import { formatNumber } from '@/utils/format'
+import { formatMoney, formatNumber } from '@/utils/format'
+import { newIdempotencyKey } from '@/utils/idempotency'
+import { ApiError } from '@/utils/request'
 import type {
   CreateIndicatorRequest,
   Indicator,
@@ -70,6 +73,11 @@ const formReadOnly = computed(() => {
     || props.planArchived
     || (source !== null && 'editable' in source && !source.editable)
 })
+
+const canMaintainBudget = computed(() => userStore.can('indicator:budget') && !props.planArchived)
+const budgetInput = ref<number | null>(null)
+const budgetReason = ref('')
+const budgetSaving = ref(false)
 
 interface FormState {
   name: string
@@ -169,6 +177,8 @@ function resetForm(): void {
   form.description = source?.description ?? ''
   form.evidenceRequirement = source?.evidenceRequirement ?? ''
   form.minFileCount = source?.minFileCount ?? 0
+  budgetInput.value = source?.totalBudget ?? null
+  budgetReason.value = ''
   for (const key of Object.keys(targetInputs)) delete targetInputs[Number(key)]
   for (const year of props.years) {
     const target = source?.yearTargets?.find((item) => item.year === year)?.target
@@ -356,6 +366,33 @@ async function submit(): Promise<void> {
     ElMessage.error(`${stage}失败${reason}`)
   } finally {
     saving.value = false
+  }
+}
+
+async function saveBudget(): Promise<void> {
+  const indicator = workingIndicator.value
+  if (!indicator || budgetSaving.value || !canMaintainBudget.value) return
+  const reason = budgetReason.value.trim()
+  if (!reason) {
+    ElMessage.warning('请填写预算调整原因')
+    return
+  }
+  budgetSaving.value = true
+  try {
+    const detail = await putIndicatorBudget(indicator.id, {
+      version: indicator.version,
+      totalBudget: budgetInput.value,
+      reason,
+    }, newIdempotencyKey())
+    workingIndicator.value = detail
+    budgetInput.value = detail.totalBudget ?? null
+    budgetReason.value = ''
+    ElMessage.success('预算已保存')
+    emit('saved')
+  } catch (error) {
+    ElMessage.error(error instanceof ApiError && error.message ? error.message : '预算保存失败')
+  } finally {
+    budgetSaving.value = false
   }
 }
 </script>
@@ -596,6 +633,53 @@ async function submit(): Promise<void> {
         </el-form-item>
       </el-form>
 
+      <div v-if="isEdit && workingIndicator && workingIndicator.level === 'A'" class="budget-section">
+        <el-divider content-position="left" class="form-section-divider">
+          <span class="form-section-title">预算</span>
+        </el-divider>
+        <div class="budget-summary-row">
+          <div>
+            <span>当前总预算</span>
+            <strong>{{ workingIndicator.totalBudget == null ? '未设置' : `${formatMoney(workingIndicator.totalBudget)} 万` }}</strong>
+          </div>
+          <div>
+            <span>已花预算</span>
+            <strong>{{ formatMoney(workingIndicator.spentBudget ?? 0) }} 万</strong>
+          </div>
+        </div>
+        <template v-if="canMaintainBudget">
+          <div class="budget-edit-row">
+            <el-input-number
+              v-model="budgetInput"
+              :min="0"
+              :precision="2"
+              :value-on-clear="null"
+              controls-position="right"
+              placeholder="清空表示清除预算"
+              class="budget-input"
+            />
+            <el-button
+              type="primary"
+              :loading="budgetSaving"
+              :disabled="detailLoading || Boolean(detailError)"
+              @click="saveBudget"
+            >
+              保存预算
+            </el-button>
+          </div>
+          <el-input
+            v-model="budgetReason"
+            type="textarea"
+            :rows="2"
+            maxlength="500"
+            show-word-limit
+            placeholder="预算调整原因（必填，500 字以内）"
+            class="budget-reason"
+          />
+          <div class="field-tip">预算不能低于已认定支出 {{ formatMoney(workingIndicator.spentBudget ?? 0) }} 万元；清除预算后填报不再受超支限制。</div>
+        </template>
+        <div v-else class="field-tip">{{ planArchived ? '计划已归档，预算只读' : '无预算维护权限，仅展示预算数字' }}</div>
+      </div>
     </div>
 
     <template #footer>
@@ -678,6 +762,55 @@ async function submit(): Promise<void> {
 
 .sum-error {
   color: var(--el-color-danger);
+}
+
+.budget-section {
+  max-width: 860px;
+}
+
+.budget-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.budget-summary-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+  padding: 10px 14px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  background: var(--el-fill-color-light);
+}
+
+.budget-summary-row span {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.budget-summary-row strong {
+  color: var(--el-text-color-primary);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-edit-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
+.budget-input {
+  width: 220px;
+}
+
+.budget-reason {
+  margin-bottom: var(--space-2);
 }
 
 @media (max-width: 600px) {

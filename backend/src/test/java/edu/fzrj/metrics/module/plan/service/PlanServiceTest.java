@@ -30,7 +30,10 @@ import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.module.task.service.TaskYearActivationService;
 import edu.fzrj.metrics.module.training.entity.TrainingProject;
 import edu.fzrj.metrics.module.training.entity.TrainingSheet;
+import edu.fzrj.metrics.module.training.entity.TrainingSheetStaff;
 import edu.fzrj.metrics.module.training.mapper.TrainingProjectMapper;
+import edu.fzrj.metrics.module.training.mapper.TrainingSheetStaffMapper;
+import edu.fzrj.metrics.module.training.service.TrainingAttachmentService;
 import edu.fzrj.metrics.module.training.mapper.TrainingReviewMapper;
 import edu.fzrj.metrics.module.training.mapper.TrainingSheetMapper;
 import edu.fzrj.metrics.security.LoginUser;
@@ -106,6 +109,10 @@ class PlanServiceTest {
     private TrainingProjectMapper trainingProjectMapper;
     @Mock
     private TrainingReviewMapper trainingReviewMapper;
+    @Mock
+    private TrainingSheetStaffMapper trainingSheetStaffMapper;
+    @Mock
+    private TrainingAttachmentService trainingAttachmentService;
 
     @InjectMocks
     private PlanService planService;
@@ -121,6 +128,7 @@ class PlanServiceTest {
         TableInfoHelper.initTableInfo(assistant, OrgUnit.class);
         TableInfoHelper.initTableInfo(assistant, TrainingSheet.class);
         TableInfoHelper.initTableInfo(assistant, TrainingProject.class);
+        TableInfoHelper.initTableInfo(assistant, TrainingSheetStaff.class);
     }
 
     @BeforeEach
@@ -754,6 +762,8 @@ class PlanServiceTest {
         assertEquals(99L, plan.getUpdatedBy());
         assertEquals(99L, sheet.getUpdatedBy());
         assertEquals(99L, project.getUpdatedBy());
+        verify(trainingSheetStaffMapper).delete(any());
+        verify(trainingAttachmentService).removeAll(List.of(101L));
         verify(trainingSheetMapper).updateById(sheet);
         verify(trainingProjectMapper).updateById(project);
         verifyNoInteractions(trainingReviewMapper);

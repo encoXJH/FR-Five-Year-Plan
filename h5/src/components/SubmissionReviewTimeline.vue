@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import StatusTag from '@/components/StatusTag.vue'
-import { formatDateTime } from '@/utils/format'
+import { formatDateTime, formatMoney } from '@/utils/format'
 import { formatMetricValue } from '@/utils/submission'
 import type { StatCaliber } from '@/types/enums'
 import type { ReviewRecord } from '@/types/submission'
@@ -33,6 +33,9 @@ defineProps<{
       <div v-if="review.comment" class="small review-comment">“{{ review.comment }}”</div>
       <div v-if="review.approvedValue" class="small review-approved">
         认定值：{{ formatMetricValue(review.approvedValue, caliber, unitLabel) }}
+      </div>
+      <div v-if="review.expenseAmount != null" class="small review-approved">
+        本次支出：{{ formatMoney(review.expenseAmount) }} 万<template v-if="review.approvedExpenseAmount != null"> · 认定支出：{{ formatMoney(review.approvedExpenseAmount) }} 万</template>
       </div>
     </div>
   </div>

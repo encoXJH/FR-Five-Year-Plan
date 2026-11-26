@@ -132,6 +132,23 @@ class UserImportServiceTest {
     }
 
     @Test
+    void 管理员导入模板排除干事并提示使用用户添加() throws Exception {
+        mockCreator("ADMIN", List.of());
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of());
+
+        byte[] bytes = userImportService.buildImportTemplate();
+
+        try (Workbook workbook = WorkbookFactory.create(new ByteArrayInputStream(bytes))) {
+            Sheet roles = workbook.getSheetAt(2);
+            assertEquals(4, roles.getLastRowNum());
+            assertEquals("ADMIN", roles.getRow(1).getCell(0).getStringCellValue());
+            assertEquals("UNIT_OWNER", roles.getRow(4).getCell(0).getStringCellValue());
+            String notes = workbook.getSheetAt(1).getRow(4).getCell(0).getStringCellValue();
+            assertTrue(notes.contains("批量导入不支持 STAFF"));
+        }
+    }
+
+    @Test
     void 预览支持中英文逗号并保存规范化角色和单元() {
         mockCreator("ADMIN", List.of());
         when(orgUnitMapper.selectList(any())).thenReturn(List.of(
@@ -194,6 +211,22 @@ class UserImportServiceTest {
     }
 
     @Test
+    void 管理员干事导入在预览阶段阻断() {
+        mockCreator("ADMIN", List.of());
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of());
+        when(sysUserMapper.selectList(any())).thenReturn(List.of());
+
+        SystemDtos.UserImportPreviewResponse response = userImportService.preview(excel(List.of(
+                List.of("干事", "staff003", "", "STAFF", "", ""))));
+
+        assertEquals(0, response.validRows());
+        assertEquals(1, response.invalidRows());
+        assertTrue(response.rows().get(0).errors().stream()
+                .anyMatch(error -> error.contains("批量导入不支持 STAFF")));
+        verify(userAdminService, never()).create(any());
+    }
+
+    @Test
     void 预览拒绝学院越权() {
         mockCreator("UNIT_OWNER", List.of(101L));
         when(orgUnitMapper.selectList(any())).thenReturn(List.of(
@@ -234,6 +267,7 @@ class UserImportServiceTest {
         assertEquals(List.of("STAFF"), captor.getValue().getRoles());
         assertNull(captor.getValue().getUnitId());
         assertNull(captor.getValue().getUnitIds());
+        assertNull(captor.getValue().getOwnerUserId());
         assertNull(previewStore.get(preview.importId()));
     }
 

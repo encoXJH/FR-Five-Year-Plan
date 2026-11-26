@@ -17,6 +17,7 @@ import edu.fzrj.metrics.module.system.mapper.RefreshTokenMapper;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.mapper.UserRoleMapper;
 import edu.fzrj.metrics.module.system.service.UserUnitService;
+import edu.fzrj.metrics.module.training.mapper.TrainingSheetStaffMapper;
 import edu.fzrj.metrics.security.dto.MeResponse;
 import edu.fzrj.metrics.security.dto.TokenResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -49,6 +51,7 @@ public class AuthService {
     private final AuditLogMapper auditLogMapper;
     private final ObjectMapper objectMapper;
     private final UserUnitService userUnitService;
+    private final TrainingSheetStaffMapper trainingSheetStaffMapper;
 
     @Value("${app.login.max-fail-count}")
     private int maxFailCount;
@@ -63,7 +66,7 @@ public class AuthService {
                        OrgUnitMapper orgUnitMapper, RefreshTokenMapper refreshTokenMapper,
                        JwtService jwtService, PasswordEncoder passwordEncoder,
                        AuditLogMapper auditLogMapper, ObjectMapper objectMapper,
-                       UserUnitService userUnitService) {
+                       UserUnitService userUnitService, TrainingSheetStaffMapper trainingSheetStaffMapper) {
         this.sysUserMapper = sysUserMapper;
         this.userRoleMapper = userRoleMapper;
         this.orgUnitMapper = orgUnitMapper;
@@ -73,6 +76,7 @@ public class AuthService {
         this.auditLogMapper = auditLogMapper;
         this.objectMapper = objectMapper;
         this.userUnitService = userUnitService;
+        this.trainingSheetStaffMapper = trainingSheetStaffMapper;
     }
 
     /** 账号密码登录 */
@@ -245,7 +249,13 @@ public class AuthService {
         MeResponse.UserInfo userInfo = new MeResponse.UserInfo(
                 user.getId(), user.getUsername(), user.getName(), maskPhone(user.getPhone()), user.getEmail(),
                 user.getUnitId(), unitName, units, unitIds);
-        return new MeResponse(userInfo, loginUser.getRoles(), loginUser.getPermissions(),
+        List<String> permissions = new ArrayList<>(loginUser.getPermissions());
+        boolean pureStaff = loginUser.getRoles().size() == 1 && loginUser.getRoles().contains("STAFF");
+        if (pureStaff && permissions.contains("training:fill")
+                && trainingSheetStaffMapper.selectValidSheetIds(loginUser.getUserId()).isEmpty()) {
+            permissions.remove("training:fill");
+        }
+        return new MeResponse(userInfo, loginUser.getRoles(), permissions,
                 dataScopeOf(loginUser), requiresPasswordChange(user));
     }
 

@@ -49,7 +49,7 @@ public class UserAdminService {
     private static final Set<String> ROLES = Set.copyOf(ROLE_ORDER);
     private static final List<String> UNIT_OWNER_DIRECTORY_ROLES = List.of("UNIT_OWNER", "STAFF");
     private static final Map<String, Set<String>> CREATABLE_ROLES = Map.of(
-            "ADMIN", Set.of("ADMIN", "LEADER", "SCHOOL_OWNER", "UNIT_OWNER"),
+            "ADMIN", Set.of("ADMIN", "LEADER", "SCHOOL_OWNER", "UNIT_OWNER", "STAFF"),
             "LEADER", Set.of("LEADER", "SCHOOL_OWNER", "UNIT_OWNER"),
             "SCHOOL_OWNER", Set.of("SCHOOL_OWNER", "UNIT_OWNER"),
             "UNIT_OWNER", Set.of("UNIT_OWNER", "STAFF"),
@@ -180,7 +180,9 @@ public class UserAdminService {
         if (duplicate > 0) {
             throw new BizException(ErrorCode.PARAM_INVALID, "登录名已存在：" + username);
         }
-        UnitSelection units = resolveCreationUnits(roles, request.getUnitId(), request.getUnitIds(), creator);
+        StaffCreation staff = resolveStaffCreation(roles, request.getOwnerUserId(), creator);
+        UnitSelection units = resolveCreationUnits(
+                roles, request.getUnitId(), request.getUnitIds(), creator, staff);
 
         SysUser user = new SysUser();
         user.setUsername(username);
@@ -189,7 +191,7 @@ public class UserAdminService {
         user.setPhone(StringUtils.hasText(request.getPhone()) ? request.getPhone().trim() : null);
         user.setEmail(StringUtils.hasText(request.getEmail()) ? request.getEmail().trim() : null);
         user.setUnitId(units.primaryUnitId());
-        user.setOwnerUserId(roles.contains("STAFF") ? creator.getUserId() : null);
+        user.setOwnerUserId(staff == null ? null : staff.ownerUserId());
         user.setIsEnabled(true);
         user.setLoginFailCount(0);
         user.setCreatedBy(creator.getUserId());
@@ -273,7 +275,7 @@ public class UserAdminService {
     public SystemDtos.UserItem patchStaff(Long userId, JsonNode body) {
         LoginUser manager = requireUnitOwner();
         PatchHelper patch = new PatchHelper(body);
-        SysUser user = requireManagedStaff(userId, manager);
+        SysUser user = requireManagedAccount(userId, manager);
         int version = patch.versionRequired();
         if (!user.getVersion().equals(version)) {
             throw new BizException(ErrorCode.VERSION_CONFLICT,
@@ -297,7 +299,7 @@ public class UserAdminService {
         List<Long> retainedUnitIds = null;
         if (unitChanged) {
             if (patch.isNull("unitId")) {
-                throw new BizException(ErrorCode.PARAM_INVALID, "干事主学院不能为空");
+                throw new BizException(ErrorCode.PARAM_INVALID, "账号主学院不能为空");
             }
             Long unitId = patch.longId("unitId");
             if (!manager.getUnitIds().contains(unitId)) {
@@ -338,7 +340,7 @@ public class UserAdminService {
         List<String> newRoles = validateRoles(request.getRoles());
         List<String> before = rolesOf(userId);
         if (newRoles.contains("STAFF") && (!before.contains("STAFF") || user.getOwnerUserId() == null)) {
-            throw new BizException(ErrorCode.FORBIDDEN, "只能通过学院负责人创建干事，不能为普通账号追加 STAFF");
+            throw new BizException(ErrorCode.FORBIDDEN, "只能通过用户添加流程创建干事，不能为普通账号追加 STAFF");
         }
         replaceRoles(userId, newRoles);
         // 推进用户版本号（乐观锁语义挂在 sys_user 上）
@@ -370,7 +372,7 @@ public class UserAdminService {
     @Transactional
     public void resetStaffPassword(Long userId, SystemDtos.StaffPasswordResetRequest request) {
         LoginUser manager = requireUnitOwner();
-        SysUser user = requireManagedStaff(userId, manager);
+        SysUser user = requireManagedAccount(userId, manager);
         if (!user.getVersion().equals(request.getVersion())) {
             throw new BizException(ErrorCode.VERSION_CONFLICT,
                     "数据已被他人修改，当前最新版本号：" + user.getVersion());
@@ -406,15 +408,25 @@ public class UserAdminService {
     private LoginUser requireUnitOwner() {
         LoginUser manager = SecurityUtils.getLoginUser();
         if (!manager.getRoles().contains("UNIT_OWNER")) {
-            throw new BizException(ErrorCode.FORBIDDEN, "仅学院项目负责人可以管理干事");
+            throw new BizException(ErrorCode.FORBIDDEN, "仅学院项目负责人可以管理本学院账号");
         }
         return manager;
     }
 
-    private SysUser requireManagedStaff(Long userId, LoginUser manager) {
+    public SysUser requireManagedAccount(Long userId) {
+        return requireManagedAccount(userId, requireUnitOwner());
+    }
+
+    private SysUser requireManagedAccount(Long userId, LoginUser manager) {
         SysUser user = requireUser(userId);
-        if (!Set.of("STAFF").equals(new LinkedHashSet<>(rolesOf(userId)))) {
-            throw new BizException(ErrorCode.DATA_SCOPE_DENIED, "目标用户不是可管理的纯干事账号");
+        Set<String> targetRoles = new LinkedHashSet<>(rolesOf(userId));
+        boolean staff = Set.of("STAFF").equals(targetRoles);
+        if (!staff && !Set.of("UNIT_OWNER").equals(targetRoles)) {
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED, "目标账号角色已变更，超出学院负责人管理范围");
+        }
+        // 纯 STAFF 归属本学院任意负责人即可管理；UNIT_OWNER 仍限本人创建
+        if (!staff && !manager.getUserId().equals(user.getCreatedBy())) {
+            throw new BizException(ErrorCode.DATA_SCOPE_DENIED, "学院负责人账号只能管理本人创建的");
         }
         Set<Long> managerUnitIds = new LinkedHashSet<>(manager.getUnitIds());
         boolean inScope = userUnitService.unitIdsOf(userId).stream().anyMatch(managerUnitIds::contains);
@@ -449,12 +461,54 @@ public class UserAdminService {
         return distinct;
     }
 
+    private StaffCreation resolveStaffCreation(List<String> roles, Long requestedOwnerUserId,
+                                               LoginUser creator) {
+        if (!roles.contains("STAFF")) {
+            if (requestedOwnerUserId != null) {
+                throw new BizException(ErrorCode.PARAM_INVALID, "仅管理员创建干事时可以指定归属负责人");
+            }
+            return null;
+        }
+        if (!creator.getRoles().contains("ADMIN")) {
+            if (requestedOwnerUserId != null) {
+                throw new BizException(ErrorCode.PARAM_INVALID, "学院负责人创建干事时无需指定归属负责人");
+            }
+            return new StaffCreation(creator.getUserId(), null);
+        }
+        if (requestedOwnerUserId == null) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "管理员创建干事时必须选择归属负责人");
+        }
+        SysUser owner = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getId, requestedOwnerUserId)
+                .eq(SysUser::getDeleted, 0L));
+        if (owner == null || !Boolean.TRUE.equals(owner.getIsEnabled())
+                || !rolesOf(owner.getId()).contains("UNIT_OWNER")) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "归属负责人不存在、未启用或不具备学院项目负责人角色");
+        }
+        List<Long> inherited = List.copyOf(new LinkedHashSet<>(userUnitService.unitIdsOf(owner.getId())));
+        if (inherited.isEmpty()) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "归属负责人未配置学院，不能创建干事");
+        }
+        Long primary = owner.getUnitId() != null && inherited.contains(owner.getUnitId())
+                ? owner.getUnitId() : inherited.get(0);
+        return new StaffCreation(owner.getId(), new UnitSelection(primary, inherited));
+    }
+
     UnitSelection resolveCreationUnits(List<String> roles, Long requestedPrimaryUnitId,
                                        List<Long> requestedUnitIds, LoginUser creator) {
+        return resolveCreationUnits(roles, requestedPrimaryUnitId, requestedUnitIds, creator, null);
+    }
+
+    private UnitSelection resolveCreationUnits(List<String> roles, Long requestedPrimaryUnitId,
+                                               List<Long> requestedUnitIds, LoginUser creator,
+                                               StaffCreation staff) {
         List<Long> requested = requestedUnitIds == null ? List.of() : requestedUnitIds;
         if (roles.contains("STAFF")) {
             if (requestedPrimaryUnitId != null || !requested.isEmpty()) {
-                throw new BizException(ErrorCode.PARAM_INVALID, "创建干事时单元必须留空，由服务端继承创建人全部学院");
+                throw new BizException(ErrorCode.PARAM_INVALID, "创建干事时单元必须留空，由服务端继承归属负责人全部学院");
+            }
+            if (staff != null && staff.units() != null) {
+                return staff.units();
             }
             List<Long> inherited = List.copyOf(new LinkedHashSet<>(creator.getUnitIds()));
             if (inherited.isEmpty()) {
@@ -479,6 +533,9 @@ public class UserAdminService {
     }
 
     record UnitSelection(Long primaryUnitId, List<Long> unitIds) {
+    }
+
+    private record StaffCreation(Long ownerUserId, UnitSelection units) {
     }
 
     private List<String> validateRoles(List<String> roles) {
@@ -526,14 +583,14 @@ public class UserAdminService {
         }
     }
 
-    private List<String> rolesOf(Long userId) {
+    List<String> rolesOf(Long userId) {
         return userRoleMapper.selectList(new LambdaQueryWrapper<UserRole>()
                         .eq(UserRole::getUserId, userId)
                         .orderByAsc(UserRole::getRole))
                 .stream().map(UserRole::getRole).toList();
     }
 
-    private void replaceRoles(Long userId, List<String> roles) {
+    void replaceRoles(Long userId, List<String> roles) {
         userRoleMapper.delete(new LambdaQueryWrapper<UserRole>().eq(UserRole::getUserId, userId));
         Long operator = SecurityUtils.getUserId();
         for (String role : roles) {
@@ -612,8 +669,27 @@ public class UserAdminService {
                                 .filter(role -> !unitOwnerDirectory || UNIT_OWNER_DIRECTORY_ROLES.contains(role))
                                 .toList(),
                         u.getIsEnabled(), u.getLastLoginAt(), u.getVersion(),
-                        unitIdsByUser.getOrDefault(u.getId(), List.of()), u.getOwnerUserId()))
+                        unitIdsByUser.getOrDefault(u.getId(), List.of()), u.getOwnerUserId(), u.getCreatedBy(),
+                        manageableBy(SecurityUtils.getLoginUserOrNull(), u,
+                                roleMap.getOrDefault(u.getId(), List.of()),
+                                unitIdsByUser.getOrDefault(u.getId(), List.of()))))
                 .toList();
+    }
+
+    private boolean manageableBy(LoginUser manager, SysUser user, List<String> roles, List<Long> unitIds) {
+        if (manager == null || !manager.getRoles().contains("UNIT_OWNER")) {
+            return false;
+        }
+        Set<String> targetRoles = new LinkedHashSet<>(roles);
+        boolean staff = Set.of("STAFF").equals(targetRoles);
+        if (!staff && !Set.of("UNIT_OWNER").equals(targetRoles)) {
+            return false;
+        }
+        // 纯 STAFF 归属本学院任意负责人即可管理；UNIT_OWNER 仍限本人创建
+        if (!staff && !manager.getUserId().equals(user.getCreatedBy())) {
+            return false;
+        }
+        return unitIds.stream().anyMatch(manager.getUnitIds()::contains);
     }
 
     private Map<Long, OrgUnit> unitMapOf(List<SysUser> users, Map<Long, List<Long>> unitIdsByUser) {

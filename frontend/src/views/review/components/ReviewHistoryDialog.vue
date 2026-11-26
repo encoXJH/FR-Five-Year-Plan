@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import StatusTag from '@/components/StatusTag.vue'
 import FilePreviewPane from '@/components/FilePreviewPane.vue'
+import FilePreviewDrawer from '@/components/FilePreviewDrawer.vue'
 import SubmissionTimeline from '@/views/submission/components/SubmissionTimeline.vue'
 import { listReviewHistory } from '@/api/review'
 import { getSubmission } from '@/api/submission'
-import { formatDateTime } from '@/utils/format'
+import { downloadFile } from '@/api/file'
+import { formatDateTime, formatMoney } from '@/utils/format'
 import { FILE_CATEGORY_COLORS, formatFileSize } from '@/utils/file'
 import { formatMetricValue, parseSubmissionRemark } from '@/utils/submission'
 import type { PageResult } from '@/types/api'
-import type { FileInfo } from '@/types/file'
+import type { FileInfo, FileView } from '@/types/file'
 import type {
   ReviewHistoryQuery,
   SubmissionDetail,
@@ -39,6 +42,7 @@ let listGeneration = 0
 let detailGeneration = 0
 
 const files = computed(() => detail.value?.files ?? [])
+const budgetFiles = computed(() => detail.value?.budgetFiles ?? [])
 const previewFile = computed<FileInfo | null>(() =>
   files.value.find((file) => file.id === previewFileId.value) ?? null,
 )
@@ -105,6 +109,29 @@ function changePage(next: number): void {
 
 function openPreview(file: { id: string }): void {
   previewFileId.value = file.id
+}
+
+const budgetPreviewVisible = ref(false)
+const budgetPreviewFile = ref<FileInfo | null>(null)
+
+function openBudgetPreview(file: FileView): void {
+  budgetPreviewFile.value = {
+    ...file,
+    bizType: 'BUDGET_ATTACHMENT',
+    status: 'BOUND',
+    transcodeStatus: null,
+    uploadedAt: '',
+    uploadedBy: null,
+  }
+  budgetPreviewVisible.value = true
+}
+
+async function downloadBudgetFile(file: FileView): Promise<void> {
+  try {
+    await downloadFile(file.id, file.fileName, file.size)
+  } catch {
+    ElMessage.error('获取下载地址失败，请重试')
+  }
 }
 
 watch(() => props.modelValue, (open) => {
@@ -197,6 +224,8 @@ watch(() => props.modelValue, (open) => {
           <el-descriptions :column="1" border size="small">
             <el-descriptions-item label="填报值">{{ submissionValueText }}</el-descriptions-item>
             <el-descriptions-item v-if="detail.approvedValue" label="认定值">{{ approvedValueText }}</el-descriptions-item>
+            <el-descriptions-item v-if="detail.expenseAmount != null" label="本次支出">{{ formatMoney(detail.expenseAmount) }} 万</el-descriptions-item>
+            <el-descriptions-item v-if="detail.approvedExpenseAmount != null" label="认定支出">{{ formatMoney(detail.approvedExpenseAmount) }} 万</el-descriptions-item>
             <el-descriptions-item v-if="detail.sourceNote" label="数据来源说明">{{ detail.sourceNote }}</el-descriptions-item>
             <el-descriptions-item label="完成情况说明">{{ remarkParts.remark || '—' }}</el-descriptions-item>
           </el-descriptions>
@@ -211,6 +240,19 @@ watch(() => props.modelValue, (open) => {
             </li>
           </ul>
           <div v-else class="empty-text">该记录未上传材料</div>
+
+          <template v-if="budgetFiles.length > 0">
+            <h3 class="section-title">预算佐证材料（{{ budgetFiles.length }} 份）</h3>
+            <ul class="file-list">
+              <li v-for="file in budgetFiles" :key="file.id" class="file-row">
+                <span class="file-dot" :style="{ backgroundColor: FILE_CATEGORY_COLORS[file.category] }" />
+                <span class="file-name" :title="file.fileName">{{ file.fileName }}</span>
+                <span class="file-size">{{ formatFileSize(file.size) }}</span>
+                <el-button link type="primary" @click="openBudgetPreview(file)">预览</el-button>
+                <el-button link type="primary" @click="downloadBudgetFile(file)">下载</el-button>
+              </li>
+            </ul>
+          </template>
 
           <template v-if="detail.reviews.length > 0">
             <h3 class="section-title">审核意见</h3>
@@ -229,6 +271,8 @@ watch(() => props.modelValue, (open) => {
         <el-empty v-else-if="!detailLoading" description="选择一条记录查看历史审核材料" :image-size="100" />
       </el-card>
     </div>
+
+    <FilePreviewDrawer v-model="budgetPreviewVisible" :file="budgetPreviewFile" />
   </el-dialog>
 </template>
 

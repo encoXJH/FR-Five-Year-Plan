@@ -136,25 +136,52 @@ public class UserController {
         return userAdminService.staffPage(query);
     }
 
-    @Operation(summary = "修改或停用本学院干事",
-            description = "权限：user:create，且当前用户必须为 UNIT_OWNER；可改 name / phone / unitId / isEnabled；"
-                    + "unitId 必须属于本人学院；保留其他学院关系、角色、归属创建人与 createdBy；必须带 version；停用时吊销全部 refreshToken")
+    @Operation(summary = "修改或停用学院自管账号",
+            description = "权限：user:create，且当前用户必须为 UNIT_OWNER；目标须为同学院纯 STAFF（归属本学院任意负责人即可）或本人创建且同学院的 UNIT_OWNER；"
+                    + "可改 name / phone / unitId / isEnabled / role；unitId 必须属于本人学院；role 变化时必须填写 reason，"
+                    + "资料与角色在同一事务保存并复用互转业务阻断；未改角色时保留原归属；必须带 version，停用时吊销 refreshToken")
     @PatchMapping("/staff/{userId}")
     @PreAuthorize("hasAuthority('user:create')")
-    @AuditLog(action = "UPDATE", resourceType = "user", resourceId = "#userId")
+    @AuditLog(action = "UPDATE", resourceType = "user", resourceId = "#userId",
+            reason = "#body.path('reason').asText(null)")
     public SystemDtos.UserItem patchStaff(@PathVariable Long userId, @RequestBody JsonNode body) {
-        return userAdminService.patchStaff(userId, body);
+        return userDeletionService.patchManaged(userId, body);
     }
 
-    @Operation(summary = "重置本学院干事密码",
-            description = "权限：user:create，且当前用户必须为 UNIT_OWNER；新密码 8–64 位并必须带 version；"
-                    + "重置后清除登录锁定并吊销全部 refreshToken")
+    @Operation(summary = "重置学院自管账号密码",
+            description = "权限：user:create，且当前用户必须为 UNIT_OWNER；目标须为同学院纯 STAFF（归属本学院任意负责人即可）或本人创建且同学院的 UNIT_OWNER；"
+                    + "新密码 8–64 位并必须带 version；重置后清除登录锁定并吊销全部 refreshToken")
     @PostMapping("/staff/{userId}/password-reset")
     @PreAuthorize("hasAuthority('user:create')")
     @AuditLog(action = "UPDATE", resourceType = "user", resourceId = "#userId")
     public void resetStaffPassword(@PathVariable Long userId,
                                    @Valid @RequestBody SystemDtos.StaffPasswordResetRequest request) {
         userAdminService.resetStaffPassword(userId, request);
+    }
+
+    @Operation(summary = "转换学院自管账号角色（敏感操作）",
+            description = "权限：user:create，且当前用户必须为 UNIT_OWNER；仅限同学院纯 STAFF（归属本学院任意负责人即可）与本人创建且同学院的 UNIT_OWNER 互转；"
+                    + "必须带 version 和 reason；存在有效负责人引用、任务或培训分配、下属干事、草稿/待审填报或在途调整时返回 40008；"
+                    + "转换后更新 owner_user_id、吊销 refreshToken，历史业务记录不改写")
+    @PutMapping("/staff/{userId}/roles")
+    @PreAuthorize("hasAuthority('user:create')")
+    @AuditLog(action = "PERMISSION_CHANGE", resourceType = "user", resourceId = "#userId",
+            reason = "#request.reason", before = "#result.auditBefore", after = "#result.auditAfter")
+    public SystemDtos.RoleChangeView updateManagedRoles(@PathVariable Long userId,
+                                                        @Valid @RequestBody SystemDtos.RolesRequest request) {
+        return userDeletionService.updateManagedRoles(userId, request);
+    }
+
+    @Operation(summary = "删除学院自管账号（逻辑删除）",
+            description = "权限：user:create，且当前用户必须为 UNIT_OWNER；仅限同学院纯 STAFF（归属本学院任意负责人即可）或本人创建且同学院的 UNIT_OWNER；"
+                    + "必须带 version 和 reason；有效业务引用阻断规则与 ADMIN 删除一致，清理当前关系并吊销 refreshToken")
+    @DeleteMapping("/staff/{userId}")
+    @PreAuthorize("hasAuthority('user:create')")
+    @AuditLog(action = "DELETE", resourceType = "user", resourceId = "#userId", reason = "#request.reason",
+            before = "deletionSnapshot(#userId)")
+    public void deleteManaged(@PathVariable Long userId,
+                              @Valid @RequestBody SystemDtos.UserDeleteRequest request) {
+        userDeletionService.deleteManaged(userId, request);
     }
 
     @Operation(summary = "修改或停用用户",

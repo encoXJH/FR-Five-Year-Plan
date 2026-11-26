@@ -57,6 +57,12 @@ public final class SubmissionDtos {
         private String sourceNote;
         private List<Long> fileIds;
 
+        /** 本次支出金额（万元，最多两位小数） */
+        private BigDecimal expenseAmount;
+
+        /** 预算佐证材料文件 id */
+        private List<Long> budgetFileIds;
+
         /** 管理员代填原因（敏感操作必填） */
         private String proxyReason;
     }
@@ -74,6 +80,9 @@ public final class SubmissionDtos {
 
         @Valid
         private MetricValue approvedValue;
+
+        /** 认定支出金额（万元，核减用；不能大于本级可认定上限） */
+        private BigDecimal approvedExpenseAmount;
 
         /** 管理员代审原因（选填，填写后写入审计日志） */
         private String reason;
@@ -153,6 +162,8 @@ public final class SubmissionDtos {
             String result,
             String comment,
             MetricValue approvedValue,
+            BigDecimal expenseAmount,
+            BigDecimal approvedExpenseAmount,
             Boolean isProxy,
             LocalDateTime createdAt) {
     }
@@ -161,6 +172,8 @@ public final class SubmissionDtos {
             Integer revisionNo,
             MetricValue value,
             @JsonSerialize(contentUsing = ToStringSerializer.class) List<Long> fileIds,
+            BigDecimal expenseAmount,
+            @JsonSerialize(contentUsing = ToStringSerializer.class) List<Long> budgetFileIds,
             LocalDateTime submittedAt,
             UserRef submittedBy) {
     }
@@ -193,6 +206,8 @@ public final class SubmissionDtos {
             Integer year,
             String statCaliber,
             MetricValue value,
+            BigDecimal expenseAmount,
+            BigDecimal approvedExpenseAmount,
             String status,
             String submitterRole,
             String currentReviewNode,
@@ -217,6 +232,8 @@ public final class SubmissionDtos {
             String statCaliber,
             MetricValue value,
             MetricValue approvedValue,
+            BigDecimal expenseAmount,
+            BigDecimal approvedExpenseAmount,
             String remark,
             String sourceNote,
             String status,
@@ -225,6 +242,7 @@ public final class SubmissionDtos {
             Integer revisionNo,
             Boolean isProxy,
             List<FileView> files,
+            List<FileView> budgetFiles,
             List<ReviewView> reviews,
             List<HistoryView> histories,
             LocalDateTime submittedAt,

@@ -1,6 +1,8 @@
 package edu.fzrj.metrics.module.indicator.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
@@ -79,6 +81,10 @@ public class Indicator {
 
     /** 五年目标总量（GROWTH / STOCK 口径为末年应达总量；BOOLEAN 为 1） */
     private BigDecimal totalTarget;
+
+    /** 指标总预算（万元），仅 A 级维护；NULL 表示未设置 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal totalBudget;
 
     /** 建设方向负责人，引用 sys_user.id；A+ 为空时沿用上级 A */
     @JsonSerialize(using = ToStringSerializer.class)

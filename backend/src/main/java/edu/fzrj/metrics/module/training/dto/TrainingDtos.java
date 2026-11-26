@@ -2,7 +2,9 @@ package edu.fzrj.metrics.module.training.dto;
 
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+import edu.fzrj.metrics.common.api.UserRef;
 import edu.fzrj.metrics.common.page.PageQuery;
+import edu.fzrj.metrics.module.file.dto.FileInfoResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -45,6 +47,15 @@ public final class TrainingDtos {
         private Integer rowNo;
         @NotNull(message = "项目数据不能为空")
         private Map<String, Object> data;
+        private List<Long> fileIds;
+    }
+
+    @Data
+    public static class StaffPutRequest {
+        @NotNull(message = "缺少 version（乐观锁版本号）")
+        private Integer version;
+        @NotNull(message = "staffIds 不能为空")
+        private List<Long> staffIds;
     }
 
     @Data
@@ -108,7 +119,15 @@ public final class TrainingDtos {
             String submittedByName,
             LocalDateTime submittedAt,
             boolean canEdit,
-            boolean canReview) {
+            boolean canReview,
+            boolean canAssignStaff) {
+    }
+
+    public record StaffView(
+            Integer version,
+            List<UserRef> staff,
+            List<UserRef> assignableStaff,
+            boolean canAssignStaff) {
     }
 
     public record FieldDefinition(
@@ -134,7 +153,8 @@ public final class TrainingDtos {
             LocalDateTime submittedAt,
             boolean canEdit,
             boolean canReview,
-            String reviewComment) {
+            String reviewComment,
+            List<FileInfoResponse> files) {
     }
 
     public record ReviewItem(

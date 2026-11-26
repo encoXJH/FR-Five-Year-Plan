@@ -90,9 +90,11 @@ export type AchieveStatus =
 
 export type FileBizType =
   | 'SUBMISSION_ATTACHMENT'
+  | 'BUDGET_ATTACHMENT'
   | 'ADJUSTMENT_ATTACHMENT'
   | 'MILESTONE_ATTACHMENT'
   | 'INDICATOR_ATTACHMENT'
+  | 'TRAINING_ATTACHMENT'
   | 'IMPORT_FILE'
 
 export type FileCategory = 'DOCUMENT' | 'PDF' | 'IMAGE' | 'VIDEO' | 'ARCHIVE'

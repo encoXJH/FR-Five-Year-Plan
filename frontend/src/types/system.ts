@@ -65,6 +65,9 @@ export interface SystemUser {
   isEnabled: boolean
   lastLoginAt?: string | null
   version: number
+  unitIds?: string[]
+  createdBy?: string | null
+  manageable?: boolean
 }
 
 export interface SystemUserSaveRequest {
@@ -75,6 +78,7 @@ export interface SystemUserSaveRequest {
   email?: string | null
   unitId?: string | null
   unitIds?: string[]
+  ownerUserId?: string | null
   roles?: Role[]
   isEnabled?: boolean
   version?: number
@@ -132,6 +136,8 @@ export interface StaffUserUpdateRequest {
   phone?: string
   unitId?: string
   isEnabled?: boolean
+  role?: Role
+  reason?: string
   version: number
 }
 

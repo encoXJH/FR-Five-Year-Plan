@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -33,6 +34,12 @@ public class SubmissionHistory {
 
     /** 提交时引用的文件 id 数组 */
     private String fileIdsJson;
+
+    /** 提交时支出金额快照（万元） */
+    private BigDecimal expenseAmount;
+
+    /** 提交时预算佐证文件 id 数组 */
+    private String budgetFileIdsJson;
 
     /** 提交时间 */
     private LocalDateTime submittedAt;

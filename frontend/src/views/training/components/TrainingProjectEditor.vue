@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import MaterialUploader from '@/views/submission/components/MaterialUploader.vue'
 import {
   calculateTrainingFunding,
   calculateTrainingValues,
@@ -15,6 +16,7 @@ import type {
   TrainingProjectData,
   TrainingProjectInput,
 } from '@/types/training'
+import type { FileInfo } from '@/types/file'
 
 const props = withDefaults(defineProps<{
   modelValue: boolean
@@ -34,6 +36,10 @@ const emit = defineEmits<{
 
 const data = ref<TrainingProjectData>(emptyTrainingProjectData())
 const rowNo = ref(1)
+const fileIds = ref<string[]>([])
+const initialFiles = ref<FileInfo[]>([])
+const attachmentKey = ref(0)
+const attachmentUploader = ref<InstanceType<typeof MaterialUploader> | null>(null)
 const groups = computed(() => groupTrainingFields(props.fields))
 const funding = computed(() => calculateTrainingFunding(data.value))
 const peopleGroups = new Set(['AUDIENCE', 'INDUSTRY', 'REGION'])
@@ -60,6 +66,10 @@ watch(
     if (!visible) return
     rowNo.value = project?.rowNo ?? 1
     data.value = calculateTrainingValues(project?.data ?? emptyTrainingProjectData())
+    const nextFileIds = [...(project?.fileIds ?? project?.files?.map((file) => file.id) ?? [])]
+    fileIds.value = nextFileIds
+    initialFiles.value = (project?.files ?? []).filter((file) => nextFileIds.includes(file.id))
+    attachmentKey.value += 1
   },
   { immediate: true, deep: true },
 )
@@ -78,6 +88,8 @@ function confirm(): void {
     ...props.project,
     rowNo: rowNo.value,
     data: calculateTrainingValues(data.value),
+    fileIds: [...fileIds.value],
+    files: initialFiles.value.filter((file) => fileIds.value.includes(file.id)),
   }
   const issues = validateTrainingProject(project, props.fields, 'draft')
   if (issues.length > 0) {
@@ -194,6 +206,26 @@ function confirm(): void {
       </section>
     </el-form>
 
+    <section class="training-field-group training-attachments" aria-label="项目附件">
+      <div class="training-field-group__heading">
+        <h2 class="training-field-group__title">项目附件</h2>
+        <el-button v-if="!readonly" type="primary" plain size="small" @click="attachmentUploader?.openPicker()">
+          上传附件
+        </el-button>
+      </div>
+      <div class="field-tip attachment-tip">
+        {{ readonly ? '项目附件仅支持预览和下载。' : '项目附件随“保存草稿”生效；点击“确定”仅暂存到当前项目。' }}
+      </div>
+      <MaterialUploader
+        ref="attachmentUploader"
+        :key="attachmentKey"
+        v-model="fileIds"
+        :initial-files="initialFiles"
+        :disabled="readonly"
+        biz-type="TRAINING_ATTACHMENT"
+      />
+    </section>
+
     <template #footer>
       <div class="editor-footer">
         <el-button v-if="readonly" type="primary" @click="close">关闭</el-button>
@@ -270,6 +302,14 @@ function confirm(): void {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   line-height: 18px;
+}
+
+.training-attachments {
+  margin-top: 20px;
+}
+
+.attachment-tip {
+  margin: -4px 0 12px;
 }
 
 .funding-total {

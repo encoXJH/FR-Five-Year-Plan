@@ -167,6 +167,12 @@ function onPick(event: Event): void {
   input.value = ''
 }
 
+function openPicker(): void {
+  if (!props.disabled) fileInput.value?.click()
+}
+
+defineExpose({ openPicker })
+
 function onDrop(event: DragEvent): void {
   dragging.value = false
   if (props.disabled) return

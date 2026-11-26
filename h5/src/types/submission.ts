@@ -1,6 +1,6 @@
 import type { UnitRef, UserRef } from './api'
 import type { ReviewNode, ReviewResult, StatCaliber, SubmissionStatus, SubmitterRole } from './enums'
-import type { FileInfo } from './file'
+import type { FileInfo, FileView } from './file'
 
 /**
  * 指标值对象 MetricValue（API 约定 3.5）
@@ -30,6 +30,10 @@ export interface ReviewRecord {
   reviewNode?: ReviewNode | null
   comment: string | null
   approvedValue: MetricValue | null
+  /** 本次填报支出（万元） */
+  expenseAmount?: number | null
+  /** 本级审核认定支出（万元） */
+  approvedExpenseAmount?: number | null
   /** 是否管理员代审（API 第 10 章敏感操作标识） */
   isProxy?: boolean | null
   createdAt: string
@@ -51,6 +55,8 @@ export interface SubmissionHistoryRecord {
   revisionNo: number
   value: MetricValue
   fileIds: string[]
+  expenseAmount?: number | null
+  budgetFileIds?: string[]
   submittedAt: string
   submittedBy: UserRef | null
 }
@@ -79,6 +85,10 @@ export interface SubmissionListItem {
   createdAt: string
   fileCount?: number
   approvedValue?: MetricValue | null
+  /** 本次支出（万元）；null 表示未申报支出 */
+  expenseAmount?: number | null
+  /** 校审认定支出（万元） */
+  approvedExpenseAmount?: number | null
   remark?: string | null
   sourceNote?: string | null
   fileIds?: string[]
@@ -95,6 +105,8 @@ export interface SubmissionDetail extends SubmissionListItem {
   remark: string | null
   sourceNote: string | null
   files: FileInfo[]
+  /** 预算佐证材料 */
+  budgetFiles?: FileView[]
   reviews: ReviewRecord[]
   histories: SubmissionHistoryRecord[]
   isProxy: boolean | null
@@ -108,6 +120,10 @@ export interface CreateSubmissionRequest {
   remark?: string | null
   sourceNote?: string | null
   fileIds?: string[]
+  /** 本次支出金额（万元，最多两位小数） */
+  expenseAmount?: number | null
+  /** 预算佐证材料文件 id；支出大于 0 时提交必传 */
+  budgetFileIds?: string[]
   /** 管理员代填原因（敏感操作，API 第 10 章；后端契约字段名 proxyReason，is_proxy=1） */
   proxyReason?: string | null
 }
@@ -118,6 +134,8 @@ export interface UpdateSubmissionRequest {
   remark?: string | null
   sourceNote?: string | null
   fileIds?: string[]
+  expenseAmount?: number | null
+  budgetFileIds?: string[]
   proxyReason?: string | null
   version: number
 }
@@ -144,6 +162,8 @@ export interface ReviewRequest {
   comment?: string | null
   /** 核减认定值（不能大于本级认定值，60005） */
   approvedValue?: MetricValue | null
+  /** 核减认定支出（万元，不能大于本次申报支出，60005） */
+  approvedExpenseAmount?: number | null
   /** 当前填报版本，审核乐观锁必传 */
   version: number
   /** 管理员代审原因（敏感操作，API 第 10 章） */

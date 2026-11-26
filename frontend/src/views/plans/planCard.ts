@@ -9,6 +9,14 @@ export function canExportTrainingPlan(
   return planType === 'TRAINING' && can('training:fill', 'submission:review')
 }
 
+export function canAssignTrainingPlanStaff(
+  planType: PlanType | undefined,
+  status: PlanStatus,
+  isAdmin: boolean,
+): boolean {
+  return planType === 'TRAINING' && status !== 'ARCHIVED' && isAdmin
+}
+
 export function canArchivePlanCard(canManage: boolean, status: PlanStatus): boolean {
   return canManage && status !== 'ARCHIVED'
 }

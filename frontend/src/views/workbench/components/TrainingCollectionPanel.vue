@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import StatusTag from '@/components/StatusTag.vue'
+import TrainingStaffDialog from '@/views/training/components/TrainingStaffDialog.vue'
 import { listTrainingSheets } from '@/api/training'
 import { useUserStore } from '@/stores/user'
 import { useAutoRefresh } from '@/utils/autoRefresh'
@@ -13,6 +14,9 @@ const userStore = useUserStore()
 const loading = ref(false)
 const loadFailed = ref(false)
 const sheets = ref<TrainingSheetSummary[]>([])
+const staffDialogVisible = ref(false)
+const staffSheetId = ref<string | null>(null)
+const staffPlanName = ref('')
 
 async function load(silent = false): Promise<void> {
   if (!userStore.can('training:fill')) return
@@ -35,6 +39,17 @@ function actionLabel(sheet: TrainingSheetSummary): string {
 
 function openSheet(sheet: TrainingSheetSummary): void {
   void router.push({ path: `/training/${sheet.id}`, query: { from: 'training' } })
+}
+
+function openStaffDialog(sheet: TrainingSheetSummary): void {
+  if (!sheet.canAssignStaff) return
+  staffSheetId.value = sheet.id
+  staffPlanName.value = sheet.planName
+  staffDialogVisible.value = true
+}
+
+async function handleStaffSaved(): Promise<void> {
+  await Promise.all([load(), userStore.fetchMe().catch(() => undefined)])
 }
 
 onMounted(() => void load())
@@ -66,10 +81,17 @@ useAutoRefresh(() => load(true))
           <el-button :type="sheet.canEdit || sheet.canReview ? 'primary' : 'default'" @click="openSheet(sheet)">
             {{ actionLabel(sheet) }}
           </el-button>
+          <el-button v-if="sheet.canAssignStaff" @click="openStaffDialog(sheet)">干事分配</el-button>
         </div>
       </article>
     </div>
     <el-empty v-else-if="!loading" description="暂无职业培训采集计划" :image-size="64" />
+    <TrainingStaffDialog
+      v-model="staffDialogVisible"
+      :sheet-id="staffSheetId"
+      :plan-name="staffPlanName"
+      @saved="handleStaffSaved"
+    />
   </el-card>
 </template>
 
@@ -132,12 +154,23 @@ useAutoRefresh(() => load(true))
 }
 
 .training-sheet__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
   margin-top: 16px;
-  text-align: right;
+}
+
+.training-sheet__actions :deep(.el-button) {
+  margin-left: 0;
 }
 
 @media (max-width: 480px) {
   .training-sheet__head {
+    flex-direction: column;
+  }
+
+  .training-sheet__actions {
     flex-direction: column;
   }
 

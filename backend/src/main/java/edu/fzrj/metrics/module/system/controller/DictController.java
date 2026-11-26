@@ -96,7 +96,8 @@ public class DictController {
             m.put("ApprovalNode", items("OWNER_REVIEW:建设方向负责人初审", "RECEIVER_CONFIRM:接收方确认", "LEADER_APPROVAL:校级负责人审批"));
             m.put("Decision", items("APPROVE:同意", "REJECT:驳回（拒绝）"));
             m.put("MilestoneStatus", items("NOT_STARTED:未开始", "IN_PROGRESS:进行中", "COMPLETED:已完成", "OVERDUE:逾期", "POSTPONED:已延期"));
-            m.put("FileBizType", items("SUBMISSION_ATTACHMENT:填报材料", "ADJUSTMENT_ATTACHMENT:调整附件", "MILESTONE_ATTACHMENT:里程碑附件", "IMPORT_FILE:导入文件"));
+            m.put("FileBizType", items("SUBMISSION_ATTACHMENT:填报材料", "ADJUSTMENT_ATTACHMENT:调整附件", "MILESTONE_ATTACHMENT:里程碑附件", "INDICATOR_ATTACHMENT:指标材料", "IMPORT_FILE:导入文件", "TRAINING_ATTACHMENT:培训项目附件"));
+            m.put("FileRefType", items("SUBMISSION:填报", "ADJUSTMENT:调整", "MILESTONE:里程碑", "INDICATOR:指标", "TRAINING_PROJECT:培训项目"));
             m.put("FileCategory", items("DOCUMENT:文档", "PDF:PDF", "IMAGE:图片", "VIDEO:视频", "ARCHIVE:压缩包"));
             m.put("PreviewType", items("IMAGE:IMAGE", "PDF:PDF", "OFFICE:OFFICE", "VIDEO:VIDEO", "UNSUPPORTED:UNSUPPORTED"));
             m.put("ExportType", items("INDICATORS:指标体系", "TASKS:学院任务", "STATS_REPORT:统计报表", "SETTLEMENT:核算结果", "AUDIT_LOGS:操作日志", "MATERIAL_ZIP:材料 ZIP"));

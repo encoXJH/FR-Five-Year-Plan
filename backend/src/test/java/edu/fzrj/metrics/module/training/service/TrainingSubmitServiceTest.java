@@ -51,6 +51,8 @@ class TrainingSubmitServiceTest {
     @Mock private UserUnitMapper userUnitMapper;
     @Spy private ObjectMapper objectMapper = new ObjectMapper();
     @Mock private TrainingExcelService excelService;
+    @Mock private TrainingAccessService accessService;
+    @Mock private TrainingAttachmentService attachmentService;
     @Spy @InjectMocks private TrainingService trainingService;
 
     @BeforeAll
@@ -119,7 +121,7 @@ class TrainingSubmitServiceTest {
     private TrainingDtos.Detail exportDetail() {
         TrainingDtos.SheetSummary sheet = new TrainingDtos.SheetSummary(1L, 2L, "培训采集",
                 2025, 2026, 2024, 14L, 99L, "PENDING_REVIEW", 2, 1, null,
-                "学院", "负责人", "UNIT_OWNER", "LEADER_REVIEW", 1, 100L, "干事", null, true, true);
+                "学院", "负责人", "UNIT_OWNER", "LEADER_REVIEW", 1, 100L, "干事", null, true, true, false);
         return new TrainingDtos.Detail(sheet, List.of(),
                 List.of(exportProject(10L, "APPROVED"), exportProject(11L, "PENDING_REVIEW")), List.of());
     }
@@ -127,7 +129,7 @@ class TrainingSubmitServiceTest {
     private TrainingDtos.Project exportProject(Long id, String status) {
         return new TrainingDtos.Project(id, id.intValue(), java.util.Map.of(), status,
                 "UNIT_OWNER", "PENDING_REVIEW".equals(status) ? "LEADER_REVIEW" : null,
-                1, 100L, null, false, false, null);
+                1, 100L, null, false, false, null, List.of());
     }
 
     private TrainingSheet submitSheet() throws Exception {
@@ -146,6 +148,7 @@ class TrainingSubmitServiceTest {
         when(sheetMapper.selectOne(any())).thenReturn(sheet);
         when(planMapper.selectByIdForUpdate(2L)).thenReturn(plan);
         when(sheetMapper.selectByIdForUpdate(1L)).thenReturn(sheet);
+        when(accessService.canFill(any(), any())).thenReturn(true);
         when(sheetMapper.updateById(any(TrainingSheet.class))).thenReturn(1);
         TrainingProject project = new TrainingProject();
         project.setId(10L);

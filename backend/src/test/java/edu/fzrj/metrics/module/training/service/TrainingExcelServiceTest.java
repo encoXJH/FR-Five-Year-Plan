@@ -21,11 +21,11 @@ class TrainingExcelServiceTest {
         TrainingFieldSchema.ValidationResult validated = TrainingFieldSchema.validate(
                 TrainingFieldSchemaTest.fullData(), "田明月", true, "data");
         TrainingDtos.Project project = new TrainingDtos.Project(101L, 1, validated.data(),
-                "APPROVED", "UNIT_OWNER", null, 1, 99L, null, false, false, null);
+                "APPROVED", "UNIT_OWNER", null, 1, 99L, null, false, false, null, List.of());
         TrainingDtos.SheetSummary sheet = new TrainingDtos.SheetSummary(1L, 2L, "2025—2026学年职业培训信息采集",
                 2025, 2026, 2024, 14L, 99L, "APPROVED", 1, 1, null,
                 "产业AI人才服务中心", "田明月", "UNIT_OWNER", null, 1,
-                99L, "田明月", null, false, false);
+                99L, "田明月", null, false, false, false);
         TrainingDtos.Detail detail = new TrainingDtos.Detail(sheet, TrainingFieldSchema.fields(), List.of(project), List.of());
 
         byte[] bytes = excelService.build(detail);

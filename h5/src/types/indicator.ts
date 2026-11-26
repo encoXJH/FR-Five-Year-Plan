@@ -1,4 +1,4 @@
-import type { UserRef } from './api'
+import type { PageResult, UnitRef, UserRef } from './api'
 import type {
   IndicatorLevel,
   IndicatorNature,
@@ -6,9 +6,11 @@ import type {
   MeasureType,
   RollupMode,
   StatCaliber,
+  SubmissionStatus,
   SubjectType,
   TargetDirection,
 } from './enums'
+import type { FileView } from './file'
 
 /** 年度目标（API 3.6）：BOOLEAN 型计划年完成年为 true，其余年份为 null */
 export interface YearTarget {
@@ -42,6 +44,10 @@ export interface Indicator {
   baselineValue: number | null
   /** 五年总量；比率 / 是否型为 null */
   totalTarget: number | null
+  /** 总预算（万元）；仅 A 级有值，A+ 为 null */
+  totalBudget?: number | null
+  /** 已花预算（万元）：校审 APPROVED 认定支出合计，无则 0 */
+  spentBudget?: number | null
   yearTargets: YearTarget[]
   owner: UserRef | null
   description: string | null
@@ -123,6 +129,35 @@ export interface UpdateYearTargetsRequest {
   totalTarget: number | null
   yearTargets: YearTarget[]
   version: number
+}
+
+/** PUT /indicators/{id}/budget 请求体；totalBudget 为 null 表示清除预算，reason 必填 */
+export interface BudgetPutRequest {
+  version: number
+  totalBudget: number | null
+  reason: string
+}
+
+/** 单条预算支出记录（含预算佐证材料） */
+export interface BudgetExpenseItem {
+  submissionId: string
+  taskCode: string | null
+  unit: UnitRef | null
+  year: number
+  expenseAmount: number | null
+  approvedExpenseAmount: number | null
+  status: SubmissionStatus
+  submittedAt: string | null
+  submittedBy: UserRef | null
+  reviewedAt: string | null
+  budgetFiles: FileView[]
+}
+
+/** GET /indicators/{id}/budget 响应：预算概览 + 支出明细分页 */
+export interface IndicatorBudgetView {
+  totalBudget: number | null
+  spentBudget: number | null
+  expenses: PageResult<BudgetExpenseItem>
 }
 
 /** 导入预览单行结果 */

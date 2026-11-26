@@ -6,6 +6,7 @@ import edu.fzrj.metrics.common.idempotent.Idempotent;
 import edu.fzrj.metrics.module.training.dto.TrainingDtos;
 import edu.fzrj.metrics.module.training.service.TrainingReviewService;
 import edu.fzrj.metrics.module.training.service.TrainingService;
+import edu.fzrj.metrics.module.training.service.TrainingStaffService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -38,10 +39,13 @@ public class TrainingController {
 
     private final TrainingService trainingService;
     private final TrainingReviewService reviewService;
+    private final TrainingStaffService staffService;
 
-    public TrainingController(TrainingService trainingService, TrainingReviewService reviewService) {
+    public TrainingController(TrainingService trainingService, TrainingReviewService reviewService,
+                              TrainingStaffService staffService) {
         this.trainingService = trainingService;
         this.reviewService = reviewService;
+        this.staffService = staffService;
     }
 
     @Operation(summary = "新建职业培训采集计划", description = "管理员创建；同名有效培训计划重复调用返回已有采集表；必须幂等")
@@ -58,6 +62,23 @@ public class TrainingController {
     @PreAuthorize("hasAnyAuthority('training:fill', 'submission:review')")
     public List<TrainingDtos.SheetSummary> list(@RequestParam(required = false) Long planId) {
         return trainingService.list(planId);
+    }
+
+    @Operation(summary = "查看培训采集表干事分配", description = "仅管理员或采集表指定负责人；返回当前干事和候选人")
+    @GetMapping("/training-sheets/{sheetId}/staff")
+    @PreAuthorize("hasAuthority('training:fill')")
+    public TrainingDtos.StaffView staff(@PathVariable Long sheetId) {
+        return staffService.staff(sheetId);
+    }
+
+    @Operation(summary = "整体保存培训采集表干事", description = "仅管理员或采集表指定负责人；候选人限本学院启用纯干事；需带 version")
+    @PutMapping("/training-sheets/{sheetId}/staff")
+    @PreAuthorize("hasAuthority('training:fill')")
+    @AuditLog(action = "UPDATE", resourceType = "training_sheet", resourceId = "#sheetId",
+            before = "staffAuditSnapshot(#sheetId)", after = "staffAuditSnapshot(#sheetId)")
+    public TrainingDtos.StaffView putStaff(@PathVariable Long sheetId,
+                                           @Valid @RequestBody TrainingDtos.StaffPutRequest request) {
+        return staffService.assign(sheetId, request);
     }
 
     @Operation(summary = "当前用户可处理的职业培训待审列表")
@@ -121,5 +142,9 @@ public class TrainingController {
 
     public Map<String, Object> auditSnapshot(Long sheetId) {
         return trainingService.auditSnapshot(sheetId);
+    }
+
+    public Map<String, Object> staffAuditSnapshot(Long sheetId) {
+        return staffService.auditSnapshot(sheetId);
     }
 }

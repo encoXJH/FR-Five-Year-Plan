@@ -7,6 +7,8 @@ import type {
   SubmitTrainingSheetRequest,
   TrainingSheetDetail,
   TrainingSheetSummary,
+  TrainingStaffUpdateRequest,
+  TrainingStaffView,
 } from '@/types/training'
 
 export function listTrainingSheets(planId?: string): Promise<TrainingSheetSummary[]> {
@@ -15,6 +17,17 @@ export function listTrainingSheets(planId?: string): Promise<TrainingSheetSummar
 
 export function getTrainingSheet(sheetId: string): Promise<TrainingSheetDetail> {
   return http.get(`/training-sheets/${sheetId}`)
+}
+
+export function getTrainingStaff(sheetId: string): Promise<TrainingStaffView> {
+  return http.get(`/training-sheets/${sheetId}/staff`)
+}
+
+export function updateTrainingStaff(
+  sheetId: string,
+  data: TrainingStaffUpdateRequest,
+): Promise<TrainingStaffView> {
+  return http.put(`/training-sheets/${sheetId}/staff`, data)
 }
 
 export function saveTrainingProjects(

@@ -17,6 +17,7 @@ import edu.fzrj.metrics.module.system.mapper.RefreshTokenMapper;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.mapper.UserRoleMapper;
 import edu.fzrj.metrics.module.system.service.UserUnitService;
+import edu.fzrj.metrics.module.training.mapper.TrainingSheetStaffMapper;
 import edu.fzrj.metrics.security.dto.MeResponse;
 import edu.fzrj.metrics.security.dto.TokenResponse;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -56,6 +57,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -79,6 +81,8 @@ class AuthServiceTest {
     private ObjectMapper objectMapper;
     @Mock
     private UserUnitService userUnitService;
+    @Mock
+    private TrainingSheetStaffMapper trainingSheetStaffMapper;
 
     @InjectMocks
     private AuthService authService;
@@ -172,6 +176,52 @@ class AuthServiceTest {
 
         assertEquals("ASSIGNED", response.getDataScope().getType());
         assertEquals(List.of(103L), response.getDataScope().getUnitIds());
+    }
+
+    @Test
+    void 纯干事无有效培训分配时移除培训填写权限() {
+        SysUser user = user();
+        when(sysUserMapper.selectById(7L)).thenReturn(user);
+        when(trainingSheetStaffMapper.selectValidSheetIds(7L)).thenReturn(List.of());
+        LoginUser loginUser = new LoginUser(7L, "staff", "干事", 103L,
+                List.of("STAFF"), List.of("training:fill", "submission:submit"), List.of(103L));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(loginUser, null, List.of()));
+
+        MeResponse response = authService.me();
+
+        assertFalse(response.getPermissions().contains("training:fill"));
+        assertTrue(response.getPermissions().contains("submission:submit"));
+    }
+
+    @Test
+    void 纯干事存在有效培训分配时保留培训填写权限() {
+        SysUser user = user();
+        when(sysUserMapper.selectById(7L)).thenReturn(user);
+        when(trainingSheetStaffMapper.selectValidSheetIds(7L)).thenReturn(List.of(11L));
+        LoginUser loginUser = new LoginUser(7L, "staff", "干事", 103L,
+                List.of("STAFF"), List.of("training:fill"), List.of(103L));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(loginUser, null, List.of()));
+
+        MeResponse response = authService.me();
+
+        assertTrue(response.getPermissions().contains("training:fill"));
+    }
+
+    @Test
+    void 多角色不过滤培训填写权限且不查询干事分配() {
+        SysUser user = user();
+        when(sysUserMapper.selectById(7L)).thenReturn(user);
+        LoginUser loginUser = new LoginUser(7L, "staff", "干事", 103L,
+                List.of("STAFF", "UNIT_OWNER"), List.of("training:fill"), List.of(103L));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(loginUser, null, List.of()));
+
+        MeResponse response = authService.me();
+
+        assertTrue(response.getPermissions().contains("training:fill"));
+        verifyNoInteractions(trainingSheetStaffMapper);
     }
 
     @Test

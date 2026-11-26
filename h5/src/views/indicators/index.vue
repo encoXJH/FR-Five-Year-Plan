@@ -12,7 +12,7 @@ import IndicatorFormSheet from './components/IndicatorFormSheet.vue'
 import ImportSheet from './components/ImportSheet.vue'
 import { getPlan, listPlans } from '@/api/plan'
 import { createDirection, deleteDirection, listDirections } from '@/api/direction'
-import { deleteIndicator, listIndicators } from '@/api/indicator'
+import { deleteIndicator, getIndicatorBudget, listIndicators, putIndicatorBudget } from '@/api/indicator'
 import { listAllTasks } from '@/api/task'
 import { createExport, pollExport } from '@/api/export'
 import { getIndicatorTrend, getStatsTree } from '@/api/stats'
@@ -32,10 +32,11 @@ import {
   yearTargetMap,
   type StatsTreeIndex,
 } from '@/utils/indicator'
-import { formatCount, formatDateTime, formatPercent } from '@/utils/format'
+import { formatCount, formatDateTime, formatMoney, formatPercent } from '@/utils/format'
 import { triggerFileDownload } from '@/utils/file'
 import type { Direction, PlanCard, PlanDetail } from '@/types/plan'
-import type { Indicator, IndicatorTreeNode } from '@/types/indicator'
+import type { Indicator, IndicatorBudgetView, IndicatorTreeNode } from '@/types/indicator'
+import type { FileView } from '@/types/file'
 import type { IndicatorTrend, StatsTreeNode } from '@/types/stats'
 import type { IndicatorNature, StatCaliber } from '@/types/enums'
 import type { TaskListItem } from '@/types/task'
@@ -65,6 +66,7 @@ let materialCountRequestId = 0
 
 const canEdit = computed(() => userStore.can('indicator:edit'))
 const canAllocate = computed(() => userStore.can('allocation:edit'))
+const canBudget = computed(() => userStore.can('indicator:budget'))
 const isAdmin = computed(() => userStore.roles.includes('ADMIN'))
 const isArchived = computed(() => plan.value?.status === 'ARCHIVED')
 const readOnly = computed(() => isArchived.value)
@@ -616,6 +618,111 @@ function changeMaterialPage(page: number): void {
   void loadMaterials()
 }
 
+// ---------- 指标预算 ----------
+const budgetVisible = ref(false)
+const budgetLoading = ref(false)
+const budgetIndicator = ref<IndicatorTreeNode | null>(null)
+const budgetView = ref<IndicatorBudgetView | null>(null)
+const budgetYear = ref<number | null>(null)
+const budgetPage = ref(1)
+const budgetPageSize = 10
+const budgetAmount = ref('')
+const budgetReason = ref('')
+const savingBudget = ref(false)
+let budgetRequestId = 0
+
+function budgetCardText(row: Indicator): string {
+  if (row.totalBudget == null) return '未设置'
+  return `${formatMoney(row.totalBudget)} 万 · 已花 ${formatMoney(row.spentBudget ?? 0)} 万`
+}
+
+function asAttachments(files: FileView[]) {
+  return files.map((file) => ({ ...file, transcodeStatus: null }))
+}
+
+const budgetRemainingText = computed(() => {
+  const view = budgetView.value
+  if (!view || view.totalBudget == null) return '—'
+  return `${formatMoney(view.totalBudget - (view.spentBudget ?? 0))} 万`
+})
+
+async function openBudget(row: IndicatorTreeNode): Promise<void> {
+  budgetIndicator.value = row
+  budgetView.value = null
+  budgetYear.value = null
+  budgetPage.value = 1
+  budgetAmount.value = row.totalBudget == null ? '' : String(row.totalBudget)
+  budgetReason.value = ''
+  budgetVisible.value = true
+  await loadBudget()
+}
+
+async function loadBudget(): Promise<void> {
+  const indicator = budgetIndicator.value
+  if (!indicator) return
+  const requestId = ++budgetRequestId
+  budgetLoading.value = true
+  try {
+    const result = await getIndicatorBudget(indicator.id, {
+      page: budgetPage.value,
+      pageSize: budgetPageSize,
+      year: budgetYear.value ?? undefined,
+    })
+    if (requestId !== budgetRequestId) return
+    budgetView.value = result
+  } finally {
+    if (requestId === budgetRequestId) budgetLoading.value = false
+  }
+}
+
+function changeBudgetPage(page: number): void {
+  budgetPage.value = page
+  void loadBudget()
+}
+
+function chooseBudgetYear(year: number | null): void {
+  budgetYear.value = year
+  budgetPage.value = 1
+  void loadBudget()
+}
+
+async function saveBudget(): Promise<void> {
+  const indicator = budgetIndicator.value
+  if (!indicator) return
+  const raw = budgetAmount.value.trim()
+  let totalBudget: number | null = null
+  if (raw !== '') {
+    if (!/^\d+(\.\d{1,2})?$/.test(raw)) {
+      showToast('总预算须为不小于 0 的数字，最多两位小数')
+      return
+    }
+    totalBudget = Number(raw)
+  }
+  if (!budgetReason.value.trim()) {
+    showToast('请填写预算调整原因')
+    return
+  }
+  savingBudget.value = true
+  try {
+    await putIndicatorBudget(
+      indicator.id,
+      { version: indicator.version, totalBudget, reason: budgetReason.value.trim() },
+      newIdempotencyKey(),
+    )
+    showToast('预算已保存')
+    budgetReason.value = ''
+    await loadTree()
+    const fresh = tree.value.find((node) => node.id === indicator.id)
+    if (fresh) {
+      budgetIndicator.value = fresh
+      budgetAmount.value = fresh.totalBudget == null ? '' : String(fresh.totalBudget)
+    }
+    await loadBudget()
+  } finally {
+    savingBudget.value = false
+  }
+}
+
 // ---------- 计划切换 ----------
 function onPlanChange(planOption: { id: string; name: string }): void {
   router.replace(`/plans/${planOption.id}/indicators`)
@@ -631,6 +738,10 @@ watch(
     statsRequestId += 1
     directionRequestId += 1
     materialCountRequestId += 1
+    budgetRequestId += 1
+    budgetVisible.value = false
+    budgetIndicator.value = null
+    budgetView.value = null
     plan.value = null
     tree.value = []
     yearStatsIndexes.value = new Map()
@@ -809,6 +920,12 @@ function chooseOwner(userId: string): void {
                   <strong>{{ formatCount(materialCountOf(node.id)) }} 份</strong>
                 </button>
               </div>
+
+              <button v-if="node.level === 'A'" type="button" class="budget-row" @click="openBudget(node)">
+                <span class="small muted">指标预算</span>
+                <strong class="small">{{ budgetCardText(node) }}</strong>
+                <van-icon name="arrow" size="12" />
+              </button>
 
               <div v-if="!node.isQuantifiable" class="undecomposable">不可量化 · 仅维护基础信息</div>
               <div v-if="taskErrorIds.has(node.id) && !taskLoadingIds.has(node.id)" class="task-error">
@@ -1027,6 +1144,97 @@ function chooseOwner(userId: string): void {
               >下一页</van-button>
             </div>
           </div>
+        </div>
+      </div>
+    </van-popup>
+
+    <!-- 指标预算 -->
+    <van-popup v-model:show="budgetVisible" position="bottom" round :style="{ height: '78vh' }">
+      <div class="progress-sheet">
+        <div class="sheet-head">
+          <strong>指标预算 · {{ budgetIndicator?.code }}</strong>
+          <button type="button" class="close-btn" @click="budgetVisible = false">
+            <van-icon name="cross" size="18" />
+          </button>
+        </div>
+        <div class="sheet-body">
+          <div v-if="budgetLoading && !budgetView" class="skeleton-block">加载中…</div>
+          <template v-else>
+            <div class="budget-summary">
+              <div><span>总预算</span><strong>{{ budgetView?.totalBudget == null ? '未设置' : `${formatMoney(budgetView.totalBudget)} 万` }}</strong></div>
+              <div><span>已花预算</span><strong>{{ formatMoney(budgetView?.spentBudget ?? 0) }} 万</strong></div>
+              <div><span>剩余预算</span><strong>{{ budgetRemainingText }}</strong></div>
+            </div>
+
+            <div v-if="canBudget && !isArchived" class="budget-form">
+              <div class="field">
+                <label>总预算（万元）</label>
+                <van-field
+                  v-model="budgetAmount"
+                  type="number"
+                  inputmode="decimal"
+                  placeholder="留空保存表示清除预算"
+                />
+              </div>
+              <div class="field">
+                <label>调整原因（必填）</label>
+                <van-field
+                  v-model="budgetReason"
+                  type="textarea"
+                  rows="2"
+                  maxlength="500"
+                  show-word-limit
+                  placeholder="预算维护属于敏感操作，必须填写原因"
+                />
+              </div>
+              <van-button block type="primary" size="small" :loading="savingBudget" @click="saveBudget">保存预算</van-button>
+            </div>
+
+            <div class="chip-group budget-year-filter">
+              <button type="button" class="filter-chip" :class="{ 'is-active': budgetYear === null }" @click="chooseBudgetYear(null)">全部年度</button>
+              <button
+                v-for="year in years"
+                :key="year"
+                type="button"
+                class="filter-chip"
+                :class="{ 'is-active': budgetYear === year }"
+                @click="chooseBudgetYear(year)"
+              >{{ year }}</button>
+            </div>
+
+            <div class="section-title">支出明细</div>
+            <div v-if="budgetLoading" class="skeleton-block">加载中…</div>
+            <div v-else-if="(budgetView?.expenses.items.length ?? 0) === 0" class="empty-state">暂无支出记录</div>
+            <div v-else class="budget-expense-list">
+              <div v-for="expense in budgetView?.expenses.items ?? []" :key="expense.submissionId" class="budget-expense">
+                <div class="row--between">
+                  <strong>{{ expense.taskCode ?? '—' }}</strong>
+                  <StatusTag kind="SubmissionStatus" :value="expense.status" />
+                </div>
+                <div class="small muted">{{ expense.unit?.name ?? '—' }} · {{ expense.year }} 年 · {{ expense.submittedBy?.name ?? '—' }}</div>
+                <div class="small">
+                  申报支出 {{ expense.expenseAmount == null ? '—' : `${formatMoney(expense.expenseAmount)} 万` }}
+                  <template v-if="expense.approvedExpenseAmount != null"> · 认定 {{ formatMoney(expense.approvedExpenseAmount) }} 万</template>
+                </div>
+                <div class="small muted">{{ expense.submittedAt ? formatDateTime(expense.submittedAt) : '—' }}</div>
+                <AttachmentList
+                  v-if="expense.budgetFiles.length > 0"
+                  :files="asAttachments(expense.budgetFiles)"
+                  compact
+                  empty-text="无预算佐证"
+                />
+              </div>
+              <div class="pager">
+                <van-button size="small" :disabled="budgetPage <= 1" @click="changeBudgetPage(budgetPage - 1)">上一页</van-button>
+                <span class="small muted">{{ budgetPage }} / {{ Math.max(1, Math.ceil((budgetView?.expenses.total ?? 0) / budgetPageSize)) }}</span>
+                <van-button
+                  size="small"
+                  :disabled="budgetPage >= Math.ceil((budgetView?.expenses.total ?? 0) / budgetPageSize)"
+                  @click="changeBudgetPage(budgetPage + 1)"
+                >下一页</van-button>
+              </div>
+            </div>
+          </template>
         </div>
       </div>
     </van-popup>
@@ -1389,6 +1597,69 @@ function chooseOwner(userId: string): void {
   justify-content: center;
   gap: 16px;
   padding: 10px 0;
+}
+.budget-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 40px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfcfe;
+  color: var(--text);
+  text-align: left;
+}
+.budget-row strong {
+  margin-left: auto;
+  color: var(--brand);
+}
+.budget-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.budget-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f8fafd;
+}
+.budget-summary span {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.budget-summary strong {
+  font-size: 13px;
+}
+.budget-form {
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfcfe;
+}
+.budget-year-filter {
+  margin-bottom: 4px;
+}
+.budget-expense-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.budget-expense {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfcfe;
 }
 .owner-item {
   width: 100%;

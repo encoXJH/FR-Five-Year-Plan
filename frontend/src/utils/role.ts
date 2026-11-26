@@ -3,7 +3,7 @@ import type { Role } from '@/types/enums'
 const ROLE_ORDER: readonly Role[] = ['ADMIN', 'LEADER', 'SCHOOL_OWNER', 'UNIT_OWNER', 'STAFF']
 
 export const USER_CREATION_MATRIX: Readonly<Record<Role, readonly Role[]>> = {
-  ADMIN: ['ADMIN', 'LEADER', 'SCHOOL_OWNER', 'UNIT_OWNER'],
+  ADMIN: ['ADMIN', 'LEADER', 'SCHOOL_OWNER', 'UNIT_OWNER', 'STAFF'],
   LEADER: ['LEADER', 'SCHOOL_OWNER', 'UNIT_OWNER'],
   SCHOOL_OWNER: ['SCHOOL_OWNER', 'UNIT_OWNER'],
   UNIT_OWNER: ['UNIT_OWNER', 'STAFF'],

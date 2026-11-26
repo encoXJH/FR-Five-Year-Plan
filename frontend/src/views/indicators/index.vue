@@ -7,6 +7,7 @@ import StatusTag from '@/components/StatusTag.vue'
 import ResponsiveRecordView from '@/components/ResponsiveRecordView.vue'
 import FilePreviewDrawer from '@/components/FilePreviewDrawer.vue'
 import IndicatorEditDrawer from './components/IndicatorEditDrawer.vue'
+import IndicatorBudgetDialog from './components/IndicatorBudgetDialog.vue'
 import IndicatorTaskPanel from './components/IndicatorTaskPanel.vue'
 import ImportDialog from './components/ImportDialog.vue'
 import RollupBadge from './components/RollupBadge.vue'
@@ -43,7 +44,7 @@ import {
   type CompletionLevel,
   type StatsTreeIndex,
 } from '@/utils/indicator'
-import { formatCount, formatDateTime, formatNumber, formatPercent } from '@/utils/format'
+import { formatCount, formatDateTime, formatMoney, formatNumber, formatPercent } from '@/utils/format'
 import { useAutoRefresh } from '@/utils/autoRefresh'
 import { formatFileSize, triggerFileDownload } from '@/utils/file'
 import type { Direction, PlanDetail } from '@/types/plan'
@@ -753,6 +754,22 @@ async function downloadMaterial(row: MaterialItem): Promise<void> {
   await downloadFile(row.id, row.fileName, row.size)
 }
 
+const budgetDialogVisible = ref(false)
+const budgetIndicator = ref<Indicator | null>(null)
+const budgetManageOnly = ref(false)
+function openBudgetDialog(indicator: Indicator, manageOnly = false): void {
+  budgetIndicator.value = indicator
+  budgetManageOnly.value = manageOnly
+  budgetDialogVisible.value = true
+}
+function canSetBudget(indicator: Indicator): boolean {
+  return userStore.can('indicator:budget') && indicator.level === 'A' && !isArchived.value
+}
+function budgetTotalText(indicator: Indicator): string {
+  const total = indicator.totalBudget
+  return total === null || total === undefined ? '未设置' : `${formatMoney(total)} 万`
+}
+
 const aRows = computed(() => tree.value.filter((node) => node.level === 'A'))
 const aConstraintCount = computed(() => aRows.value.filter((node) => node.nature === 'CONSTRAINT').length)
 const aDevelopmentCount = computed(() => aRows.value.filter((node) => node.nature === 'DEVELOPMENT').length)
@@ -1318,6 +1335,39 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
                   <div v-if="taskErrorIds.has(row.id) && !taskLoadingIds.has(row.id)" class="task-error-state" role="alert">学院任务加载失败，请点击编号重试</div>
                 </template>
               </el-table-column>
+              <el-table-column label="预算" width="150" align="center" header-align="center">
+                <template #default="{ row }">
+                  <div class="a-budget-cell">
+                    <el-button
+                      v-if="canSetBudget(row.indicator)"
+                      link
+                      type="primary"
+                      class="a-budget-cell__total a-budget-cell__action"
+                      :title="`设置 ${row.indicator.code} 的总预算`"
+                      @click="openBudgetDialog(row.indicator, true)"
+                    >{{ row.indicator.totalBudget === null || row.indicator.totalBudget === undefined ? '设置总预算' : `总预算 ${budgetTotalText(row.indicator)}` }}</el-button>
+                    <span
+                      v-else
+                      class="a-budget-cell__total a-budget-cell__link"
+                      role="button"
+                      tabindex="0"
+                      :title="`查看 ${row.indicator.code} 的预算明细`"
+                      @click="openBudgetDialog(row.indicator)"
+                      @keydown.enter="openBudgetDialog(row.indicator)"
+                      @keydown.space.prevent="openBudgetDialog(row.indicator)"
+                    >总预算 {{ budgetTotalText(row.indicator) }}</span>
+                    <span
+                      class="a-budget-cell__spent a-budget-cell__link"
+                      role="button"
+                      tabindex="0"
+                      :title="`查看 ${row.indicator.code} 的预算明细`"
+                      @click="openBudgetDialog(row.indicator)"
+                      @keydown.enter="openBudgetDialog(row.indicator)"
+                      @keydown.space.prevent="openBudgetDialog(row.indicator)"
+                    >已花 {{ formatMoney(row.indicator.spentBudget ?? 0) }} 万</span>
+                  </div>
+                </template>
+              </el-table-column>
               <el-table-column label="总进度" min-width="220" align="center" header-align="center">
                 <template #default="{ row }">
                   <div
@@ -1434,6 +1484,36 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
                   <span class="a-total-progress__text" :class="completionLevelClass(aCumulativeLevel(node.indicator))">
                     {{ aTotalText(node.indicator) }}
                   </span>
+                </div>
+                <div class="a-budget-cell a-budget-cell--card">
+                  <span class="a-budget-cell__label">预算</span>
+                  <el-button
+                    v-if="canSetBudget(node.indicator)"
+                    link
+                    type="primary"
+                    class="a-budget-cell__total a-budget-cell__action"
+                    :title="`设置 ${node.indicator.code} 的总预算`"
+                    @click="openBudgetDialog(node.indicator, true)"
+                  >{{ node.indicator.totalBudget === null || node.indicator.totalBudget === undefined ? '设置总预算' : `总预算 ${budgetTotalText(node.indicator)}` }}</el-button>
+                  <span
+                    v-else
+                    class="a-budget-cell__total a-budget-cell__link"
+                    role="button"
+                    tabindex="0"
+                    :title="`查看 ${node.indicator.code} 的预算明细`"
+                    @click="openBudgetDialog(node.indicator)"
+                    @keydown.enter="openBudgetDialog(node.indicator)"
+                    @keydown.space.prevent="openBudgetDialog(node.indicator)"
+                  >总预算 {{ budgetTotalText(node.indicator) }}</span>
+                  <span
+                    class="a-budget-cell__spent a-budget-cell__link"
+                    role="button"
+                    tabindex="0"
+                    :title="`查看 ${node.indicator.code} 的预算明细`"
+                    @click="openBudgetDialog(node.indicator)"
+                    @keydown.enter="openBudgetDialog(node.indicator)"
+                    @keydown.space.prevent="openBudgetDialog(node.indicator)"
+                  >已花 {{ formatMoney(node.indicator.spentBudget ?? 0) }} 万</span>
                 </div>
                 <div v-if="!node.indicator.isQuantifiable" class="undecomposable-tip">不可量化 · 仅维护基础信息</div>
                 <div v-if="taskErrorIds.has(node.id) && !taskLoadingIds.has(node.id)" class="task-error-state" role="alert">学院任务加载失败，请点击编号重试</div>
@@ -1670,6 +1750,14 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
         @size-change="changeMaterialPageSize"
       />
     </el-dialog>
+    <IndicatorBudgetDialog
+      v-model="budgetDialogVisible"
+      :indicator="budgetIndicator"
+      :years="years"
+      :plan-archived="isArchived"
+      :manage-only="budgetManageOnly"
+      @saved="loadTree"
+    />
     <FilePreviewDrawer v-model="previewVisible" :file="previewFile" />
   </div>
 </template>
@@ -1880,6 +1968,15 @@ useAutoRefresh(() => loadAll(true), { skip: () => editMode.value })
 .a-total-progress__text.completion-value--partial { color: var(--el-color-warning); }
 .a-total-progress__text.completion-value--complete { color: var(--el-color-success); }
 .a-progress-empty { color: var(--indicator-muted); }
+.a-budget-cell { display: flex; flex-direction: column; align-items: center; gap: 3px; width: fit-content; max-width: 100%; margin: 0 auto; font-variant-numeric: tabular-nums; }
+.a-budget-cell__link { cursor: pointer; }
+.a-budget-cell__link:hover { color: var(--el-color-primary); }
+.a-budget-cell__link:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
+.a-budget-cell__action { height: auto; margin: 0; padding: 0; font-size: 13px; font-weight: 600; }
+.a-budget-cell__total { color: var(--indicator-ink); font-size: 13px; font-weight: 600; }
+.a-budget-cell__spent { color: var(--indicator-muted); font-size: 12px; }
+.a-budget-cell--card { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; gap: 8px; width: 100%; margin-top: 8px; }
+.a-budget-cell__label { color: var(--indicator-muted); font-size: 12px; }
 .dialog-heading h3 { margin: 0; color: var(--indicator-ink); font-size: 18px; line-height: 26px; }
 .dialog-heading p { margin: 5px 24px 0 0; color: var(--indicator-muted); font-size: 13px; line-height: 20px; }
 .dialog-heading p span { margin-right: 8px; color: var(--el-color-primary); font-weight: 650; font-variant-numeric: tabular-nums; }

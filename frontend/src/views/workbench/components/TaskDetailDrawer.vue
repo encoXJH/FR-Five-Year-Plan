@@ -7,14 +7,14 @@ import { getTask } from '@/api/task'
 import { listTaskAdjustments } from '@/api/adjustment'
 import { getSubmission, listSubmissions } from '@/api/submission'
 import { useUserStore } from '@/stores/user'
-import { formatDateTime, formatPercent } from '@/utils/format'
+import { formatDateTime, formatMoney, formatPercent } from '@/utils/format'
 import { formatTargetValue } from '@/utils/indicator'
 import { formatDeadline, primaryTaskIndicator, progressPercentage } from '@/utils/task'
 import { summarizeItems } from '@/utils/adjustment'
 import { enumLabel } from '@/utils/enumLabels'
 import type { TaskDetail } from '@/types/task'
 import type { AdjustmentListItem } from '@/types/adjustment'
-import type { FileInfo } from '@/types/file'
+import type { FileInfo, FileView } from '@/types/file'
 import type { SubmissionDetail, SubmissionListItem } from '@/types/submission'
 import type { StatCaliber } from '@/types/enums'
 
@@ -102,6 +102,17 @@ function submissionRoundLabel(revisionNo: number | null | undefined): string {
 function openMaterial(file: FileInfo): void {
   previewFile.value = file
   previewVisible.value = true
+}
+
+function openBudgetMaterial(file: FileView): void {
+  openMaterial({
+    ...file,
+    bizType: 'BUDGET_ATTACHMENT',
+    status: 'BOUND',
+    transcodeStatus: null,
+    uploadedAt: '',
+    uploadedBy: null,
+  })
 }
 
 let loadSequence = 0
@@ -269,6 +280,13 @@ watch(visible, (value) => {
               :class="{ 'is-loading': submissionLoading }"
             >
               <template v-if="submissionDetail">
+                <div
+                  v-if="submissionDetail.expenseAmount != null || submissionDetail.approvedExpenseAmount != null"
+                  class="expense-line"
+                >
+                  <span v-if="submissionDetail.expenseAmount != null">本次支出 {{ formatMoney(submissionDetail.expenseAmount) }} 万</span>
+                  <span v-if="submissionDetail.approvedExpenseAmount != null">认定支出 {{ formatMoney(submissionDetail.approvedExpenseAmount) }} 万</span>
+                </div>
                 <h3 class="section-title">提交材料（{{ submissionDetail.files.length }} 份）</h3>
                 <div v-if="submissionDetail.files.length > 0" class="material-list">
                   <el-button
@@ -282,6 +300,20 @@ watch(visible, (value) => {
                   </el-button>
                 </div>
                 <el-empty v-else :image-size="60" description="本次提交未上传材料" />
+                <template v-if="(submissionDetail.budgetFiles ?? []).length > 0">
+                  <h3 class="section-title">预算佐证材料（{{ (submissionDetail.budgetFiles ?? []).length }} 份）</h3>
+                  <div class="material-list">
+                    <el-button
+                      v-for="file in submissionDetail.budgetFiles ?? []"
+                      :key="file.id"
+                      text
+                      type="primary"
+                      @click="openBudgetMaterial(file)"
+                    >
+                      {{ file.fileName }}
+                    </el-button>
+                  </div>
+                </template>
               </template>
               <el-empty
                 v-else-if="submissionLoadFailed && !submissionLoading"
@@ -429,6 +461,15 @@ watch(visible, (value) => {
 
 .submission-materials.is-loading {
   min-height: 96px;
+}
+
+.expense-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .material-list {

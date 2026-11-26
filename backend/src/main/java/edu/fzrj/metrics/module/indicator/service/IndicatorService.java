@@ -20,6 +20,8 @@ import edu.fzrj.metrics.module.plan.service.PlanReadScopeService;
 import edu.fzrj.metrics.module.plan.service.PlanService;
 import edu.fzrj.metrics.module.system.entity.OrgUnit;
 import edu.fzrj.metrics.module.system.entity.SysUser;
+import edu.fzrj.metrics.module.submission.entity.Submission;
+import edu.fzrj.metrics.module.submission.mapper.SubmissionMapper;
 import edu.fzrj.metrics.module.system.mapper.OrgUnitMapper;
 import edu.fzrj.metrics.module.system.service.UserRefResolver;
 import edu.fzrj.metrics.module.task.entity.Task;
@@ -53,6 +55,7 @@ public class IndicatorService {
     private final DirectionMapper directionMapper;
     private final OrgUnitMapper orgUnitMapper;
     private final TaskMapper taskMapper;
+    private final SubmissionMapper submissionMapper;
     private final PlanService planService;
     private final UserRefResolver userRefResolver;
     private final DataScopeService dataScopeService;
@@ -61,7 +64,8 @@ public class IndicatorService {
 
     public IndicatorService(IndicatorMapper indicatorMapper, IndicatorYearTargetMapper yearTargetMapper,
                             DirectionMapper directionMapper, OrgUnitMapper orgUnitMapper,
-                            TaskMapper taskMapper, PlanService planService, UserRefResolver userRefResolver,
+                            TaskMapper taskMapper, SubmissionMapper submissionMapper,
+                            PlanService planService, UserRefResolver userRefResolver,
                             DataScopeService dataScopeService, PlanReadScopeService planReadScopeService,
                             TaskReadScopeService taskReadScopeService) {
         this.indicatorMapper = indicatorMapper;
@@ -69,6 +73,7 @@ public class IndicatorService {
         this.directionMapper = directionMapper;
         this.orgUnitMapper = orgUnitMapper;
         this.taskMapper = taskMapper;
+        this.submissionMapper = submissionMapper;
         this.planService = planService;
         this.userRefResolver = userRefResolver;
         this.dataScopeService = dataScopeService;
@@ -105,10 +110,11 @@ public class IndicatorService {
 
         Map<Long, SysUser> users = userRefResolver.mapOf(effectiveOwners.values());
         Map<Long, List<IndicatorDtos.YearTargetView>> targetViews = targetViewsOf(scoped);
+        Map<Long, BigDecimal> spentByA = spentBudgetByTopA(planId, all);
         boolean treeView = "tree".equalsIgnoreCase(view == null ? "" : view);
         if (!treeView) {
             return matched.stream()
-                    .map(i -> toNode(i, directions, effectiveOwners, users, targetViews, List.of()))
+                    .map(i -> toNode(i, directions, effectiveOwners, users, targetViews, spentByA, List.of()))
                     .toList();
         }
         Set<Long> matchedIds = matched.stream().map(Indicator::getId).collect(Collectors.toSet());
@@ -121,9 +127,9 @@ public class IndicatorService {
                 continue;
             }
             List<IndicatorDtos.TreeNode> childNodes = children.stream()
-                    .map(c -> toNode(c, directions, effectiveOwners, users, targetViews, List.of()))
+                    .map(c -> toNode(c, directions, effectiveOwners, users, targetViews, spentByA, List.of()))
                     .toList();
-            roots.add(toNode(a, directions, effectiveOwners, users, targetViews, childNodes));
+            roots.add(toNode(a, directions, effectiveOwners, users, targetViews, spentByA, childNodes));
         }
         return roots;
     }
@@ -800,7 +806,7 @@ public class IndicatorService {
         return result;
     }
 
-    private void requireDetailAccess(Indicator indicator) {
+    public void requireDetailAccess(Indicator indicator) {
         LoginUser user = SecurityUtils.getLoginUser();
         if (dataScopeService.isAllData(user)
                 || (dataScopeService.isOwnerScope(user)
@@ -827,7 +833,7 @@ public class IndicatorService {
         throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
     }
 
-    private List<Task> visibleTasks(Indicator indicator) {
+    public List<Task> visibleTasks(Indicator indicator) {
         LoginUser user = SecurityUtils.getLoginUser();
         LambdaQueryWrapper<Task> query = taskRelationQuery(indicator);
         boolean ownerAccess = dataScopeService.isAllData(user)
@@ -948,9 +954,11 @@ public class IndicatorService {
     private IndicatorDtos.TreeNode toNode(Indicator indicator, Map<Long, Direction> directions,
                                           Map<Long, Long> effectiveOwners, Map<Long, SysUser> users,
                                           Map<Long, List<IndicatorDtos.YearTargetView>> targetViews,
+                                          Map<Long, BigDecimal> spentByA,
                                           List<IndicatorDtos.TreeNode> children) {
         Direction direction = indicator.getDirectionId() == null ? null : directions.get(indicator.getDirectionId());
         boolean quantifiable = IndicatorRules.isQuantifiable(indicator.getLevel(), indicator.getIsQuantifiable());
+        boolean levelA = IndicatorRules.LEVEL_A.equals(indicator.getLevel());
         return new IndicatorDtos.TreeNode(indicator.getId(), indicator.getDirectionId(),
                 direction == null ? null : direction.getCode(),
                 direction == null ? null : direction.getName(),
@@ -964,8 +972,78 @@ public class IndicatorService {
                 userRefResolver.refOf(effectiveOwners.get(indicator.getId()), users),
                 quantifiable ? indicator.getBaselineValue() : null,
                 quantifiable ? indicator.getTotalTarget() : null,
+                levelA ? indicator.getTotalBudget() : null,
+                levelA ? spentByA.getOrDefault(indicator.getId(), BigDecimal.ZERO) : null,
                 quantifiable ? targetViews.getOrDefault(indicator.getId(), List.of()) : List.of(),
                 indicator.getStatus(), indicator.getSort(), indicator.getVersion(), children);
+    }
+
+    // ---------------- 预算汇总 ----------------
+
+    /** A 级已花预算：仅 APPROVED 填报，认定支出优先；历史 A+ / A 直承任务一并归集到 A，每个 B 只计一次。 */
+    public BigDecimal spentOfIndicator(Indicator indicator) {
+        if (!IndicatorRules.LEVEL_A.equals(indicator.getLevel())) {
+            return null;
+        }
+        List<Long> taskIds = taskMapper.selectList(taskRelationQuery(indicator).select(Task::getId))
+                .stream().map(Task::getId).toList();
+        if (taskIds.isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+        return submissionMapper.selectList(new LambdaQueryWrapper<Submission>()
+                        .in(Submission::getTaskId, taskIds)
+                        .eq(Submission::getStatus, "APPROVED")
+                        .eq(Submission::getDeleted, 0L))
+                .stream().map(IndicatorService::expenseOf)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /** 计划内全部 APPROVED 支出按所属 A 批量归集（防 N+1） */
+    private Map<Long, BigDecimal> spentBudgetByTopA(Long planId, List<Indicator> all) {
+        List<Task> tasks = taskMapper.selectList(new LambdaQueryWrapper<Task>()
+                .eq(Task::getPlanId, planId)
+                .eq(Task::getDeleted, 0L));
+        if (tasks.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, Task> taskById = tasks.stream().collect(Collectors.toMap(Task::getId, Function.identity()));
+        Map<Long, Indicator> indicatorById = all.stream()
+                .collect(Collectors.toMap(Indicator::getId, Function.identity()));
+        Map<Long, BigDecimal> result = new java.util.HashMap<>();
+        for (Submission s : submissionMapper.selectList(new LambdaQueryWrapper<Submission>()
+                .eq(Submission::getPlanId, planId)
+                .eq(Submission::getStatus, "APPROVED")
+                .eq(Submission::getDeleted, 0L))) {
+            BigDecimal expense = expenseOf(s);
+            if (expense == null) {
+                continue;
+            }
+            Task task = taskById.get(s.getTaskId());
+            if (task == null) {
+                continue;
+            }
+            Long topA = topIndicatorIdOf(task, indicatorById.get(s.getIndicatorId()));
+            if (topA != null) {
+                result.merge(topA, expense, BigDecimal::add);
+            }
+        }
+        return result;
+    }
+
+    /** 支出归属的 A：新 B 用 top_indicator_id；旧 B 用 A+ 的父 A；A 直承任务即自身 */
+    public static Long topIndicatorIdOf(Task task, Indicator indicator) {
+        if (task.getTopIndicatorId() != null) {
+            return task.getTopIndicatorId();
+        }
+        if (indicator != null && indicator.getParentId() != null) {
+            return indicator.getParentId();
+        }
+        return task.getIndicatorId();
+    }
+
+    private static BigDecimal expenseOf(Submission s) {
+        return s.getApprovedExpenseAmount() != null ? s.getApprovedExpenseAmount() : s.getExpenseAmount();
     }
 
     private IndicatorDtos.Detail toDetail(Indicator indicator) {
@@ -1029,6 +1107,8 @@ public class IndicatorService {
                 quantifiable ? indicator.getMinFileCount() : null,
                 quantifiable ? indicator.getBaselineValue() : null,
                 quantifiable ? indicator.getTotalTarget() : null,
+                IndicatorRules.LEVEL_A.equals(indicator.getLevel()) ? indicator.getTotalBudget() : null,
+                spentOfIndicator(indicator),
                 userRefResolver.refOf(effectiveOwners.get(indicator.getId()), users),
                 indicator.getSort(), indicator.getStatus(), yearTargets, children, bSummaries,
                 indicator.getVersion(), indicator.getCreatedAt(), indicator.getUpdatedAt());

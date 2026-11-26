@@ -12,6 +12,7 @@ import SubmissionReviewTimeline from '@/components/SubmissionReviewTimeline.vue'
 import { getTask } from '@/api/task'
 import {
   createSubmission,
+  getSubmission,
   listSubmissions,
   submitSubmission,
   updateSubmission,
@@ -20,7 +21,7 @@ import {
 import { useUserStore } from '@/stores/user'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { ApiError } from '@/utils/request'
-import { formatGrowth, formatPercent, formatDateTime } from '@/utils/format'
+import { formatGrowth, formatMoney, formatPercent, formatDateTime } from '@/utils/format'
 import { formatTargetValue } from '@/utils/indicator'
 import {
   buildMetricValue,
@@ -33,7 +34,7 @@ import {
 } from '@/utils/submission'
 import { canWriteTask, formatDeadline, primaryTaskIndicator, progressPercentage } from '@/utils/task'
 import { CALIBER_INPUT_FIELDS } from '@/utils/submission'
-import type { FileInfo } from '@/types/file'
+import type { FileInfo, FileView } from '@/types/file'
 import type { StatCaliber } from '@/types/enums'
 import type { MetricValue, SubmissionListItem } from '@/types/submission'
 import type { TaskDetail, TaskYearItem } from '@/types/task'
@@ -164,6 +165,10 @@ const sourceNote = ref('')
 const proxyReason = ref('')
 const fileIds = ref<string[]>([])
 const initialFiles = ref<FileInfo[]>([])
+const expenseAmount = ref('')
+const budgetFileIds = ref<string[]>([])
+const budgetInitialFiles = ref<FileInfo[]>([])
+const budgetFilesKey = ref(0)
 const editingId = ref<string | null>(null)
 const editingVersion = ref(0)
 const dirty = ref(false)
@@ -194,8 +199,39 @@ function populate(): void {
   proxyReason.value = ''
   fileIds.value = target?.files?.map((file) => file.id) ?? target?.fileIds ?? []
   initialFiles.value = target?.files ?? []
+  expenseAmount.value = target?.expenseAmount != null ? String(target.expenseAmount) : ''
+  budgetFileIds.value = []
+  budgetInitialFiles.value = []
   dirty.value = false
   initializing = false
+}
+
+function toBudgetFileInfo(view: FileView): FileInfo {
+  return {
+    id: view.id,
+    fileName: view.fileName,
+    size: view.size,
+    mimeType: view.mimeType,
+    category: view.category,
+    bizType: 'BUDGET_ATTACHMENT',
+    status: 'BOUND',
+    transcodeStatus: null,
+    uploadedAt: '',
+    uploadedBy: null,
+  }
+}
+
+async function loadBudgetFiles(submissionId: string, generation: number): Promise<void> {
+  try {
+    const detail = await getSubmission(submissionId)
+    if (generation !== reloadGeneration) return
+    expenseAmount.value = detail.expenseAmount != null ? String(detail.expenseAmount) : ''
+    budgetFileIds.value = detail.budgetFiles?.map((file) => file.id) ?? []
+    budgetInitialFiles.value = (detail.budgetFiles ?? []).map(toBudgetFileInfo)
+    budgetFilesKey.value += 1
+  } catch {
+    // 拦截器已提示
+  }
 }
 
 // 实时计算
@@ -250,6 +286,8 @@ async function reload(): Promise<void> {
     task.value = detail
     submissions.value = list
     populate()
+    const budgetTarget = isHistorical.value ? latestSubmission.value : editableSubmission.value
+    if (budgetTarget) void loadBudgetFiles(budgetTarget.id, generation)
   } catch {
     if (generation === reloadGeneration) loadFailed.value = true
   } finally {
@@ -265,6 +303,13 @@ const submitError = ref<{ code: number; message: string } | null>(null)
 
 function buildValue(): MetricValue {
   return buildMetricValue(caliber.value, value.value)
+}
+
+function parseExpense(): number | null {
+  const raw = expenseAmount.value.trim()
+  if (raw === '') return null
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
 }
 
 function validateForSubmit(): string[] {
@@ -297,6 +342,14 @@ function validateForSubmit(): string[] {
   } else if (fileIds.value.length < required) {
     errors.push(`请至少上传 ${required} 份佐证材料（当前 ${fileIds.value.length} 份）`)
   }
+  const expenseRaw = expenseAmount.value.trim()
+  if (expenseRaw !== '') {
+    if (!/^\d+(\.\d{1,2})?$/.test(expenseRaw)) {
+      errors.push('本次支出须为不小于 0 的数字，最多两位小数')
+    } else if (Number(expenseRaw) > 0 && budgetFileIds.value.length === 0) {
+      errors.push('支出大于 0 时必须上传预算佐证材料（60002）')
+    }
+  }
   if (isDelegateFill.value && !proxyReason.value.trim()) {
     errors.push('管理员代填必须填写代填原因')
   }
@@ -311,6 +364,8 @@ async function saveDraft(): Promise<void> {
     remark: serializeSubmissionRemark(caliber.value, remark.value, completionDate.value),
     sourceNote: sourceNote.value || null,
     fileIds: fileIds.value,
+    expenseAmount: parseExpense(),
+    budgetFileIds: budgetFileIds.value,
     proxyReason: isDelegateFill.value ? proxyReason.value || null : undefined,
   }
   if (editingId.value) {
@@ -501,6 +556,8 @@ function submissionType(status: string): string {
               <div class="section-title">本次填报内容（审核中）</div>
               <div class="kv-list">
                 <div class="kv"><span class="kv__label">填报值</span><span class="kv__value">{{ pendingValueText }}</span></div>
+                <div v-if="pendingSubmission.expenseAmount != null" class="kv"><span class="kv__label">本次支出</span><span class="kv__value">{{ formatMoney(pendingSubmission.expenseAmount) }} 万</span></div>
+                <div v-if="pendingSubmission.approvedExpenseAmount != null" class="kv"><span class="kv__label">认定支出</span><span class="kv__value">{{ formatMoney(pendingSubmission.approvedExpenseAmount) }} 万</span></div>
                 <div v-if="pendingSubmission.sourceNote" class="kv"><span class="kv__label">数据来源</span><span class="kv__value">{{ pendingSubmission.sourceNote }}</span></div>
                 <div v-if="pendingRemarkParts.completionDate" class="kv"><span class="kv__label">完成日期</span><span class="kv__value">{{ pendingRemarkParts.completionDate }}</span></div>
                 <div class="kv"><span class="kv__label">情况说明</span><span class="kv__value">{{ pendingRemarkParts.remark || '—' }}</span></div>
@@ -589,6 +646,18 @@ function submissionType(status: string): string {
                   @update:model-value="markDirty"
                 />
               </div>
+
+              <div class="field">
+                <label>本次支出（万元）</label>
+                <van-field
+                  v-model="expenseAmount"
+                  type="number"
+                  inputmode="decimal"
+                  :disabled="formReadonly || yearLocked"
+                  placeholder="选填；支出大于 0 时须上传预算佐证"
+                  @update:model-value="markDirty"
+                />
+              </div>
             </template>
 
             <div class="divider" />
@@ -606,6 +675,19 @@ function submissionType(status: string): string {
               v-model="fileIds"
               :initial-files="initialFiles"
               :disabled="formReadonly || yearLocked"
+              @update:model-value="markDirty"
+            />
+
+            <div class="divider" />
+            <div class="section-title">预算佐证材料</div>
+            <p v-if="!formReadonly && !yearLocked" class="small muted material-hint">支出大于 0 时必须上传至少 1 份预算佐证</p>
+            <FileUploader
+              :key="`budget-${editingId ?? 'new'}-${formReadonly}-${yearLocked}-${budgetFilesKey}`"
+              v-model="budgetFileIds"
+              :initial-files="budgetInitialFiles"
+              :disabled="formReadonly || yearLocked"
+              biz-type="BUDGET_ATTACHMENT"
+              hint="预算佐证：发票、合同、付款凭证等；支持 doc/docx、xls/xlsx、pdf、图片"
               @update:model-value="markDirty"
             />
           </div>
@@ -628,6 +710,9 @@ function submissionType(status: string): string {
                 </div>
                 <div v-if="item.status === 'APPROVED' && item.approvedValue" class="small">
                   认定 {{ formatMetricValue(item.approvedValue, caliber, unitLabel) }}
+                </div>
+                <div v-if="item.expenseAmount != null" class="small">
+                  本次支出 {{ formatMoney(item.expenseAmount) }} 万<template v-if="item.approvedExpenseAmount != null"> · 认定支出 {{ formatMoney(item.approvedExpenseAmount) }} 万</template>
                 </div>
                 <SubmissionReviewTimeline
                   v-if="(item.reviews?.length ?? 0) > 0"

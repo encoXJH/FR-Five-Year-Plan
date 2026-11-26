@@ -12,6 +12,7 @@ import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.module.training.entity.TrainingSheet;
 import edu.fzrj.metrics.module.training.mapper.TrainingSheetMapper;
+import edu.fzrj.metrics.module.training.mapper.TrainingSheetStaffMapper;
 import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
@@ -47,6 +48,8 @@ class PlanReadScopeServiceTest {
     private TaskReadScopeService taskReadScopeService;
     @Mock
     private TrainingSheetMapper trainingSheetMapper;
+    @Mock
+    private TrainingSheetStaffMapper trainingSheetStaffMapper;
 
     @InjectMocks
     private PlanReadScopeService planReadScopeService;
@@ -110,6 +113,33 @@ class PlanReadScopeServiceTest {
         BizException error = assertThrows(BizException.class,
                 () -> planReadScopeService.requireVisible(otherTraining));
         assertEquals(20005, error.getErrorCode().getCode());
+    }
+
+    @Test
+    void 多角色培训计划范围保留本人负责表与已分配表并集() {
+        login("UNIT_OWNER", 14L, "STAFF");
+        when(dataScopeService.isUnitScope(any())).thenReturn(true);
+        when(dataScopeService.isAssignedScope(any())).thenReturn(true);
+        TrainingSheet owned = new TrainingSheet();
+        owned.setId(10L);
+        owned.setPlanId(3L);
+        owned.setOwnerId(99L);
+        owned.setUnitId(14L);
+        TrainingSheet assigned = new TrainingSheet();
+        assigned.setId(11L);
+        assigned.setPlanId(4L);
+        assigned.setOwnerId(88L);
+        assigned.setUnitId(14L);
+        when(trainingSheetStaffMapper.selectValidSheetIds(99L)).thenReturn(List.of(11L));
+        when(trainingSheetMapper.selectList(any())).thenReturn(List.of(owned), List.of(assigned));
+        Plan ownedPlan = plan(3L);
+        ownedPlan.setPlanType("TRAINING");
+        Plan assignedPlan = plan(4L);
+        assignedPlan.setPlanType("TRAINING");
+
+        assertEquals(Set.of(3L, 4L), planReadScopeService.filterVisiblePlans(
+                        List.of(plan(1L), ownedPlan, assignedPlan)).stream()
+                .map(Plan::getId).collect(java.util.stream.Collectors.toSet()));
     }
 
     @Test

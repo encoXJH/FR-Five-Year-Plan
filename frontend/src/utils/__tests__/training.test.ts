@@ -7,6 +7,7 @@ import {
   validateTrainingProjects,
 } from '../training'
 import type { TrainingField, TrainingFieldType, TrainingProjectInput } from '@/types/training'
+import type { FileInfo } from '@/types/file'
 
 function field(
   key: string,
@@ -62,6 +63,23 @@ describe('培训项目自动合计', () => {
     expect(result.map((item) => item.rowNo)).toEqual([1, 2])
     expect(result[0]).toMatchObject({ id: '9', data: { c32: 2 } })
     expect(result[1].data.c44).toBe(4)
+  })
+
+  it('保存载荷携带 fileIds，新增空 id 项目也可先上传，附件变化参与脏检查', () => {
+    const original: TrainingProjectInput[] = [
+      { id: null, rowNo: 1, data: {}, fileIds: ['temp-file'], files: [] },
+      { id: 'project-2', rowNo: 2, data: {}, files: [{ id: 'bound-file' } as FileInfo] },
+    ]
+    const payload = toTrainingProjectInputs(original)
+
+    expect(payload[0]).not.toHaveProperty('id')
+    expect(payload[0].fileIds).toEqual(['temp-file'])
+    expect(payload[1].fileIds).toEqual(['bound-file'])
+    expect(payload[0]).not.toHaveProperty('files')
+
+    const baseline = JSON.stringify(payload)
+    original[0].fileIds = ['temp-file', 'new-file']
+    expect(JSON.stringify(toTrainingProjectInputs(original))).not.toBe(baseline)
   })
 })
 

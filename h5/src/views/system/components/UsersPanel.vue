@@ -15,7 +15,6 @@ import type { OrgUnitAdmin, SystemUser } from '@/types/system'
 import type { Role } from '@/types/enums'
 import { enumLabel, enumOptions } from '@/utils/enumLabels'
 import { useUserStore } from '@/stores/user'
-import { formatDateTime } from '@/utils/format'
 
 const userStore = useUserStore()
 const loading = ref(false)
@@ -271,7 +270,6 @@ onMounted(async () => {
             <span class="chip" :class="row.isEnabled ? 'chip--success' : 'chip--gray'">{{ row.isEnabled ? '启用' : '停用' }}</span>
           </div>
           <div class="small muted">{{ row.unitName ?? '校级账号' }} · {{ row.roles.map((role) => enumLabel('Role', role, userStore.enums)).join(' / ') }}</div>
-          <div class="small muted">最近登录 {{ formatDateTime(row.lastLoginAt) }}</div>
           <div class="actions">
             <van-button size="mini" plain type="primary" @click="openActions(row)">操作</van-button>
           </div>

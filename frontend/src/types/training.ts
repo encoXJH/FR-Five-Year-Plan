@@ -1,5 +1,6 @@
-import type { PageResult } from './api'
+import type { PageResult, UserRef } from './api'
 import type { ReviewResult, TrainingSheetStatus } from './enums'
+import type { FileInfo } from './file'
 import type { ReviewNode, SubmitterRole } from './submission'
 
 export type { TrainingSheetStatus } from './enums'
@@ -33,6 +34,19 @@ export interface TrainingSheetSummary {
   submittedAt: string | null
   canEdit: boolean
   canReview: boolean
+  canAssignStaff: boolean
+}
+
+export interface TrainingStaffView {
+  canAssignStaff: boolean
+  version: number
+  staff: UserRef[]
+  assignableStaff: UserRef[]
+}
+
+export interface TrainingStaffUpdateRequest {
+  version: number
+  staffIds: string[]
 }
 
 export interface TrainingField {
@@ -50,6 +64,7 @@ export interface TrainingProject {
   id: string
   rowNo: number
   data: TrainingProjectData
+  files: FileInfo[]
   status: TrainingSheetStatus
   submitterRole: SubmitterRole | null
   currentReviewNode: ReviewNode | null
@@ -62,9 +77,11 @@ export interface TrainingProject {
 }
 
 export interface TrainingProjectInput {
-  id?: string
+  id?: string | null
   rowNo: number
   data: TrainingProjectData
+  fileIds?: string[]
+  files?: FileInfo[]
   status?: TrainingSheetStatus
   submitterRole?: SubmitterRole | null
   currentReviewNode?: ReviewNode | null

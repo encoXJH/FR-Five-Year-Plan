@@ -21,7 +21,7 @@ public class FileRef {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
-    /** 业务类型：SUBMISSION / ADJUSTMENT / MILESTONE */
+    /** 业务类型：SUBMISSION / ADJUSTMENT / MILESTONE / INDICATOR / TRAINING_PROJECT */
     private String bizType;
 
     /** 业务数据 id */

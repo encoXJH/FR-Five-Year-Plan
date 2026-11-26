@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   exportTrainingSheet,
   getTrainingSheet,
+  getTrainingStaff,
   listPendingTrainingReviews,
   listTrainingSheets,
   reviewTrainingSheet,
   saveTrainingProjects,
   submitTrainingSheet,
+  updateTrainingStaff,
 } from '../training'
 import { http } from '@/utils/request'
 import type { SaveTrainingProjectsRequest } from '@/types/training'
@@ -39,10 +41,31 @@ describe('职业培训采集 API 契约', () => {
     expect(getMock).toHaveBeenCalledWith('/training-sheets/sheet-1')
   })
 
+  it('通过培训专用接口读取并整体保存干事分配', async () => {
+    const view = {
+      canAssignStaff: true,
+      version: 4,
+      staff: [{ id: 'staff-1', name: '干事一' }],
+      assignableStaff: [{ id: 'staff-1', name: '干事一' }, { id: 'staff-2', name: '干事二' }],
+    }
+    getMock.mockResolvedValue(view)
+    await expect(getTrainingStaff('sheet-1')).resolves.toBe(view)
+    expect(getMock).toHaveBeenCalledWith('/training-sheets/sheet-1/staff')
+
+    const updated = { ...view, version: 5, staff: view.assignableStaff }
+    putMock.mockResolvedValue(updated)
+    const request = { version: 4, staffIds: ['staff-1', 'staff-2'] }
+    await expect(updateTrainingStaff('sheet-1', request)).resolves.toBe(updated)
+    expect(putMock).toHaveBeenCalledWith('/training-sheets/sheet-1/staff', request)
+  })
+
   it('整体保存 projects 并携带 sheet version', async () => {
     const request: SaveTrainingProjectsRequest = {
       version: 3,
-      projects: [{ id: 'project-1', rowNo: 1, data: { c01: '培训项目' } }, { rowNo: 2, data: {} }],
+      projects: [
+        { id: 'project-1', rowNo: 1, data: { c01: '培训项目' }, fileIds: ['file-1'] },
+        { id: null, rowNo: 2, data: {}, fileIds: ['temp-file'] },
+      ],
     }
     putMock.mockResolvedValue({ sheet: { version: 4 } })
 

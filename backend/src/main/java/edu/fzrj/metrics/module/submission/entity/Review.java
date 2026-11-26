@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -43,6 +44,12 @@ public class Review {
 
     /** 认定值快照（核减时记录原值与认定值） */
     private String approvedValueJson;
+
+    /** 审核时填报支出快照（万元） */
+    private BigDecimal expenseAmount;
+
+    /** 本级认定支出（万元） */
+    private BigDecimal approvedExpenseAmount;
 
     /** 是否管理员代审 */
     private Boolean isProxy;

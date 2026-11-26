@@ -1,6 +1,7 @@
 package edu.fzrj.metrics.module.system.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.adjustment.entity.Adjustment;
@@ -28,6 +29,12 @@ import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.entity.TaskStaff;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.mapper.TaskStaffMapper;
+import edu.fzrj.metrics.module.training.entity.TrainingProject;
+import edu.fzrj.metrics.module.training.entity.TrainingSheet;
+import edu.fzrj.metrics.module.training.entity.TrainingSheetStaff;
+import edu.fzrj.metrics.module.training.mapper.TrainingProjectMapper;
+import edu.fzrj.metrics.module.training.mapper.TrainingSheetMapper;
+import edu.fzrj.metrics.module.training.mapper.TrainingSheetStaffMapper;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -60,6 +67,9 @@ public class UserDeletionService {
     private final SubmissionMapper submissionMapper;
     private final AdjustmentMapper adjustmentMapper;
     private final ApprovalStepMapper approvalStepMapper;
+    private final TrainingSheetStaffMapper trainingSheetStaffMapper;
+    private final TrainingSheetMapper trainingSheetMapper;
+    private final TrainingProjectMapper trainingProjectMapper;
 
     public UserDeletionService(UserAdminService userAdminService, SysUserMapper sysUserMapper,
                                UserRoleMapper userRoleMapper, UserUnitMapper userUnitMapper,
@@ -67,7 +77,10 @@ public class UserDeletionService {
                                TaskMapper taskMapper, IndicatorMapper indicatorMapper,
                                DirectionMapper directionMapper, MajorGroupMapper majorGroupMapper,
                                SubmissionMapper submissionMapper, AdjustmentMapper adjustmentMapper,
-                               ApprovalStepMapper approvalStepMapper) {
+                               ApprovalStepMapper approvalStepMapper,
+                               TrainingSheetStaffMapper trainingSheetStaffMapper,
+                               TrainingSheetMapper trainingSheetMapper,
+                               TrainingProjectMapper trainingProjectMapper) {
         this.userAdminService = userAdminService;
         this.sysUserMapper = sysUserMapper;
         this.userRoleMapper = userRoleMapper;
@@ -81,6 +94,9 @@ public class UserDeletionService {
         this.submissionMapper = submissionMapper;
         this.adjustmentMapper = adjustmentMapper;
         this.approvalStepMapper = approvalStepMapper;
+        this.trainingSheetStaffMapper = trainingSheetStaffMapper;
+        this.trainingSheetMapper = trainingSheetMapper;
+        this.trainingProjectMapper = trainingProjectMapper;
     }
 
     public SystemDtos.UserItem snapshot(Long userId) {
@@ -91,7 +107,74 @@ public class UserDeletionService {
     @Transactional
     public void delete(Long userId, SystemDtos.UserDeleteRequest request) {
         userAdminService.requireAdmin();
-        SysUser user = userAdminService.requireUser(userId);
+        deleteAuthorized(userAdminService.requireUser(userId), request);
+    }
+
+    @Transactional
+    public void deleteManaged(Long userId, SystemDtos.UserDeleteRequest request) {
+        deleteAuthorized(userAdminService.requireManagedAccount(userId), request);
+    }
+
+    @Transactional
+    public SystemDtos.UserItem patchManaged(Long userId, JsonNode body) {
+        String targetRole = body.has("role") && !body.get("role").isNull()
+                ? body.get("role").asText() : null;
+        if (targetRole != null && !Set.of("UNIT_OWNER", "STAFF").contains(targetRole)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "学院账号角色只能为 UNIT_OWNER 或 STAFF");
+        }
+        SystemDtos.UserItem patched = userAdminService.patchStaff(userId, body);
+        if (targetRole == null || patched.roles().equals(List.of(targetRole))) {
+            return patched;
+        }
+        String reason = body.path("reason").isTextual() ? body.path("reason").asText().trim() : "";
+        if (reason.isEmpty() || reason.length() > 500) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "转换角色必须填写 1–500 字原因");
+        }
+        SystemDtos.RolesRequest rolesRequest = new SystemDtos.RolesRequest();
+        rolesRequest.setRoles(List.of(targetRole));
+        rolesRequest.setReason(reason);
+        rolesRequest.setVersion(patched.version());
+        return updateManagedRoles(userId, rolesRequest).user();
+    }
+
+    @Transactional
+    public SystemDtos.RoleChangeView updateManagedRoles(Long userId, SystemDtos.RolesRequest request) {
+        SysUser user = userAdminService.requireManagedAccount(userId);
+        if (!user.getVersion().equals(request.getVersion())) {
+            throw new BizException(ErrorCode.VERSION_CONFLICT,
+                    "数据已被他人修改，当前最新版本号：" + user.getVersion());
+        }
+        List<String> before = userAdminService.rolesOf(userId);
+        String currentRole = before.get(0);
+        List<String> requested = request.getRoles();
+        if (requested == null || requested.size() != 1
+                || !Set.of("UNIT_OWNER", "STAFF").contains(requested.get(0))) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "学院负责人只能将账号转换为 UNIT_OWNER 或 STAFF 单角色");
+        }
+        String targetRole = requested.get(0);
+        if (currentRole.equals(targetRole)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "目标角色与当前角色相同");
+        }
+        List<String> blockers = findRoleChangeBlockers(userId);
+        if (!blockers.isEmpty()) {
+            throw new BizException(ErrorCode.HAS_CHILDREN,
+                    "用户仍存在有效业务引用，不能转换角色：" + String.join("、", blockers));
+        }
+
+        user.setOwnerUserId("STAFF".equals(targetRole) ? SecurityUtils.getUserId() : null);
+        user.setUpdatedBy(SecurityUtils.getUserId());
+        userAdminService.replaceRoles(userId, List.of(targetRole));
+        if (sysUserMapper.updateById(user) == 0) {
+            throw new BizException(ErrorCode.VERSION_CONFLICT, "用户已被他人修改，请刷新后重试");
+        }
+        userAdminService.revokeAllRefreshTokens(userId);
+        return new SystemDtos.RoleChangeView(
+                userAdminService.toItems(List.of(sysUserMapper.selectById(userId))).get(0),
+                before, List.of(targetRole));
+    }
+
+    private void deleteAuthorized(SysUser user, SystemDtos.UserDeleteRequest request) {
+        Long userId = user.getId();
         if (!user.getVersion().equals(request.getVersion())) {
             throw new BizException(ErrorCode.VERSION_CONFLICT,
                     "数据已被他人修改，当前最新版本号：" + user.getVersion());
@@ -115,6 +198,8 @@ public class UserDeletionService {
         userRoleMapper.delete(new LambdaQueryWrapper<UserRole>().eq(UserRole::getUserId, userId));
         userUnitMapper.delete(new LambdaQueryWrapper<UserUnit>().eq(UserUnit::getUserId, userId));
         taskStaffMapper.delete(new LambdaQueryWrapper<TaskStaff>().eq(TaskStaff::getStaffId, userId));
+        trainingSheetStaffMapper.delete(new LambdaQueryWrapper<TrainingSheetStaff>()
+                .eq(TrainingSheetStaff::getStaffId, userId));
         userAdminService.revokeAllRefreshTokens(userId);
     }
 
@@ -140,11 +225,7 @@ public class UserDeletionService {
 
     private List<String> findBlockers(Long userId) {
         List<String> blockers = new ArrayList<>();
-        List<Long> activePlanIds = planMapper.selectList(new LambdaQueryWrapper<Plan>()
-                        .eq(Plan::getDeleted, 0L)
-                        .ne(Plan::getStatus, "ARCHIVED")
-                        .select(Plan::getId))
-                .stream().map(Plan::getId).toList();
+        List<Long> activePlanIds = activePlanIds();
         if (!activePlanIds.isEmpty()) {
             if (taskMapper.selectCount(new LambdaQueryWrapper<Task>()
                     .eq(Task::getDeleted, 0L)
@@ -193,6 +274,58 @@ public class UserDeletionService {
             blockers.add("未删除的下属干事");
         }
         return blockers;
+    }
+
+    private List<String> findRoleChangeBlockers(Long userId) {
+        List<String> blockers = new ArrayList<>(findBlockers(userId));
+        List<Long> activePlanIds = activePlanIds();
+        if (activePlanIds.isEmpty()) {
+            return blockers;
+        }
+        List<Long> assignedTaskIds = taskStaffMapper.selectList(new LambdaQueryWrapper<TaskStaff>()
+                        .eq(TaskStaff::getStaffId, userId)
+                        .select(TaskStaff::getTaskId))
+                .stream().map(TaskStaff::getTaskId).toList();
+        if (!assignedTaskIds.isEmpty() && taskMapper.selectCount(new LambdaQueryWrapper<Task>()
+                .eq(Task::getDeleted, 0L)
+                .in(Task::getId, assignedTaskIds)
+                .in(Task::getPlanId, activePlanIds)
+                .notIn(Task::getStatus, ENDED_TASK_STATUSES)) > 0) {
+            blockers.add("未归档计划中的任务干事分配");
+        }
+
+        List<TrainingSheet> activeSheets = trainingSheetMapper.selectList(new LambdaQueryWrapper<TrainingSheet>()
+                .eq(TrainingSheet::getDeleted, 0L)
+                .in(TrainingSheet::getPlanId, activePlanIds)
+                .select(TrainingSheet::getId, TrainingSheet::getOwnerId));
+        if (activeSheets.stream().anyMatch(sheet -> userId.equals(sheet.getOwnerId()))) {
+            blockers.add("未归档培训采集表负责人");
+        }
+        Set<Long> activeSheetIds = activeSheets.stream().map(TrainingSheet::getId).collect(Collectors.toSet());
+        if (!activeSheetIds.isEmpty()) {
+            if (trainingSheetStaffMapper.selectCount(new LambdaQueryWrapper<TrainingSheetStaff>()
+                    .in(TrainingSheetStaff::getSheetId, activeSheetIds)
+                    .eq(TrainingSheetStaff::getStaffId, userId)) > 0) {
+                blockers.add("未归档培训采集表干事分配");
+            }
+            if (trainingProjectMapper.selectCount(new LambdaQueryWrapper<TrainingProject>()
+                    .eq(TrainingProject::getDeleted, 0L)
+                    .in(TrainingProject::getSheetId, activeSheetIds)
+                    .in(TrainingProject::getStatus, "DRAFT", "PENDING_REVIEW")
+                    .and(w -> w.eq(TrainingProject::getCreatedBy, userId)
+                            .or().eq(TrainingProject::getSubmittedBy, userId))) > 0) {
+                blockers.add("草稿或待审核培训项目");
+            }
+        }
+        return blockers;
+    }
+
+    private List<Long> activePlanIds() {
+        return planMapper.selectList(new LambdaQueryWrapper<Plan>()
+                        .eq(Plan::getDeleted, 0L)
+                        .ne(Plan::getStatus, "ARCHIVED")
+                        .select(Plan::getId))
+                .stream().map(Plan::getId).toList();
     }
 
     private void findAdjustmentBlockers(Long userId, List<Long> activePlanIds, List<String> blockers) {

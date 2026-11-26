@@ -138,12 +138,129 @@ class UserAdminServiceTest {
 
     static Stream<Arguments> deniedCreationMatrix() {
         return Stream.of(
-                Arguments.of("ADMIN", "STAFF"), Arguments.of("LEADER", "ADMIN"),
+                Arguments.of("LEADER", "ADMIN"),
                 Arguments.of("LEADER", "STAFF"), Arguments.of("SCHOOL_OWNER", "ADMIN"),
                 Arguments.of("SCHOOL_OWNER", "LEADER"), Arguments.of("SCHOOL_OWNER", "STAFF"),
                 Arguments.of("UNIT_OWNER", "ADMIN"), Arguments.of("UNIT_OWNER", "LEADER"),
                 Arguments.of("UNIT_OWNER", "SCHOOL_OWNER"), Arguments.of("STAFF", "STAFF"),
                 Arguments.of("STAFF", "UNIT_OWNER"));
+    }
+
+    @Test
+    void 管理员创建干事继承所选负责人学院并保留实际创建人() {
+        mockCreator("ADMIN", List.of());
+        security.when(SecurityUtils::getUserId).thenReturn(99L);
+        SysUser owner = user(88L, 102L);
+        when(sysUserMapper.selectOne(any())).thenReturn(owner);
+        when(sysUserMapper.selectCount(any())).thenReturn(0L);
+        when(userRoleMapper.selectList(any())).thenReturn(
+                List.of(role(88L, "UNIT_OWNER"), role(88L, "LEADER")),
+                List.of(role(1L, "STAFF")));
+        when(userUnitService.unitIdsOf(88L)).thenReturn(List.of(101L, 102L));
+        when(passwordEncoder.encode("password")).thenReturn("hash");
+        SysUser[] stored = new SysUser[1];
+        doAnswer(invocation -> {
+            SysUser created = invocation.getArgument(0);
+            created.setId(1L);
+            created.setVersion(1);
+            stored[0] = created;
+            return 1;
+        }).when(sysUserMapper).insert(any(SysUser.class));
+        when(sysUserMapper.selectById(1L)).thenAnswer(invocation -> stored[0]);
+        when(userUnitService.unitIdsOf(anyCollection())).thenReturn(Map.of(1L, List.of(101L, 102L)));
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of(
+                unit(101L, "学院101"), unit(102L, "学院102")));
+        SystemDtos.UserCreateRequest request = createRequest("STAFF", List.of());
+        request.setOwnerUserId(88L);
+
+        SystemDtos.UserItem result = userAdminService.create(request);
+
+        assertEquals(List.of("STAFF"), result.roles());
+        assertEquals(88L, result.ownerUserId());
+        assertEquals(102L, result.unitId());
+        assertEquals(List.of(101L, 102L), result.unitIds());
+        ArgumentCaptor<SysUser> inserted = ArgumentCaptor.forClass(SysUser.class);
+        verify(sysUserMapper).insert(inserted.capture());
+        assertEquals(99L, inserted.getValue().getCreatedBy());
+        assertEquals(88L, inserted.getValue().getOwnerUserId());
+        verify(userUnitService).replaceUnits(1L, 102L, List.of(101L, 102L), 99L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"未指定", "不存在或已删除", "已停用", "无学院负责人角色", "无学院关系"})
+    void 管理员创建干事拒绝无效归属负责人(String scenario) {
+        mockCreator("ADMIN", List.of());
+        when(sysUserMapper.selectCount(any())).thenReturn(0L);
+        SystemDtos.UserCreateRequest request = createRequest("STAFF", List.of());
+        if (!"未指定".equals(scenario)) {
+            request.setOwnerUserId(88L);
+        }
+        SysUser owner = user(88L, 101L);
+        switch (scenario) {
+            case "不存在或已删除" -> when(sysUserMapper.selectOne(any())).thenReturn(null);
+            case "已停用" -> {
+                owner.setIsEnabled(false);
+                when(sysUserMapper.selectOne(any())).thenReturn(owner);
+            }
+            case "无学院负责人角色" -> {
+                when(sysUserMapper.selectOne(any())).thenReturn(owner);
+                when(userRoleMapper.selectList(any())).thenReturn(List.of());
+            }
+            case "无学院关系" -> {
+                when(sysUserMapper.selectOne(any())).thenReturn(owner);
+                when(userRoleMapper.selectList(any())).thenReturn(List.of(role(88L, "UNIT_OWNER")));
+                when(userUnitService.unitIdsOf(88L)).thenReturn(List.of());
+            }
+            default -> {
+            }
+        }
+
+        BizException error = assertThrows(BizException.class, () -> userAdminService.create(request));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        verify(sysUserMapper, never()).insert(any(SysUser.class));
+    }
+
+    @Test
+    void 管理员创建干事不能伪造学院() {
+        mockCreator("ADMIN", List.of());
+        when(sysUserMapper.selectCount(any())).thenReturn(0L);
+        when(sysUserMapper.selectOne(any())).thenReturn(user(88L, 101L));
+        when(userRoleMapper.selectList(any())).thenReturn(List.of(role(88L, "UNIT_OWNER")));
+        when(userUnitService.unitIdsOf(88L)).thenReturn(List.of(101L));
+        SystemDtos.UserCreateRequest request = createRequest("STAFF", List.of(999L));
+        request.setOwnerUserId(88L);
+
+        BizException error = assertThrows(BizException.class, () -> userAdminService.create(request));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        verify(sysUserMapper, never()).insert(any(SysUser.class));
+    }
+
+    @Test
+    void 学院负责人创建干事误传归属负责人会被拒绝() {
+        mockCreator("UNIT_OWNER", List.of(101L));
+        when(sysUserMapper.selectCount(any())).thenReturn(0L);
+        SystemDtos.UserCreateRequest request = createRequest("STAFF", List.of());
+        request.setOwnerUserId(88L);
+
+        BizException error = assertThrows(BizException.class, () -> userAdminService.create(request));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        verify(sysUserMapper, never()).insert(any(SysUser.class));
+    }
+
+    @Test
+    void 非干事角色误传归属负责人会被拒绝() {
+        mockCreator("ADMIN", List.of());
+        when(sysUserMapper.selectCount(any())).thenReturn(0L);
+        SystemDtos.UserCreateRequest request = createRequest("LEADER", List.of());
+        request.setOwnerUserId(88L);
+
+        BizException error = assertThrows(BizException.class, () -> userAdminService.create(request));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        verify(sysUserMapper, never()).insert(any(SysUser.class));
     }
 
     @Test
@@ -156,6 +273,14 @@ class UserAdminServiceTest {
 
         assertEquals(10001, error.getErrorCode().getCode());
         verify(sysUserMapper, never()).insert(any(SysUser.class));
+    }
+
+    @Test
+    void 管理员可创建非干事多角色账号() {
+        List<String> roles = userAdminService.validateCreationRoles(
+                List.of("LEADER", "SCHOOL_OWNER"), List.of("ADMIN"));
+
+        assertEquals(List.of("LEADER", "SCHOOL_OWNER"), roles);
     }
 
     @Test
@@ -454,8 +579,10 @@ class UserAdminServiceTest {
         when(userRoleMapper.selectList(any())).thenReturn(candidateRoles, itemRoles);
         SysUser first = user(1L, 101L);
         first.setOwnerUserId(88L);
+        first.setCreatedBy(99L);
         SysUser second = user(2L, 102L);
         second.setOwnerUserId(77L);
+        second.setCreatedBy(77L);
         doAnswer(invocation -> {
             Page<SysUser> page = invocation.getArgument(0);
             page.setRecords(List.of(first, second));
@@ -472,6 +599,10 @@ class UserAdminServiceTest {
         assertEquals(2, result.getTotal());
         assertEquals(88L, result.getItems().get(0).ownerUserId());
         assertEquals(77L, result.getItems().get(1).ownerUserId());
+        assertEquals(99L, result.getItems().get(0).createdBy());
+        assertEquals(77L, result.getItems().get(1).createdBy());
+        assertTrue(result.getItems().get(0).manageable());
+        assertTrue(result.getItems().get(1).manageable());
         ArgumentCaptor<LambdaQueryWrapper> wrapperCaptor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(sysUserMapper).selectPage(any(), wrapperCaptor.capture());
         wrapperCaptor.getValue().getSqlSegment();
@@ -510,11 +641,13 @@ class UserAdminServiceTest {
 
     @ParameterizedTest
     @MethodSource("unmanagedStaffCases")
-    void 逐ID拒绝多角色外院及无学院关系账号(List<UserRole> roles, List<Long> unitIds) throws Exception {
+    void 逐ID拒绝多角色外院无学院关系及他人创建负责人账号(
+            Long createdBy, List<UserRole> roles, List<Long> unitIds) throws Exception {
         mockCreator("UNIT_OWNER", List.of(101L));
         SysUser user = user(1L, 101L);
+        user.setCreatedBy(createdBy);
         when(sysUserMapper.selectOne(any())).thenReturn(user);
-        when(userRoleMapper.selectList(any())).thenReturn(roles);
+        lenient().when(userRoleMapper.selectList(any())).thenReturn(roles);
         lenient().when(userUnitService.unitIdsOf(1L)).thenReturn(unitIds);
 
         BizException error = assertThrows(BizException.class, () -> userAdminService.patchStaff(1L,
@@ -526,15 +659,41 @@ class UserAdminServiceTest {
 
     static Stream<Arguments> unmanagedStaffCases() {
         return Stream.of(
-                Arguments.of(List.of(role(1L, "STAFF"), role(1L, "UNIT_OWNER")), List.of(101L)),
-                Arguments.of(List.of(role(1L, "STAFF")), List.of(102L)),
-                Arguments.of(List.of(role(1L, "STAFF")), List.of()));
+                Arguments.of(77L, List.of(role(1L, "UNIT_OWNER")), List.of(101L)),
+                Arguments.of(99L, List.of(role(1L, "STAFF"), role(1L, "UNIT_OWNER")), List.of(101L)),
+                Arguments.of(99L, List.of(role(1L, "STAFF")), List.of(102L)),
+                Arguments.of(99L, List.of(role(1L, "STAFF")), List.of()));
     }
 
     @Test
-    void 干事编辑跨创建人切换可管关系并保留外院关系() throws Exception {
+    void 跨创建人同学院纯干事编辑与密码重置成功() throws Exception {
+        mockCreator("UNIT_OWNER", List.of(101L));
+        SysUser user = user(1L, 101L);
+        user.setCreatedBy(77L);
+        user.setOwnerUserId(88L);
+        when(sysUserMapper.selectOne(any())).thenReturn(user);
+        when(userRoleMapper.selectList(any())).thenReturn(List.of(role(1L, "STAFF")));
+        when(userUnitService.unitIdsOf(1L)).thenReturn(List.of(101L));
+        when(sysUserMapper.updateById(user)).thenReturn(1);
+        when(sysUserMapper.selectById(1L)).thenReturn(user);
+        when(userUnitService.unitIdsOf(anyCollection())).thenReturn(Map.of(1L, List.of(101L)));
+        when(orgUnitMapper.selectList(any())).thenReturn(List.of(unit(101L, "学院101")));
+        when(passwordEncoder.encode("newPassword")).thenReturn("newHash");
+
+        SystemDtos.UserItem result = userAdminService.patchStaff(1L,
+                new ObjectMapper().readTree("{\"name\":\"新姓名\",\"version\":1}"));
+        userAdminService.resetStaffPassword(1L, staffPasswordRequest(1));
+
+        assertEquals("新姓名", result.name());
+        assertEquals("newHash", user.getPasswordHash());
+        verify(refreshTokenMapper).update(isNull(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"UNIT_OWNER", "STAFF"})
+    void 两类本人创建同学院账号编辑成功并保留外院关系(String accountRole) throws Exception {
         mockCreator("UNIT_OWNER", List.of(101L, 102L, 103L));
-        SysUser user = mockManagedStaff(1L, List.of(101L, 103L, 999L));
+        SysUser user = mockManagedAccount(1L, accountRole, List.of(101L, 103L, 999L));
         when(orgUnitMapper.selectCount(any())).thenReturn(1L);
         when(sysUserMapper.updateById(user)).thenReturn(1);
         when(sysUserMapper.selectById(1L)).thenReturn(user);
@@ -549,8 +708,8 @@ class UserAdminServiceTest {
         assertEquals("新姓名", result.name());
         assertEquals("138****5678", result.phone());
         assertEquals(List.of(102L, 999L), result.unitIds());
-        assertEquals(88L, user.getOwnerUserId());
-        assertEquals(77L, user.getCreatedBy());
+        assertEquals("STAFF".equals(accountRole) ? 88L : null, user.getOwnerUserId());
+        assertEquals(99L, user.getCreatedBy());
         verify(userUnitService).replaceUnits(1L, 102L, List.of(999L), 99L);
         verify(userRoleMapper, never()).delete(any());
         verify(refreshTokenMapper).update(isNull(), any());
@@ -601,6 +760,7 @@ class UserAdminServiceTest {
     void 干事密码重置逐ID拒绝外院账号() {
         mockCreator("UNIT_OWNER", List.of(101L));
         SysUser user = user(1L, 102L);
+        user.setCreatedBy(99L);
         when(sysUserMapper.selectOne(any())).thenReturn(user);
         when(userRoleMapper.selectList(any())).thenReturn(List.of(role(1L, "STAFF")));
         when(userUnitService.unitIdsOf(1L)).thenReturn(List.of(102L));
@@ -613,10 +773,11 @@ class UserAdminServiceTest {
         verify(refreshTokenMapper, never()).update(isNull(), any());
     }
 
-    @Test
-    void 干事密码重置清除锁定并吊销令牌() {
+    @ParameterizedTest
+    @ValueSource(strings = {"UNIT_OWNER", "STAFF"})
+    void 两类本人创建同学院账号密码重置成功并吊销令牌(String accountRole) {
         mockCreator("UNIT_OWNER", List.of(101L));
-        SysUser user = mockManagedStaff(1L, List.of(101L));
+        SysUser user = mockManagedAccount(1L, accountRole, List.of(101L));
         user.setLoginFailCount(4);
         user.setLockedUntil(LocalDateTime.now().plusDays(1));
         when(passwordEncoder.encode("newPassword")).thenReturn("newHash");
@@ -627,17 +788,46 @@ class UserAdminServiceTest {
         assertEquals("newHash", user.getPasswordHash());
         assertEquals(0, user.getLoginFailCount());
         assertNull(user.getLockedUntil());
-        assertEquals(88L, user.getOwnerUserId());
-        assertEquals(77L, user.getCreatedBy());
+        assertEquals("STAFF".equals(accountRole) ? 88L : null, user.getOwnerUserId());
+        assertEquals(99L, user.getCreatedBy());
         verify(refreshTokenMapper).update(isNull(), any());
     }
 
+    @Test
+    void 用户视图返回创建人并按角色学院标记可管理() {
+        mockCreator("UNIT_OWNER", List.of(101L));
+        List<SysUser> users = List.of(
+                user(1L, 101L), user(2L, 101L), user(3L, 101L),
+                user(4L, 101L), user(5L, 102L), user(6L, 101L));
+        users.forEach(user -> user.setCreatedBy(99L));
+        users.get(2).setCreatedBy(77L);
+        users.get(5).setCreatedBy(77L);
+        when(userUnitService.unitIdsOf(anyCollection())).thenReturn(Map.of(
+                1L, List.of(101L), 2L, List.of(101L), 3L, List.of(101L),
+                4L, List.of(101L), 5L, List.of(102L), 6L, List.of(101L)));
+        when(userRoleMapper.selectList(any())).thenReturn(List.of(
+                role(1L, "STAFF"), role(2L, "UNIT_OWNER"), role(3L, "STAFF"),
+                role(4L, "STAFF"), role(4L, "UNIT_OWNER"), role(5L, "STAFF"),
+                role(6L, "UNIT_OWNER")));
+
+        List<SystemDtos.UserItem> items = userAdminService.toItems(users);
+
+        assertEquals(List.of(99L, 99L, 77L, 99L, 99L, 77L),
+                items.stream().map(SystemDtos.UserItem::createdBy).toList());
+        assertEquals(List.of(true, true, true, false, false, false),
+                items.stream().map(SystemDtos.UserItem::manageable).toList());
+    }
+
     private SysUser mockManagedStaff(Long userId, List<Long> unitIds) {
+        return mockManagedAccount(userId, "STAFF", unitIds);
+    }
+
+    private SysUser mockManagedAccount(Long userId, String accountRole, List<Long> unitIds) {
         SysUser user = user(userId, unitIds.stream().findFirst().orElse(null));
-        user.setOwnerUserId(88L);
-        user.setCreatedBy(77L);
+        user.setOwnerUserId("STAFF".equals(accountRole) ? 88L : null);
+        user.setCreatedBy(99L);
         when(sysUserMapper.selectOne(any())).thenReturn(user);
-        when(userRoleMapper.selectList(any())).thenReturn(List.of(role(userId, "STAFF")));
+        when(userRoleMapper.selectList(any())).thenReturn(List.of(role(userId, accountRole)));
         when(userUnitService.unitIdsOf(userId)).thenReturn(unitIds);
         return user;
     }
@@ -652,8 +842,10 @@ class UserAdminServiceTest {
     private void mockCreator(String role, List<Long> unitIds) {
         security = Mockito.mockStatic(SecurityUtils.class);
         Long primaryUnitId = unitIds.stream().findFirst().orElse(null);
-        security.when(SecurityUtils::getLoginUser).thenReturn(new LoginUser(
-                99L, "creator", "创建人", primaryUnitId, List.of(role), List.of(), unitIds));
+        LoginUser creator = new LoginUser(
+                99L, "creator", "创建人", primaryUnitId, List.of(role), List.of(), unitIds);
+        security.when(SecurityUtils::getLoginUser).thenReturn(creator);
+        security.when(SecurityUtils::getLoginUserOrNull).thenReturn(creator);
     }
 
     private void mockSuccessfulCreate(String targetRole, List<Long> unitIds) {

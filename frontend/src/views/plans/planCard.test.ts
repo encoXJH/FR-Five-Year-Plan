@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   canArchivePlanCard,
+  canAssignTrainingPlanStaff,
   canDeletePlanCard,
   canExportTrainingPlan,
   trainingPlanExportFilename,
@@ -20,6 +21,17 @@ describe('计划卡培训导出菜单', () => {
   it('清理计划名称中的文件名非法字符', () => {
     expect(trainingPlanExportFilename('2025/2026:职业培训*?'))
       .toBe('2025_2026_职业培训__-职业培训信息表.xlsx')
+  })
+})
+
+describe('计划卡培训干事分配菜单', () => {
+  it('仅 ADMIN 的未归档培训计划显示入口', () => {
+    expect(canAssignTrainingPlanStaff('TRAINING', 'ACTIVE', true)).toBe(true)
+    expect(canAssignTrainingPlanStaff('TRAINING', 'DRAFT', true)).toBe(true)
+    expect(canAssignTrainingPlanStaff('TRAINING', 'ARCHIVED', true)).toBe(false)
+    expect(canAssignTrainingPlanStaff('TRAINING', 'ACTIVE', false)).toBe(false)
+    expect(canAssignTrainingPlanStaff('INDICATOR', 'ACTIVE', true)).toBe(false)
+    expect(canAssignTrainingPlanStaff(undefined, 'ACTIVE', true)).toBe(false)
   })
 })
 

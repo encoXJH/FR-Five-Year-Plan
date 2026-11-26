@@ -136,6 +136,19 @@ export function deleteUser(userId: string, data: SystemUserDeleteRequest): Promi
   return http.delete(`/users/${userId}`, { data })
 }
 
+/** PUT /users/staff/{userId}/roles（学院自管账号的 UNIT_OWNER / STAFF 互转，带 version + reason） */
+export function setManagedUserRoles(
+  userId: string,
+  data: SetUserRolesRequest,
+): Promise<{ user: SystemUser }> {
+  return http.put(`/users/staff/${userId}/roles`, data)
+}
+
+/** DELETE /users/staff/{userId}（学院自管账号逻辑删除，带 version + reason） */
+export function deleteManagedUser(userId: string, data: SystemUserDeleteRequest): Promise<void> {
+  return http.delete(`/users/staff/${userId}`, { data })
+}
+
 /** POST /users/staff/{userId}/password-reset（带 version，重置后吊销该用户全部 refreshToken） */
 export function resetStaffUserPassword(userId: string, data: StaffPasswordResetRequest): Promise<void> {
   return http.post(`/users/staff/${userId}/password-reset`, data)

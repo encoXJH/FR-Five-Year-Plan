@@ -7,7 +7,7 @@ import { getTask } from '@/api/task'
 import { listTaskAdjustments } from '@/api/adjustment'
 import { getSubmission, listSubmissions } from '@/api/submission'
 import { useUserStore } from '@/stores/user'
-import { formatDateTime, formatPercent } from '@/utils/format'
+import { formatDateTime, formatMoney, formatPercent } from '@/utils/format'
 import { formatTargetValue } from '@/utils/indicator'
 import { primaryTaskIndicator, progressPercentage } from '@/utils/task'
 import { summarizeItems } from '@/utils/adjustment'
@@ -150,6 +150,9 @@ function selectTab(tab: string): void {
 }
 
 const detailFiles = computed<FileInfo[]>(() => submissionDetail.value?.files ?? [])
+const submissionBudgetFiles = computed(() =>
+  (submissionDetail.value?.budgetFiles ?? []).map((file) => ({ ...file, transcodeStatus: null })),
+)
 </script>
 
 <template>
@@ -247,8 +250,15 @@ const detailFiles = computed<FileInfo[]>(() => submissionDetail.value?.files ?? 
               <div v-if="selectedSubmissionId" class="submission-materials">
                 <div v-if="submissionLoading" class="skeleton-block">加载提交材料…</div>
                 <template v-else-if="submissionDetail">
+                  <div v-if="submissionDetail.expenseAmount != null" class="small">
+                    本次支出 {{ formatMoney(submissionDetail.expenseAmount) }} 万<template v-if="submissionDetail.approvedExpenseAmount != null"> · 认定支出 {{ formatMoney(submissionDetail.approvedExpenseAmount) }} 万</template>
+                  </div>
                   <h3 class="section-title">提交材料（{{ detailFiles.length }} 份）</h3>
                   <AttachmentList :files="detailFiles" empty-text="本次提交未上传材料" />
+                  <template v-if="submissionBudgetFiles.length > 0">
+                    <h3 class="section-title">预算佐证（{{ submissionBudgetFiles.length }} 份）</h3>
+                    <AttachmentList :files="submissionBudgetFiles" empty-text="无预算佐证" />
+                  </template>
                 </template>
                 <div v-else-if="submissionLoadFailed" class="empty-state">提交详情加载失败，请点击上方记录重试</div>
               </div>

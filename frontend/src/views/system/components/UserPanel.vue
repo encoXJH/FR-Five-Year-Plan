@@ -3,17 +3,20 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  deleteManagedUser,
   deleteUser,
   listUsers,
+  resetStaffUserPassword,
   resetUserPassword,
   setUserRoles,
+  updateStaffUser,
   updateUser,
 } from '@/api/system'
 import { listOrgUnits } from '@/api/orgUnit'
 import type { OrgUnit } from '@/api/orgUnit'
 import { useUserStore } from '@/stores/user'
 import { enumLabel, enumOptions } from '@/utils/enumLabels'
-import { EMPTY_DISPLAY, formatDateTime } from '@/utils/format'
+import { EMPTY_DISPLAY } from '@/utils/format'
 import { useAutoRefresh } from '@/utils/autoRefresh'
 import ReasonDialog from '@/components/ReasonDialog.vue'
 import type { Role } from '@/types/enums'
@@ -46,7 +49,21 @@ const roleOptions = computed(() => {
     ? options.filter((option) => ['UNIT_OWNER', 'STAFF'].includes(option.value))
     : options
 })
-const isAdmin = computed(() => !props.readonly && userStore.roles.includes('ADMIN'))
+const isAdmin = computed(() =>
+  !props.readonly && !props.unitOwnerDirectory && userStore.roles.includes('ADMIN'),
+)
+const isManagedDirectory = computed(() =>
+  !props.readonly && props.unitOwnerDirectory && userStore.roles.includes('UNIT_OWNER'),
+)
+const showManagement = computed(() => isAdmin.value || isManagedDirectory.value)
+const alertTitle = computed(() => isManagedDirectory.value ? '学院账号管理' : '全校人员查询')
+const alertDescription = computed(() => isManagedDirectory.value
+  ? '本学院任意负责人归属的干事及本人创建的学院项目负责人可编辑、删除及转换角色，其他账号仅支持查看。'
+  : '可按姓名、工号、所属单元、角色和状态查找全校人员，人员信息仅支持查看。')
+
+function canManage(row: SystemUser): boolean {
+  return isManagedDirectory.value && row.manageable === true
+}
 
 let loadSequence = 0
 
@@ -83,8 +100,23 @@ const editing = ref<SystemUser | null>(null)
 const form = reactive({
   name: '',
   username: '',
+  phone: '',
   unitId: '' as string,
   isEnabled: true,
+  role: '' as Role | '',
+  roleReason: '',
+})
+const editingManaged = computed(() => editing.value ? canManage(editing.value) : false)
+const editingRoleChanged = computed(() =>
+  editingManaged.value && editing.value?.roles[0] !== form.role,
+)
+const editingUnitOptions = computed(() => {
+  if (!editingManaged.value) return units.value
+  const ownUnitIds = [...(userStore.userInfo?.unitIds ?? userStore.dataScope?.unitIds ?? [])]
+  const primaryUnitId = userStore.userInfo?.unitId ?? userStore.dataScope?.unitId
+  if (primaryUnitId && !ownUnitIds.includes(primaryUnitId)) ownUnitIds.push(primaryUnitId)
+  const own = new Set(ownUnitIds)
+  return units.value.filter((unit) => own.has(unit.id))
 })
 
 function openCreate(): void {
@@ -95,8 +127,11 @@ function openEdit(row: SystemUser): void {
   editing.value = row
   form.name = row.name
   form.username = row.username
+  form.phone = ''
   form.unitId = row.unitId ?? ''
   form.isEnabled = row.isEnabled
+  form.role = row.roles[0] ?? ''
+  form.roleReason = ''
   dialogVisible.value = true
 }
 
@@ -106,14 +141,37 @@ async function submit(): Promise<void> {
     ElMessage.warning('请填写姓名')
     return
   }
+  if (editingManaged.value && !form.unitId) {
+    ElMessage.warning('请选择所属单元')
+    return
+  }
+  if (editingManaged.value && !form.role) {
+    ElMessage.warning('请选择角色')
+    return
+  }
+  if (editingRoleChanged.value && !form.roleReason.trim()) {
+    ElMessage.warning('转换角色请填写原因')
+    return
+  }
   saving.value = true
   try {
-    await updateUser(editing.value.id, {
+    const payload = {
       name: form.name.trim(),
       unitId: form.unitId || null,
       isEnabled: form.isEnabled,
       version: editing.value.version,
-    })
+    }
+    if (editingManaged.value) {
+      await updateStaffUser(editing.value.id, {
+        ...payload,
+        unitId: form.unitId,
+        phone: form.phone.trim() || undefined,
+        role: form.role as Role,
+        reason: editingRoleChanged.value ? form.roleReason.trim() : undefined,
+      })
+    } else {
+      await updateUser(editing.value.id, payload)
+    }
     ElMessage.success('用户已更新')
     dialogVisible.value = false
     await load()
@@ -138,7 +196,11 @@ async function toggleEnabled(row: SystemUser): Promise<void> {
     }
   }
   try {
-    await updateUser(row.id, { isEnabled: !row.isEnabled, version: row.version })
+    if (canManage(row)) {
+      await updateStaffUser(row.id, { isEnabled: !row.isEnabled, version: row.version })
+    } else {
+      await updateUser(row.id, { isEnabled: !row.isEnabled, version: row.version })
+    }
     ElMessage.success(row.isEnabled ? '已停用' : '已启用')
     await load()
   } catch {
@@ -167,7 +229,11 @@ async function handleResetPassword(row: SystemUser): Promise<void> {
     return
   }
   try {
-    await resetUserPassword(row.id, password)
+    if (canManage(row)) {
+      await resetStaffUserPassword(row.id, { password, version: row.version })
+    } else {
+      await resetUserPassword(row.id, password)
+    }
     ElMessage.success('密码已重置，该用户需重新登录')
   } catch {
     // 拦截器已提示
@@ -188,7 +254,11 @@ async function submitDelete(reason: string): Promise<void> {
   if (!deleteTarget.value) return
   deleteSaving.value = true
   try {
-    await deleteUser(deleteTarget.value.id, { version: deleteTarget.value.version, reason })
+    if (canManage(deleteTarget.value)) {
+      await deleteManagedUser(deleteTarget.value.id, { version: deleteTarget.value.version, reason })
+    } else {
+      await deleteUser(deleteTarget.value.id, { version: deleteTarget.value.version, reason })
+    }
     ElMessage.success('用户已删除，历史业务记录保留')
     deleteVisible.value = false
     await load()
@@ -263,8 +333,8 @@ useAutoRefresh(() => load(true))
       class="directory-alert"
       type="info"
       :closable="false"
-      title="全校人员查询"
-      description="可按姓名、工号、所属单元、角色和状态查找全校人员，人员信息仅支持查看。"
+      :title="alertTitle"
+      :description="alertDescription"
     />
     <div class="panel-toolbar">
       <el-input
@@ -307,7 +377,7 @@ useAutoRefresh(() => load(true))
       </el-select>
       <el-button type="primary" @click="search">查询</el-button>
     </div>
-    <div v-if="isAdmin" class="app-action-row panel-actions">
+    <div v-if="showManagement" class="app-action-row panel-actions">
       <el-button type="primary" @click="openCreate">新增用户</el-button>
     </div>
 
@@ -341,25 +411,25 @@ useAutoRefresh(() => load(true))
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="最近登录" width="150">
-        <template #default="{ row }">{{ formatDateTime(row.lastLoginAt) }}</template>
-      </el-table-column>
-      <el-table-column v-if="isAdmin" label="操作" width="180" fixed="right">
+      <el-table-column v-if="showManagement" label="操作" width="180" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button link type="primary" size="small" @click="openSetRoles(row)">设置角色</el-button>
-          <el-dropdown trigger="click" class="more-dropdown">
-            <el-button link type="primary" size="small">更多</el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item @click="handleResetPassword(row)">重置密码</el-dropdown-item>
-                <el-dropdown-item @click="toggleEnabled(row)">
-                  {{ row.isEnabled ? '停用' : '启用' }}
-                </el-dropdown-item>
-                <el-dropdown-item divided class="delete-menu-item" @click="openDelete(row)">删除</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <template v-if="isAdmin || canManage(row)">
+            <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button v-if="isAdmin" link type="primary" size="small" @click="openSetRoles(row)">设置角色</el-button>
+            <el-dropdown trigger="click" class="more-dropdown">
+              <el-button link type="primary" size="small">更多</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item @click="handleResetPassword(row)">重置密码</el-dropdown-item>
+                  <el-dropdown-item @click="toggleEnabled(row)">
+                    {{ row.isEnabled ? '停用' : '启用' }}
+                  </el-dropdown-item>
+                  <el-dropdown-item divided class="delete-menu-item" @click="openDelete(row)">删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </template>
+          <span v-else class="readonly-text">只读</span>
         </template>
       </el-table-column>
     </el-table>
@@ -387,8 +457,8 @@ useAutoRefresh(() => load(true))
       />
     </div>
 
-    <template v-if="isAdmin">
-      <el-dialog v-model="dialogVisible" title="编辑用户" width="480px">
+    <template v-if="showManagement">
+      <el-dialog v-model="dialogVisible" :title="editingManaged ? '编辑学院账号' : '编辑用户'" width="480px">
       <el-form label-width="90px">
         <el-form-item label="姓名" required>
           <el-input v-model="form.name" />
@@ -396,15 +466,33 @@ useAutoRefresh(() => load(true))
         <el-form-item label="工号" required>
           <el-input v-model="form.username" disabled />
         </el-form-item>
-        <el-form-item label="所属单元">
-          <el-select v-model="form.unitId" clearable style="width: 100%">
+        <el-form-item v-if="editingManaged" label="手机号">
+          <el-input v-model="form.phone" maxlength="32" placeholder="留空则不修改手机号" />
+        </el-form-item>
+        <el-form-item label="所属单元" :required="editingManaged">
+          <el-select v-model="form.unitId" :clearable="!editingManaged" style="width: 100%">
             <el-option
-              v-for="u in units"
+              v-for="u in editingUnitOptions"
               :key="u.id"
               :label="`${u.code} ${u.name}`"
               :value="u.id"
             />
           </el-select>
+        </el-form-item>
+        <el-form-item v-if="editingManaged" label="角色" required>
+          <el-select v-model="form.role" style="width: 100%">
+            <el-option v-for="o in roleOptions" :key="o.value" :label="o.label" :value="o.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="editingRoleChanged" label="调整原因" required>
+          <el-input
+            v-model="form.roleReason"
+            type="textarea"
+            :rows="3"
+            maxlength="500"
+            show-word-limit
+            placeholder="转换角色必须填写原因"
+          />
         </el-form-item>
         <el-form-item label="状态">
           <el-switch v-model="form.isEnabled" active-text="启用" inactive-text="停用" />
@@ -416,7 +504,7 @@ useAutoRefresh(() => load(true))
       </template>
     </el-dialog>
 
-    <el-dialog v-model="rolesVisible" title="设置角色" width="480px">
+    <el-dialog v-if="isAdmin" v-model="rolesVisible" title="设置角色" width="480px">
       <el-form label-width="90px">
         <el-form-item label="用户">
           <span>{{ rolesTarget?.name }}（{{ rolesTarget?.username }}）</span>
@@ -434,6 +522,7 @@ useAutoRefresh(() => load(true))
     </el-dialog>
 
     <ReasonDialog
+      v-if="isAdmin"
       v-model="reasonVisible"
       title="修改用户角色"
       :target="rolesTarget ? `${rolesTarget.name}（${rolesTarget.username}）` : ''"
@@ -503,6 +592,11 @@ useAutoRefresh(() => load(true))
 
 .role-tag {
   margin-right: 4px;
+}
+
+.readonly-text {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 .pagination-bar {

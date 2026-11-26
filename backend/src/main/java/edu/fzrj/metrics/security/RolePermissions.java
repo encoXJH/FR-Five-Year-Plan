@@ -14,6 +14,7 @@ public final class RolePermissions {
 
     public static final String PLAN_MANAGE = "plan:manage";
     public static final String INDICATOR_EDIT = "indicator:edit";
+    public static final String INDICATOR_BUDGET = "indicator:budget";
     public static final String ALLOCATION_EDIT = "allocation:edit";
     public static final String TASK_DISTRIBUTE = "task:distribute";
     public static final String TASK_ACCEPT = "task:accept";
@@ -33,7 +34,7 @@ public final class RolePermissions {
     public static final String TRAINING_FILL = "training:fill";
 
     public static final Set<String> ALL = Set.of(
-            PLAN_MANAGE, INDICATOR_EDIT, ALLOCATION_EDIT, TASK_DISTRIBUTE, TASK_ACCEPT,
+            PLAN_MANAGE, INDICATOR_EDIT, INDICATOR_BUDGET, ALLOCATION_EDIT, TASK_DISTRIBUTE, TASK_ACCEPT,
             SUBMISSION_SUBMIT, SUBMISSION_REVIEW, ADJUSTMENT_APPLY, ADJUSTMENT_DECIDE,
             SETTLEMENT_MANAGE, SCREEN_VIEW, STATS_VIEW,
             AUDIT_LOG_VIEW, AUDIT_LOG_EXPORT, SYSTEM_MANAGE, USER_CREATE, MATERIAL_VIEW, MATERIAL_UPLOAD,
@@ -42,8 +43,8 @@ public final class RolePermissions {
     private static final Map<String, Set<String>> ROLE_MAP = Map.of(
             "ADMIN", ALL,
             "LEADER", Set.of(SUBMISSION_REVIEW, ADJUSTMENT_DECIDE, SCREEN_VIEW, STATS_VIEW,
-                    AUDIT_LOG_VIEW, SYSTEM_MANAGE, USER_CREATE, MATERIAL_VIEW),
-            "SCHOOL_OWNER", Set.of(INDICATOR_EDIT, ALLOCATION_EDIT, TASK_DISTRIBUTE,
+                    AUDIT_LOG_VIEW, SYSTEM_MANAGE, USER_CREATE, MATERIAL_VIEW, INDICATOR_BUDGET),
+            "SCHOOL_OWNER", Set.of(INDICATOR_EDIT, INDICATOR_BUDGET, ALLOCATION_EDIT, TASK_DISTRIBUTE,
                     ADJUSTMENT_APPLY, ADJUSTMENT_DECIDE, STATS_VIEW,
                     USER_CREATE, MATERIAL_VIEW, MATERIAL_UPLOAD),
             "UNIT_OWNER", Set.of(SUBMISSION_SUBMIT, SUBMISSION_REVIEW, ADJUSTMENT_DECIDE, STATS_VIEW,
@@ -75,6 +76,8 @@ public final class RolePermissions {
                     "新建、修改、归档计划以及管理模板", Set.of(), ADMIN_ONLY),
             new PermissionDefinition(INDICATOR_EDIT, "指标编辑", "计划与指标",
                     "维护本人负责范围内的指标与年度目标", Set.of("SCHOOL_OWNER"), ADMIN_ONLY),
+            new PermissionDefinition(INDICATOR_BUDGET, "指标预算管理", "计划与指标",
+                    "维护本人负责范围内指标的总预算并查看支出明细", Set.of("LEADER", "SCHOOL_OWNER"), ADMIN_ONLY),
             new PermissionDefinition(ALLOCATION_EDIT, "分解编辑", "计划与指标",
                     "维护指标到学院任务的分解草稿", Set.of("SCHOOL_OWNER"), ADMIN_ONLY),
             new PermissionDefinition(TASK_DISTRIBUTE, "任务下发", "任务执行",

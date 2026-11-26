@@ -1,9 +1,11 @@
 import { http } from '@/utils/request'
 import type {
+  BudgetPutRequest,
   CreateIndicatorRequest,
   ImportConfirmRequest,
   ImportConfirmResult,
   ImportPreviewResult,
+  IndicatorBudgetView,
   IndicatorDetail,
   IndicatorQuery,
   IndicatorTreeNode,
@@ -78,4 +80,23 @@ export function importConfirm(
   return http.post(`/plans/${planId}/indicators/import-confirm`, data, {
     headers: { 'Idempotency-Key': idempotencyKey },
   })
+}
+
+/** 维护 A 级指标总预算（万元）；幂等，totalBudget 传 null 清除预算 */
+export function putIndicatorBudget(
+  indicatorId: string,
+  data: BudgetPutRequest,
+  idempotencyKey: string,
+): Promise<IndicatorDetail> {
+  return http.put(`/indicators/${indicatorId}/budget`, data, {
+    headers: { 'Idempotency-Key': idempotencyKey },
+  })
+}
+
+/** 预算概览 + 支出明细（明细按当前用户可见任务过滤） */
+export function getIndicatorBudget(
+  indicatorId: string,
+  query: { page?: number; pageSize?: number; year?: number } = {},
+): Promise<IndicatorBudgetView> {
+  return http.get(`/indicators/${indicatorId}/budget`, query)
 }

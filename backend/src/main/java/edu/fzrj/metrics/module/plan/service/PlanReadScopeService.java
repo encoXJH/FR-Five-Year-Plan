@@ -12,6 +12,7 @@ import edu.fzrj.metrics.module.task.mapper.TaskMapper;
 import edu.fzrj.metrics.module.task.service.TaskReadScopeService;
 import edu.fzrj.metrics.module.training.entity.TrainingSheet;
 import edu.fzrj.metrics.module.training.mapper.TrainingSheetMapper;
+import edu.fzrj.metrics.module.training.mapper.TrainingSheetStaffMapper;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
 import org.springframework.stereotype.Service;
@@ -34,15 +35,18 @@ public class PlanReadScopeService {
     private final TaskMapper taskMapper;
     private final TaskReadScopeService taskReadScopeService;
     private final TrainingSheetMapper trainingSheetMapper;
+    private final TrainingSheetStaffMapper trainingSheetStaffMapper;
 
     public PlanReadScopeService(DataScopeService dataScopeService, IndicatorMapper indicatorMapper,
                                 TaskMapper taskMapper, TaskReadScopeService taskReadScopeService,
-                                TrainingSheetMapper trainingSheetMapper) {
+                                TrainingSheetMapper trainingSheetMapper,
+                                TrainingSheetStaffMapper trainingSheetStaffMapper) {
         this.dataScopeService = dataScopeService;
         this.indicatorMapper = indicatorMapper;
         this.taskMapper = taskMapper;
         this.taskReadScopeService = taskReadScopeService;
         this.trainingSheetMapper = trainingSheetMapper;
+        this.trainingSheetStaffMapper = trainingSheetStaffMapper;
     }
 
     public List<Plan> filterVisiblePlans(List<Plan> plans) {
@@ -164,9 +168,10 @@ public class PlanReadScopeService {
                     .forEach(sheet -> planIds.add(sheet.getPlanId()));
         }
         if (dataScopeService.isAssignedScope(user)) {
-            if (!user.getUnitIds().isEmpty()) {
+            List<Long> assignedSheetIds = trainingSheetStaffMapper.selectValidSheetIds(user.getUserId());
+            if (!assignedSheetIds.isEmpty()) {
                 trainingSheetMapper.selectList(new LambdaQueryWrapper<TrainingSheet>()
-                                .in(TrainingSheet::getUnitId, user.getUnitIds())
+                                .in(TrainingSheet::getId, assignedSheetIds)
                                 .eq(TrainingSheet::getDeleted, 0L)
                                 .select(TrainingSheet::getPlanId))
                         .forEach(sheet -> planIds.add(sheet.getPlanId()));

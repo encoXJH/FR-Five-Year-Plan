@@ -158,7 +158,7 @@ class ReviewServiceTest {
     }
 
     @Test
-    void 院审核减后仅推进到校审且不重算并通知等待终审() {
+    void 管理员创建干事仍按归属负责人院审且仅推进到校审() {
         Submission submission = staffSubmission(1L);
         submission.setCreatedBy(99L);
         when(submissionService.requireSubmission(1L)).thenReturn(submission);
@@ -171,7 +171,9 @@ class ReviewServiceTest {
         assertEquals("PENDING_REVIEW", submission.getStatus());
         assertEquals("LEADER_REVIEW", submission.getCurrentReviewNode());
         assertEquals(new BigDecimal("4"), submission.getApprovedAmount());
-        assertEquals("UNIT_REVIEW", capturedReview().getReviewNode());
+        Review review = capturedReview();
+        assertEquals("UNIT_REVIEW", review.getReviewNode());
+        assertEquals(20L, review.getReviewerId());
         verify(actualRecalcService, never()).recalcTaskYear(anyLong());
         ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
         verify(notificationMapper).insert(captor.capture());
@@ -658,11 +660,98 @@ class ReviewServiceTest {
         verify(submissionMapper, never()).selectPage(any(), any());
     }
 
+    @Test
+    void 终审通过默认继承填报支出() {
+        Submission submission = submission(1L);
+        submission.setExpenseAmount(new BigDecimal("2.50"));
+        when(submissionService.requireSubmission(1L)).thenReturn(submission);
+
+        reviewService.review(1L, reviewRequest());
+
+        assertEquals(new BigDecimal("2.50"), submission.getApprovedExpenseAmount());
+        Review review = capturedReview();
+        assertEquals(new BigDecimal("2.50"), review.getExpenseAmount());
+        assertEquals(new BigDecimal("2.50"), review.getApprovedExpenseAmount());
+    }
+
+    @Test
+    void 终审未传认定支出时继承院审认定值() {
+        Submission submission = submission(1L);
+        submission.setExpenseAmount(new BigDecimal("10"));
+        submission.setApprovedExpenseAmount(new BigDecimal("6"));
+        when(submissionService.requireSubmission(1L)).thenReturn(submission);
+
+        reviewService.review(1L, reviewRequest());
+
+        assertEquals(new BigDecimal("6"), submission.getApprovedExpenseAmount());
+    }
+
+    @Test
+    void 终审认定支出不能大于院审认定支出() {
+        Submission submission = submission(1L);
+        submission.setExpenseAmount(new BigDecimal("10"));
+        submission.setApprovedExpenseAmount(new BigDecimal("6"));
+        when(submissionService.requireSubmission(1L)).thenReturn(submission);
+        SubmissionDtos.ReviewRequest request = reviewRequest();
+        request.setApprovedExpenseAmount(new BigDecimal("8"));
+
+        BizException ex = assertThrows(BizException.class, () -> reviewService.review(1L, request));
+        assertEquals(ErrorCode.CONFIRMED_EXCEEDS_SUBMITTED, ex.getErrorCode());
+    }
+
+    @Test
+    void 院审认定支出不能大于填报支出() {
+        Submission submission = staffSubmission(1L);
+        submission.setExpenseAmount(new BigDecimal("3"));
+        when(submissionService.requireSubmission(1L)).thenReturn(submission);
+        allowUnitOwner(20L, 40L);
+        SubmissionDtos.ReviewRequest request = reviewRequest();
+        request.setApprovedExpenseAmount(new BigDecimal("4"));
+
+        BizException ex = assertThrows(BizException.class, () -> reviewService.review(1L, request));
+        assertEquals(ErrorCode.CONFIRMED_EXCEEDS_SUBMITTED, ex.getErrorCode());
+    }
+
+    @Test
+    void 填报未填支出时不能认定支出() {
+        Submission submission = submission(1L);
+        when(submissionService.requireSubmission(1L)).thenReturn(submission);
+        SubmissionDtos.ReviewRequest request = reviewRequest();
+        request.setApprovedExpenseAmount(new BigDecimal("1"));
+
+        BizException ex = assertThrows(BizException.class, () -> reviewService.review(1L, request));
+        assertEquals(ErrorCode.CONFIRMED_EXCEEDS_SUBMITTED, ex.getErrorCode());
+    }
+
+    @Test
+    void 认定支出负数拒绝() {
+        Submission submission = submission(1L);
+        when(submissionService.requireSubmission(1L)).thenReturn(submission);
+        SubmissionDtos.ReviewRequest request = reviewRequest();
+        request.setApprovedExpenseAmount(new BigDecimal("-1"));
+
+        BizException ex = assertThrows(BizException.class, () -> reviewService.review(1L, request));
+        assertEquals(ErrorCode.PARAM_INVALID, ex.getErrorCode());
+    }
+
+    @Test
+    void 终审认定支出超预算时拒绝() {
+        Submission submission = submission(1L);
+        submission.setExpenseAmount(new BigDecimal("20"));
+        when(submissionService.requireSubmission(1L)).thenReturn(submission);
+        doThrow(new BizException(ErrorCode.BUDGET_EXCEEDED)).when(submissionService)
+                .checkBudgetLimit(any(), any(), any());
+
+        BizException ex = assertThrows(BizException.class, () -> reviewService.review(1L, reviewRequest()));
+        assertEquals(ErrorCode.BUDGET_EXCEEDED, ex.getErrorCode());
+    }
+
     private void allowUnitOwner(Long staffOwnerId, Long staffId) {
         login(20L, "UNIT_OWNER");
         SysUser staff = new SysUser();
         staff.setId(staffId);
         staff.setOwnerUserId(staffOwnerId);
+        staff.setCreatedBy(99L);
         when(sysUserMapper.selectOne(any())).thenReturn(staff);
     }
 

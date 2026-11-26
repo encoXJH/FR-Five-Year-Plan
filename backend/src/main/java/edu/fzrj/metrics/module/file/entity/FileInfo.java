@@ -37,7 +37,7 @@ public class FileInfo {
     /** 分类：DOCUMENT 文档 / PDF / IMAGE 图片 / VIDEO 视频 / ARCHIVE 压缩包 */
     private String category;
 
-    /** 用途：SUBMISSION_ATTACHMENT 填报材料 / ADJUSTMENT_ATTACHMENT 调整附件 / MILESTONE_ATTACHMENT 里程碑附件 / IMPORT_FILE 导入文件 */
+    /** 用途：填报、调整、里程碑、指标、培训项目附件或导入文件 */
     private String bizType;
 
     /** 状态：TEMP 临时（超 24h 未绑定自动清理）/ BOUND 已绑定 */

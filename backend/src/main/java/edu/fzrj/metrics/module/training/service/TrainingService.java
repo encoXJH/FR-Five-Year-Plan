@@ -9,6 +9,7 @@ import edu.fzrj.metrics.common.error.ErrorCode;
 import edu.fzrj.metrics.common.exception.BizException;
 import edu.fzrj.metrics.module.plan.entity.Plan;
 import edu.fzrj.metrics.module.plan.mapper.PlanMapper;
+import edu.fzrj.metrics.module.file.dto.FileInfoResponse;
 import edu.fzrj.metrics.module.system.entity.OrgUnit;
 import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.system.entity.UserRole;
@@ -59,12 +60,15 @@ public class TrainingService {
     private final UserUnitMapper userUnitMapper;
     private final ObjectMapper objectMapper;
     private final TrainingExcelService excelService;
+    private final TrainingAccessService accessService;
+    private final TrainingAttachmentService attachmentService;
 
     public TrainingService(PlanMapper planMapper, TrainingSheetMapper sheetMapper,
                            TrainingProjectMapper projectMapper, TrainingReviewMapper reviewMapper,
                            OrgUnitMapper orgUnitMapper, SysUserMapper sysUserMapper,
                            UserRoleMapper userRoleMapper, UserUnitMapper userUnitMapper,
-                           ObjectMapper objectMapper, TrainingExcelService excelService) {
+                           ObjectMapper objectMapper, TrainingExcelService excelService,
+                           TrainingAccessService accessService, TrainingAttachmentService attachmentService) {
         this.planMapper = planMapper;
         this.sheetMapper = sheetMapper;
         this.projectMapper = projectMapper;
@@ -75,6 +79,8 @@ public class TrainingService {
         this.userUnitMapper = userUnitMapper;
         this.objectMapper = objectMapper;
         this.excelService = excelService;
+        this.accessService = accessService;
+        this.attachmentService = attachmentService;
     }
 
     @Transactional
@@ -136,21 +142,20 @@ public class TrainingService {
         if (!admin && !leader && !unitOwner && !staff) {
             throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
         }
-        if (!admin && !leader && user.getUnitIds().isEmpty()) {
-            return List.of();
-        }
+        Set<Long> assignedSheetIds = staff ? accessService.validAssignedSheetIds(user.getUserId()) : Set.of();
         LambdaQueryWrapper<TrainingSheet> query = new LambdaQueryWrapper<TrainingSheet>()
                 .eq(TrainingSheet::getDeleted, 0L)
                 .eq(planId != null, TrainingSheet::getPlanId, planId)
                 .orderByDesc(TrainingSheet::getUpdatedAt)
                 .orderByDesc(TrainingSheet::getId);
+        List<TrainingSheet> sheets = sheetMapper.selectList(query);
         if (!admin && !leader) {
-            query.in(TrainingSheet::getUnitId, user.getUnitIds());
-            if (!staff) {
-                query.eq(TrainingSheet::getOwnerId, user.getUserId());
-            }
+            sheets = sheets.stream()
+                    .filter(sheet -> accessService.isOwner(sheet, user)
+                            || staff && assignedSheetIds.contains(sheet.getId()))
+                    .toList();
         }
-        return summaries(sheetMapper.selectList(query));
+        return summaries(sheets);
     }
 
     public List<TrainingDtos.SheetSummary> summaries(List<TrainingSheet> sheets) {
@@ -189,7 +194,8 @@ public class TrainingService {
                     sheet.getVersion(), sheet.getUpdatedAt(), unitNames.get(sheet.getUnitId()),
                     userNames.get(sheet.getOwnerId()), sheet.getSubmitterRole(), sheet.getCurrentReviewNode(),
                     sheet.getRevisionNo(), sheet.getSubmittedBy(), userNames.get(sheet.getSubmittedBy()),
-                    sheet.getSubmittedAt(), !archived && canEdit(sheet, user), canReview);
+                    sheet.getSubmittedAt(), !archived && canEdit(sheet, user), canReview,
+                    accessService.canAssignStaff(sheet, plan, user));
         }).toList();
     }
 
@@ -208,11 +214,13 @@ public class TrainingService {
         List<TrainingProject> existing = loadProjects(sheetId);
         Map<Long, TrainingProject> existingById = existing.stream()
                 .collect(Collectors.toMap(TrainingProject::getId, Function.identity()));
+        Map<Long, List<Long>> existingFiles = attachmentService.fileIdsByProjectIds(existingById.keySet());
         List<FieldError> errors = new ArrayList<>();
         Set<Long> requestedIds = new HashSet<>();
         Set<Integer> rowNumbers = new HashSet<>();
         List<Map<String, Object>> normalized = new ArrayList<>();
         List<String> jsonRows = new ArrayList<>();
+        List<List<Long>> requestedFiles = new ArrayList<>();
         for (int i = 0; i < request.getProjects().size(); i++) {
             TrainingDtos.ProjectInput input = request.getProjects().get(i);
             TrainingProject row = input.getId() == null ? null : existingById.get(input.getId());
@@ -226,6 +234,8 @@ public class TrainingService {
             if (input.getRowNo() == null || input.getRowNo() < 1 || !rowNumbers.add(input.getRowNo())) {
                 errors.add(new FieldError("projects[" + i + "].rowNo", "项目行号必须大于 0 且不能重复"));
             }
+            List<Long> fileIds = attachmentService.normalizeFileIds(input.getFileIds());
+            requestedFiles.add(fileIds);
             boolean editable = row == null || EDITABLE_STATUSES.contains(row.getStatus());
             String reporter = editable ? user.getName()
                     : readData(row).get("c57") instanceof String name ? name : null;
@@ -234,9 +244,14 @@ public class TrainingService {
             errors.addAll(result.errors());
             normalized.add(result.data());
             jsonRows.add(writeData(result.data()));
-            if (row != null && !editable && (!Objects.equals(row.getRowNo(), input.getRowNo())
-                    || !sameData(readData(row), result.data()))) {
-                errors.add(new FieldError("projects[" + i + "].data", "待审核或已通过项目不能修改"));
+            if (row != null && !editable) {
+                if (!Objects.equals(row.getRowNo(), input.getRowNo())
+                        || !sameData(readData(row), result.data())) {
+                    errors.add(new FieldError("projects[" + i + "].data", "待审核或已通过项目不能修改"));
+                }
+                if (!attachmentService.sameFiles(existingFiles.getOrDefault(row.getId(), List.of()), fileIds)) {
+                    errors.add(new FieldError("projects[" + i + "].fileIds", "待审核或已通过项目不能修改附件"));
+                }
             }
         }
         for (TrainingProject row : existing) {
@@ -251,6 +266,7 @@ public class TrainingService {
         boolean changed = false;
         for (TrainingProject row : existing) {
             if (!requestedIds.contains(row.getId())) {
+                attachmentService.removeAll(List.of(row.getId()));
                 row.setDeleted(row.getId());
                 row.setUpdatedBy(user.getUserId());
                 projectMapper.updateById(row);
@@ -270,15 +286,19 @@ public class TrainingService {
                 row.setCreatedBy(user.getUserId());
                 row.setUpdatedBy(user.getUserId());
                 projectMapper.insert(row);
+                attachmentService.replace(row.getId(), requestedFiles.get(i));
                 changed = true;
-            } else if (EDITABLE_STATUSES.contains(row.getStatus())
-                    && (!Objects.equals(row.getRowNo(), input.getRowNo())
-                    || !sameData(readData(row), normalized.get(i)))) {
-                row.setRowNo(input.getRowNo());
-                row.setDataJson(jsonRows.get(i));
-                row.setUpdatedBy(user.getUserId());
-                projectMapper.updateById(row);
-                changed = true;
+            } else if (EDITABLE_STATUSES.contains(row.getStatus())) {
+                boolean dataChanged = !Objects.equals(row.getRowNo(), input.getRowNo())
+                        || !sameData(readData(row), normalized.get(i));
+                if (dataChanged) {
+                    row.setRowNo(input.getRowNo());
+                    row.setDataJson(jsonRows.get(i));
+                    row.setUpdatedBy(user.getUserId());
+                    projectMapper.updateById(row);
+                }
+                boolean filesChanged = attachmentService.replace(row.getId(), requestedFiles.get(i));
+                changed |= dataChanged || filesChanged;
             }
         }
         if (changed) {
@@ -360,6 +380,8 @@ public class TrainingService {
         for (TrainingReview review : history) {
             latestByProject.put(review.getProjectId(), review);
         }
+        Map<Long, List<FileInfoResponse>> filesByProject = attachmentService.filesByProjectIds(
+                projects.stream().map(TrainingProject::getId).toList());
         List<TrainingDtos.Project> items = projects.stream()
                 .map(project -> new TrainingDtos.Project(project.getId(), project.getRowNo(), readData(project),
                         project.getStatus(), project.getSubmitterRole(), project.getCurrentReviewNode(),
@@ -367,7 +389,8 @@ public class TrainingService {
                         summary.canEdit() && canEdit(sheet, project, user),
                         summary.canReview() && canReview(sheet, project, user),
                         latestByProject.containsKey(project.getId())
-                                ? latestByProject.get(project.getId()).getComment() : null))
+                                ? latestByProject.get(project.getId()).getComment() : null,
+                        filesByProject.getOrDefault(project.getId(), List.of())))
                 .toList();
         List<Long> reviewerIds = history.stream().map(TrainingReview::getReviewerId).distinct().toList();
         Map<Long, String> reviewerNames = reviewerIds.isEmpty() ? Map.of()
@@ -402,7 +425,10 @@ public class TrainingService {
         snapshot.put("currentReviewNode", sheet.getCurrentReviewNode());
         snapshot.put("revisionNo", sheet.getRevisionNo());
         snapshot.put("version", sheet.getVersion());
-        snapshot.put("projects", loadProjects(sheetId).stream()
+        List<TrainingProject> projects = loadProjects(sheetId);
+        Map<Long, List<Long>> filesByProject = attachmentService.fileIdsByProjectIds(
+                projects.stream().map(TrainingProject::getId).toList());
+        snapshot.put("projects", projects.stream()
                 .map(project -> {
                     Map<String, Object> item = new LinkedHashMap<String, Object>();
                     item.put("id", project.getId());
@@ -411,6 +437,7 @@ public class TrainingService {
                     item.put("currentReviewNode", project.getCurrentReviewNode());
                     item.put("revisionNo", project.getRevisionNo());
                     item.put("data", readData(project));
+                    item.put("fileIds", filesByProject.getOrDefault(project.getId(), List.of()));
                     return item;
                 })
                 .toList());
@@ -455,16 +482,7 @@ public class TrainingService {
     }
 
     private void requireReadAccess(TrainingSheet sheet) {
-        LoginUser user = SecurityUtils.getLoginUser();
-        if (user.getRoles().contains("ADMIN")
-                || user.getRoles().contains("LEADER") && user.getPermissions().contains("submission:review")) {
-            return;
-        }
-        boolean sameUnit = user.getUnitIds().contains(sheet.getUnitId());
-        if (sameUnit && (user.getRoles().contains("UNIT_OWNER") || user.getRoles().contains("STAFF"))) {
-            return;
-        }
-        throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
+        accessService.requireReadAccess(sheet, SecurityUtils.getLoginUser());
     }
 
     private void requireEditAccess(TrainingSheet sheet) {
@@ -474,14 +492,7 @@ public class TrainingService {
     }
 
     private boolean canFill(TrainingSheet sheet, LoginUser user) {
-        if (user.getRoles().contains("ADMIN")) {
-            return true;
-        }
-        if (!user.getUnitIds().contains(sheet.getUnitId())) {
-            return false;
-        }
-        return user.getRoles().contains("STAFF")
-                || user.getRoles().contains("UNIT_OWNER") && user.getUserId().equals(sheet.getOwnerId());
+        return accessService.canFill(sheet, user);
     }
 
     public boolean canEdit(TrainingSheet sheet, LoginUser user) {

@@ -3,7 +3,10 @@ package edu.fzrj.metrics.module.indicator.dto;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+import edu.fzrj.metrics.common.api.PageResult;
 import edu.fzrj.metrics.common.api.UserRef;
+import edu.fzrj.metrics.common.page.PageQuery;
+import edu.fzrj.metrics.module.submission.dto.SubmissionDtos;
 import edu.fzrj.metrics.module.task.dto.TaskDtos;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -11,6 +14,7 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -152,6 +156,8 @@ public final class IndicatorDtos {
             UserRef owner,
             BigDecimal baselineValue,
             BigDecimal totalTarget,
+            BigDecimal totalBudget,
+            BigDecimal spentBudget,
             List<YearTargetView> yearTargets,
             String status,
             Integer sort,
@@ -220,6 +226,8 @@ public final class IndicatorDtos {
             Integer minFileCount,
             BigDecimal baselineValue,
             BigDecimal totalTarget,
+            BigDecimal totalBudget,
+            BigDecimal spentBudget,
             UserRef owner,
             Integer sort,
             String status,
@@ -229,6 +237,50 @@ public final class IndicatorDtos {
             Integer version,
             LocalDateTime createdAt,
             LocalDateTime updatedAt) {
+    }
+
+    // ---------------- 预算 ----------------
+
+    /** 维护指标总预算（万元）；totalBudget 为 null 表示清除预算 */
+    @Data
+    public static class BudgetPutRequest {
+        @NotNull(message = "缺少 version（乐观锁版本号）")
+        private Integer version;
+
+        private BigDecimal totalBudget;
+
+        @NotBlank(message = "预算调整原因必填")
+        @Size(max = 500, message = "预算调整原因不能超过 500 字")
+        private String reason;
+    }
+
+    /** 预算支出明细查询 */
+    @EqualsAndHashCode(callSuper = true)
+    @Data
+    public static class BudgetQuery extends PageQuery {
+        private Integer year;
+    }
+
+    /** 单条支出记录（含预算佐证材料） */
+    public record BudgetExpenseItem(
+            @JsonSerialize(using = ToStringSerializer.class) Long submissionId,
+            String taskCode,
+            UnitRef unit,
+            Integer year,
+            BigDecimal expenseAmount,
+            BigDecimal approvedExpenseAmount,
+            String status,
+            LocalDateTime submittedAt,
+            UserRef submittedBy,
+            LocalDateTime reviewedAt,
+            List<SubmissionDtos.FileView> budgetFiles) {
+    }
+
+    /** 预算概览 + 支出明细分页 */
+    public record BudgetView(
+            BigDecimal totalBudget,
+            BigDecimal spentBudget,
+            PageResult<BudgetExpenseItem> expenses) {
     }
 
     // ---------------- 导入 ----------------

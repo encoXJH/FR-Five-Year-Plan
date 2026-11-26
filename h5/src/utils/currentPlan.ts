@@ -14,8 +14,11 @@ export function getCurrentPlan(): CurrentPlanContext | null {
     const raw = localStorage.getItem(KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as CurrentPlanContext
-    return parsed && parsed.id && parsed.planType === 'INDICATOR' ? parsed : null
+    if (parsed && parsed.id && parsed.planType === 'INDICATOR') return parsed
+    clearCurrentPlan()
+    return null
   } catch {
+    clearCurrentPlan()
     return null
   }
 }

@@ -10,6 +10,7 @@ import SubmissionTimeline from './components/SubmissionTimeline.vue'
 import { getTask } from '@/api/task'
 import {
   createSubmission,
+  getSubmission,
   listSubmissions,
   submitSubmission,
   updateSubmission,
@@ -18,7 +19,7 @@ import {
 import { useUserStore } from '@/stores/user'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { ApiError } from '@/utils/request'
-import { formatGrowth, formatPercent } from '@/utils/format'
+import { formatGrowth, formatMoney, formatPercent } from '@/utils/format'
 import { formatTargetValue } from '@/utils/indicator'
 import { percentToDisplay, percentToStore } from '@/utils/allocation'
 import { shouldApplyRefreshResponse, useAutoRefresh } from '@/utils/autoRefresh'
@@ -33,9 +34,9 @@ import {
   serializeSubmissionRemark,
 } from '@/utils/submission'
 import { canWriteTask, formatDeadline, primaryTaskIndicator, progressPercentage } from '@/utils/task'
-import type { FileInfo } from '@/types/file'
+import type { FileInfo, FileView } from '@/types/file'
 import type { StatCaliber } from '@/types/enums'
-import type { SubmissionListItem } from '@/types/submission'
+import type { SubmissionDetail, SubmissionListItem } from '@/types/submission'
 import type { TaskDetail, TaskYearItem } from '@/types/task'
 
 const route = useRoute()
@@ -180,10 +181,15 @@ const form = reactive({
   remark: '',
   sourceNote: '',
   reason: '',
+  expenseAmount: undefined as number | undefined,
 })
 
 const fileIds = ref<string[]>([])
 const initialFiles = ref<FileInfo[]>([])
+const budgetFileIds = ref<string[]>([])
+const budgetInitialFiles = ref<FileInfo[]>([])
+const budgetFilesKey = ref(0)
+const budgetFilesLoading = ref(false)
 const editingId = ref<string | null>(null)
 const editingVersion = ref(0)
 const dirty = ref(false)
@@ -194,12 +200,31 @@ const fileIdsDirty = computed(() => {
   return fileIds.value.length !== bound.length || fileIds.value.some((id) => !bound.includes(id))
 })
 
+const budgetFilesDirty = computed(() => {
+  const bound = budgetInitialFiles.value.map((file) => file.id)
+  return budgetFileIds.value.length !== bound.length || budgetFileIds.value.some((id) => !bound.includes(id))
+})
+
 function markDirty(): void {
   if (formReadonly.value || yearLocked.value) return
   dirty.value = true
 }
 
-function populate(): void {
+function toBudgetFileInfo(view: FileView): FileInfo {
+  return {
+    ...view,
+    bizType: 'BUDGET_ATTACHMENT',
+    status: 'BOUND',
+    transcodeStatus: null,
+    uploadedAt: '',
+    uploadedBy: null,
+  }
+}
+
+let budgetLoadGeneration = 0
+
+async function populate(): Promise<void> {
+  const generation = ++budgetLoadGeneration
   const target = isHistorical.value ? latestSubmission.value : editableSubmission.value
   editingId.value = isHistorical.value ? null : (target?.id ?? null)
   editingVersion.value = isHistorical.value ? 0 : (target?.version ?? 0)
@@ -215,9 +240,34 @@ function populate(): void {
   form.remark = remarkParts.remark
   form.sourceNote = target?.sourceNote ?? ''
   form.reason = ''
+  form.expenseAmount = target?.expenseAmount ?? undefined
   fileIds.value = target?.files?.map((file) => file.id) ?? target?.fileIds ?? []
   initialFiles.value = target?.files ?? []
+  const budgetViews = (target as SubmissionDetail | null)?.budgetFiles
+  const budgetFiles = (budgetViews ?? []).map(toBudgetFileInfo)
+  budgetInitialFiles.value = budgetFiles
+  budgetFileIds.value = budgetFiles.map((file) => file.id)
+  budgetFilesKey.value += 1
   dirty.value = false
+  const id = editingId.value
+  if (budgetViews || !id) {
+    budgetFilesLoading.value = false
+    return
+  }
+  budgetFilesLoading.value = true
+  try {
+    const detail = await getSubmission(id)
+    if (generation !== budgetLoadGeneration || editingId.value !== id) return
+    if (dirty.value || fileIdsDirty.value || budgetFilesDirty.value) return
+    const files = (detail.budgetFiles ?? []).map(toBudgetFileInfo)
+    budgetInitialFiles.value = files
+    budgetFileIds.value = files.map((file) => file.id)
+    budgetFilesKey.value += 1
+  } catch {
+    /* 预算佐证加载失败不阻断填报 */
+  } finally {
+    if (generation === budgetLoadGeneration) budgetFilesLoading.value = false
+  }
 }
 
 // ---------- 实时计算展示 ----------
@@ -297,11 +347,11 @@ async function reload(silent = false): Promise<void> {
     if (!shouldApplyRefreshResponse({
       current: generation === reloadGeneration,
       silent,
-      skipping: dirty.value || fileIdsDirty.value,
+      skipping: dirty.value || fileIdsDirty.value || budgetFilesDirty.value,
     })) return
     task.value = detail
     submissions.value = list
-    populate()
+    void populate()
   } catch {
     if (!silent && generation === reloadGeneration) loadFailed.value = true
   } finally {
@@ -335,6 +385,8 @@ async function saveDraft(): Promise<void> {
       remark: serializeSubmissionRemark(caliber.value, form.remark, form.completionDate),
       sourceNote: form.sourceNote || null,
       fileIds: fileIds.value,
+      expenseAmount: form.expenseAmount ?? null,
+      budgetFileIds: budgetFileIds.value,
       proxyReason: isDelegateFill.value ? form.reason || null : undefined,
       version: editingVersion.value,
     })
@@ -347,6 +399,8 @@ async function saveDraft(): Promise<void> {
     remark: serializeSubmissionRemark(caliber.value, form.remark, form.completionDate),
     sourceNote: form.sourceNote || null,
     fileIds: fileIds.value,
+    expenseAmount: form.expenseAmount ?? null,
+    budgetFileIds: budgetFileIds.value,
     proxyReason: isDelegateFill.value ? form.reason || null : undefined,
   })
   editingId.value = created.id
@@ -408,6 +462,10 @@ async function handleSubmit(): Promise<void> {
   const errors = validateForSubmit()
   if (errors.length > 0) {
     ElMessage.error(errors[0])
+    return
+  }
+  if ((form.expenseAmount ?? 0) > 0 && budgetFileIds.value.length === 0) {
+    ElMessage.warning('本次支出大于 0，必须上传至少 1 份预算佐证材料（60002）')
     return
   }
   submitError.value = null
@@ -492,7 +550,7 @@ onBeforeRouteLeave(async () => {
 
 onMounted(reload)
 
-useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.value })
+useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.value || budgetFilesDirty.value })
 </script>
 
 <template>
@@ -610,6 +668,12 @@ useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.val
               <el-descriptions :column="1" border size="small">
                 <el-descriptions-item label="填报值">
                   <span class="readonly-value">{{ pendingValueText }}</span>
+                </el-descriptions-item>
+                <el-descriptions-item v-if="pendingSubmission.expenseAmount != null" label="本次支出">
+                  {{ formatMoney(pendingSubmission.expenseAmount) }} 万
+                </el-descriptions-item>
+                <el-descriptions-item v-if="pendingSubmission.approvedExpenseAmount != null" label="认定支出">
+                  {{ formatMoney(pendingSubmission.approvedExpenseAmount) }} 万
                 </el-descriptions-item>
                 <el-descriptions-item v-if="pendingSubmission.sourceNote" label="数据来源说明">
                   {{ pendingSubmission.sourceNote }}
@@ -780,6 +844,17 @@ useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.val
                   @input="markDirty"
                 />
               </el-form-item>
+
+              <el-form-item label="本次支出（万元）">
+                <el-input-number
+                  v-model="form.expenseAmount"
+                  :min="0"
+                  :precision="2"
+                  controls-position="right"
+                  placeholder="选填"
+                  @change="markDirty"
+                />
+              </el-form-item>
             </el-form>
 
             <el-divider class="material-divider" />
@@ -794,6 +869,19 @@ useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.val
               :key="`${editingId ?? 'new'}-${formReadonly}-${yearLocked}`"
               v-model="fileIds"
               :initial-files="initialFiles"
+              :disabled="formReadonly || yearLocked"
+              @update:model-value="markDirty"
+            />
+
+            <el-divider class="material-divider" />
+
+            <h3 class="section-title">预算佐证材料</h3>
+            <p class="budget-hint">本次支出大于 0 时必须上传至少 1 份预算佐证；支出随两级审核认定，校审通过才计入已花预算</p>
+            <MaterialUploader
+              :key="`budget-${budgetFilesKey}-${formReadonly}-${yearLocked}`"
+              v-model="budgetFileIds"
+              biz-type="BUDGET_ATTACHMENT"
+              :initial-files="budgetInitialFiles"
               :disabled="formReadonly || yearLocked"
               @update:model-value="markDirty"
             />
@@ -844,8 +932,8 @@ useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.val
       <div v-if="yearItem && !formReadonly && !yearLocked" class="sticky-bar">
         <span class="submit-flow-hint">{{ submitFlowHint }}</span>
         <el-button @click="goBack">取消</el-button>
-        <el-button :loading="saving" :disabled="submitting" @click="handleSaveDraft">存草稿</el-button>
-        <el-button type="primary" :loading="submitting" :disabled="saving" @click="handleSubmit">
+        <el-button :loading="saving" :disabled="submitting || budgetFilesLoading" @click="handleSaveDraft">存草稿</el-button>
+        <el-button type="primary" :loading="submitting" :disabled="saving || budgetFilesLoading" @click="handleSubmit">
           {{ submitButtonText }}
         </el-button>
       </div>
@@ -962,6 +1050,12 @@ useAutoRefresh(() => reload(true), { skip: () => dirty.value || fileIdsDirty.val
 
 .material-divider {
   margin: var(--space-4) 0;
+}
+
+.budget-hint {
+  margin: 0 0 var(--space-3);
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .side-card {

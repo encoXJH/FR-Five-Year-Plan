@@ -22,8 +22,11 @@ import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
@@ -35,12 +38,17 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -59,7 +67,9 @@ class TrainingServiceTest {
     @Mock private UserUnitMapper userUnitMapper;
     @Spy private ObjectMapper objectMapper = new ObjectMapper();
     @Mock private TrainingExcelService excelService;
-    @InjectMocks private TrainingService trainingService;
+    @Mock private TrainingAccessService accessService;
+    @Mock private TrainingAttachmentService attachmentService;
+    @Spy @InjectMocks private TrainingService trainingService;
 
     @BeforeAll
     static void initMybatis() {
@@ -68,6 +78,14 @@ class TrainingServiceTest {
         TableInfoHelper.initTableInfo(assistant, TrainingSheet.class);
         TableInfoHelper.initTableInfo(assistant, TrainingProject.class);
         TableInfoHelper.initTableInfo(assistant, TrainingReview.class);
+    }
+
+    @BeforeEach
+    void stubAttachments() {
+        lenient().when(attachmentService.fileIdsByProjectIds(any())).thenReturn(Map.of());
+        lenient().when(attachmentService.filesByProjectIds(any())).thenReturn(Map.of());
+        lenient().when(attachmentService.normalizeFileIds(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(attachmentService.sameFiles(any(), any())).thenReturn(true);
     }
 
     @AfterEach
@@ -79,6 +97,8 @@ class TrainingServiceTest {
     void 跨学院负责人读取采集表返回20005() {
         TrainingSheet sheet = sheet(1L, 99L);
         when(sheetMapper.selectOne(any())).thenReturn(sheet);
+        doThrow(new BizException(edu.fzrj.metrics.common.error.ErrorCode.DATA_SCOPE_DENIED))
+                .when(accessService).requireReadAccess(any(), any());
         login(100L, 15L);
 
         BizException error = assertThrows(BizException.class, () -> trainingService.detail(1L));
@@ -197,10 +217,11 @@ class TrainingServiceTest {
     }
 
     @Test
-    void 同学院干事可填写草稿但没有审核权限() {
+    void 已分配干事可填写草稿但没有审核权限() {
         TrainingSheet sheet = sheet(1L, 99L);
         LoginUser staff = new LoginUser(100L, "staff", "干事", 14L,
                 List.of("STAFF"), List.of("training:fill"));
+        when(accessService.canFill(sheet, staff)).thenReturn(true);
 
         assertTrue(trainingService.canEdit(sheet, staff));
         assertFalse(trainingService.canReview(sheet, staff));
@@ -229,6 +250,99 @@ class TrainingServiceTest {
     }
 
     @Test
+    void 多角色列表返回本人负责表与已分配表的并集() {
+        TrainingSheet owned = sheet(1L, 100L);
+        TrainingSheet assigned = sheet(2L, 99L);
+        TrainingSheet unrelated = sheet(3L, 98L);
+        LoginUser user = new LoginUser(100L, "staff", "干事", 14L,
+                List.of("STAFF", "UNIT_OWNER"), List.of("training:fill"));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(user, null, List.of()));
+        when(accessService.validAssignedSheetIds(100L)).thenReturn(Set.of(2L));
+        when(accessService.isOwner(owned, user)).thenReturn(true);
+        when(sheetMapper.selectList(any())).thenReturn(List.of(owned, assigned, unrelated));
+        when(planMapper.selectBatchIds(List.of(2L))).thenReturn(List.of(trainingPlan("ACTIVE")));
+        when(projectMapper.selectList(any())).thenReturn(List.of());
+
+        List<Long> sheetIds = trainingService.list(null).stream().map(TrainingDtos.SheetSummary::id).toList();
+
+        assertEquals(List.of(1L, 2L), sheetIds);
+    }
+
+    @Test
+    void 新项目插入取得项目编号后再绑定附件() {
+        TrainingSheet sheet = sheet(1L, 99L);
+        prepareUnarchivedSheet(sheet);
+        when(projectMapper.selectList(any())).thenReturn(List.of());
+        doAnswer(invocation -> {
+            invocation.getArgument(0, TrainingProject.class).setId(55L);
+            return 1;
+        }).when(projectMapper).insert(any(TrainingProject.class));
+        when(sheetMapper.updateById(any(TrainingSheet.class))).thenReturn(1);
+        doReturn(new TrainingDtos.Detail(null, List.of(), List.of(), List.of()))
+                .when(trainingService).detail(1L);
+        login(99L, 14L);
+        TrainingDtos.SaveProjectsRequest request = saveRequest(projectInput(null, 1, Map.of(), List.of(50L)));
+
+        trainingService.saveProjects(1L, request);
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(projectMapper, attachmentService);
+        order.verify(projectMapper).insert(any(TrainingProject.class));
+        order.verify(attachmentService).replace(55L, List.of(50L));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void 仅新增或移除附件也视为变化并推进采集表版本(boolean added) {
+        TrainingSheet sheet = sheet(1L, 99L);
+        prepareUnarchivedSheet(sheet);
+        TrainingProject project = project(10L, "DRAFT", "{\"c57\":\"测试人\"}");
+        List<Long> requestedFiles = added ? List.of(50L) : List.of();
+        when(projectMapper.selectList(any())).thenReturn(List.of(project));
+        if (!added) {
+            when(attachmentService.fileIdsByProjectIds(any())).thenReturn(Map.of(10L, List.of(50L)));
+        }
+        when(attachmentService.replace(10L, requestedFiles)).thenReturn(true);
+        doAnswer(invocation -> {
+            TrainingSheet updated = invocation.getArgument(0);
+            updated.setVersion(updated.getVersion() + 1);
+            return 1;
+        }).when(sheetMapper).updateById(any(TrainingSheet.class));
+        doReturn(new TrainingDtos.Detail(null, List.of(), List.of(), List.of()))
+                .when(trainingService).detail(1L);
+        login(99L, 14L);
+        TrainingDtos.SaveProjectsRequest request = saveRequest(
+                projectInput(10L, 1, Map.of("c57", "测试人"), requestedFiles));
+
+        trainingService.saveProjects(1L, request);
+
+        assertEquals(1, sheet.getVersion());
+        verify(projectMapper, never()).updateById(any(TrainingProject.class));
+        verify(attachmentService).replace(10L, requestedFiles);
+        verify(sheetMapper).updateById(sheet);
+    }
+
+    @Test
+    void 待审核项目数据不变时仍禁止附件变化() {
+        TrainingSheet sheet = sheet(1L, 99L);
+        prepareUnarchivedSheet(sheet);
+        TrainingProject project = project(10L, "PENDING_REVIEW", "{}");
+        when(projectMapper.selectList(any())).thenReturn(List.of(project));
+        when(attachmentService.fileIdsByProjectIds(any())).thenReturn(Map.of(10L, List.of(50L)));
+        when(attachmentService.sameFiles(any(), any())).thenReturn(false);
+        login(99L, 14L);
+        TrainingDtos.SaveProjectsRequest request = saveRequest(
+                projectInput(10L, 1, Map.of(), List.of(51L)));
+
+        BizException error = assertThrows(BizException.class, () -> trainingService.saveProjects(1L, request));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        assertTrue(error.getErrors().stream().anyMatch(field -> field.getField().endsWith("fileIds")));
+        verify(attachmentService, never()).replace(any(), any());
+        verify(sheetMapper, never()).updateById(any(TrainingSheet.class));
+    }
+
+    @Test
     void 项目数值按语义比较而不受精度表示影响() {
         assertTrue(TrainingService.sameData(
                 Map.of("c09", new BigDecimal("10.00"), "c12", new BigDecimal("8.0")),
@@ -238,10 +352,39 @@ class TrainingServiceTest {
         assertFalse(TrainingService.sameData(Map.of("c09", 10), Map.of("c10", 10)));
     }
 
+    private static TrainingProject project(Long id, String status, String dataJson) {
+        TrainingProject project = new TrainingProject();
+        project.setId(id);
+        project.setSheetId(1L);
+        project.setRowNo(1);
+        project.setStatus(status);
+        project.setRevisionNo(0);
+        project.setDataJson(dataJson);
+        return project;
+    }
+
+    private static TrainingDtos.ProjectInput projectInput(Long id, Integer rowNo,
+                                                          Map<String, Object> data, List<Long> fileIds) {
+        TrainingDtos.ProjectInput input = new TrainingDtos.ProjectInput();
+        input.setId(id);
+        input.setRowNo(rowNo);
+        input.setData(data);
+        input.setFileIds(fileIds);
+        return input;
+    }
+
+    private static TrainingDtos.SaveProjectsRequest saveRequest(TrainingDtos.ProjectInput... projects) {
+        TrainingDtos.SaveProjectsRequest request = new TrainingDtos.SaveProjectsRequest();
+        request.setVersion(0);
+        request.setProjects(List.of(projects));
+        return request;
+    }
+
     private void prepareUnarchivedSheet(TrainingSheet sheet) {
         when(sheetMapper.selectOne(any())).thenReturn(sheet);
         when(planMapper.selectByIdForUpdate(sheet.getPlanId())).thenReturn(trainingPlan("ACTIVE"));
         when(sheetMapper.selectByIdForUpdate(sheet.getId())).thenReturn(sheet);
+        lenient().when(accessService.canFill(any(), any())).thenReturn(true);
     }
 
     private Plan trainingPlan(String status) {

@@ -4,11 +4,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import StatusTag from '@/components/StatusTag.vue'
 import FilePreviewPane from '@/components/FilePreviewPane.vue'
+import FilePreviewDrawer from '@/components/FilePreviewDrawer.vue'
 import SubmissionTimeline from '@/views/submission/components/SubmissionTimeline.vue'
 import ReviewHistoryDialog from './components/ReviewHistoryDialog.vue'
 import { batchReview, listPendingReviews, reviewSubmission } from '@/api/review'
 import { listPendingTrainingReviews } from '@/api/training'
 import { getSubmission, listSubmissions } from '@/api/submission'
+import { downloadFile } from '@/api/file'
 import { listPlans } from '@/api/plan'
 import type { PlanCard } from '@/types/plan'
 import { listOrgUnits } from '@/api/orgUnit'
@@ -18,7 +20,7 @@ import { useUserStore } from '@/stores/user'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { getCurrentPlan } from '@/utils/currentPlan'
 import { ApiError } from '@/utils/request'
-import { formatDateTime, formatPercent, formatRelativeTime } from '@/utils/format'
+import { formatDateTime, formatMoney, formatPercent, formatRelativeTime } from '@/utils/format'
 import { enumOptions } from '@/utils/enumLabels'
 import { FILE_CATEGORY_COLORS, formatFileSize } from '@/utils/file'
 import { percentToDisplay, percentToStore } from '@/utils/allocation'
@@ -35,7 +37,7 @@ import {
   reviewInitialValue,
 } from '@/utils/submission'
 import type { PageResult } from '@/types/api'
-import type { FileInfo } from '@/types/file'
+import type { FileInfo, FileView } from '@/types/file'
 import type { StatCaliber } from '@/types/enums'
 import type {
   PendingReviewItem,
@@ -219,6 +221,7 @@ const detailRemarkParts = computed(() => parseSubmissionRemark(detail.value?.rem
 
 /** 材料列表（防御后端省略字段） */
 const detailFiles = computed(() => detail.value?.files ?? [])
+const detailBudgetFiles = computed(() => detail.value?.budgetFiles ?? [])
 
 let detailLoadGeneration = 0
 
@@ -277,9 +280,18 @@ const reviewForm = reactive({
   numerator: undefined as number | undefined,
   denominator: undefined as number | undefined,
   percent: undefined as number | undefined,
+  approvedExpenseAmount: undefined as number | undefined,
   comment: '',
   reason: '',
 })
+
+/** 认定支出默认值即本级上限：院审继承填报支出，校审继承院审认定支出（缺失时回退填报支出） */
+function initialApprovedExpense(data: SubmissionDetail): number | null {
+  if (data.expenseAmount == null) return null
+  return data.currentReviewNode === 'LEADER_REVIEW'
+    ? (data.approvedExpenseAmount ?? data.expenseAmount)
+    : data.expenseAmount
+}
 
 function initReviewForm(data: SubmissionDetail): void {
   const value = reviewInitialValue(data)
@@ -288,9 +300,14 @@ function initReviewForm(data: SubmissionDetail): void {
   reviewForm.numerator = value.numerator ?? undefined
   reviewForm.denominator = value.denominator ?? undefined
   reviewForm.percent = percentToDisplay(value.percent)
+  reviewForm.approvedExpenseAmount = initialApprovedExpense(data) ?? undefined
   reviewForm.comment = ''
   reviewForm.reason = ''
 }
+
+const expenseCap = computed<number | null>(() =>
+  detail.value ? initialApprovedExpense(detail.value) : null,
+)
 
 /** 审核表单已改动：自动刷新时跳过，避免覆盖认定值或审核意见 */
 const reviewFormDirty = computed(() => {
@@ -301,6 +318,7 @@ const reviewFormDirty = computed(() => {
     || (reviewForm.numerator ?? null) !== (value.numerator ?? null)
     || (reviewForm.denominator ?? null) !== (value.denominator ?? null)
     || (reviewForm.percent ?? null) !== (percentToDisplay(value.percent) ?? null)
+    || (reviewForm.approvedExpenseAmount ?? null) !== (expenseCap.value ?? null)
     || reviewForm.comment.trim() !== ''
     || reviewForm.reason.trim() !== ''
 })
@@ -342,6 +360,11 @@ function validateApproved(): string[] {
   if (reduction.value !== null && !reviewForm.comment.trim()) {
     errors.push('核减认定值时必须填写审核意见')
   }
+  const expense = reviewForm.approvedExpenseAmount
+  if (detail.value.expenseAmount != null && expense != null
+    && expenseCap.value != null && expense > expenseCap.value) {
+    errors.push('认定支出不能大于本级认定上限（60005）')
+  }
   return errors
 }
 
@@ -379,10 +402,13 @@ async function handleApprove(): Promise<void> {
   }
   approving.value = true
   try {
+    const approvedExpense = target.expenseAmount != null
+      ? reviewForm.approvedExpenseAmount ?? undefined
+      : undefined
     const body =
       caliber.value === 'BOOLEAN'
-        ? { result: 'APPROVED' as const, comment: reviewForm.comment || undefined, version: target.version, reason: reviewForm.reason || undefined }
-        : { result: 'APPROVED' as const, comment: reviewForm.comment || undefined, approvedValue: approvedValue.value, version: target.version, reason: reviewForm.reason || undefined }
+        ? { result: 'APPROVED' as const, comment: reviewForm.comment || undefined, approvedExpenseAmount: approvedExpense, version: target.version, reason: reviewForm.reason || undefined }
+        : { result: 'APPROVED' as const, comment: reviewForm.comment || undefined, approvedValue: approvedValue.value, approvedExpenseAmount: approvedExpense, version: target.version, reason: reviewForm.reason || undefined }
     await reviewSubmission(target.id, body, newIdempotencyKey())
     const reductionText = currentReduction !== null ? `（本级核减 ${currentReduction}）` : ''
     await afterReviewed(
@@ -550,6 +576,29 @@ function openPreview(file: { id: string }): void {
 
 function closePreview(): void {
   previewFileId.value = null
+}
+
+const budgetPreviewVisible = ref(false)
+const budgetPreviewFile = ref<FileInfo | null>(null)
+
+function openBudgetPreview(file: FileView): void {
+  budgetPreviewFile.value = {
+    ...file,
+    bizType: 'BUDGET_ATTACHMENT',
+    status: 'BOUND',
+    transcodeStatus: null,
+    uploadedAt: '',
+    uploadedBy: null,
+  }
+  budgetPreviewVisible.value = true
+}
+
+async function downloadBudgetFile(file: FileView): Promise<void> {
+  try {
+    await downloadFile(file.id, file.fileName, file.size)
+  } catch {
+    ElMessage.error('获取下载地址失败，请重试')
+  }
 }
 
 // ---------- 键盘（UI 规范 10.4：↑ / ↓ 上一条 / 下一条；Ctrl + Enter 通过，需二次确认） ----------
@@ -878,6 +927,12 @@ useAutoRefresh(
             <el-descriptions-item label="填报值">
               <span class="value-text">{{ valueText }}</span>
             </el-descriptions-item>
+            <el-descriptions-item v-if="detail.expenseAmount != null" label="本次支出">
+              {{ formatMoney(detail.expenseAmount) }} 万
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detail.approvedExpenseAmount != null" label="认定支出">
+              {{ formatMoney(detail.approvedExpenseAmount) }} 万
+            </el-descriptions-item>
             <el-descriptions-item v-if="detail.sourceNote" label="数据来源说明">
               {{ detail.sourceNote }}
             </el-descriptions-item>
@@ -899,6 +954,19 @@ useAutoRefresh(
             </li>
           </ul>
           <div v-else class="empty-text">未上传材料</div>
+
+          <template v-if="detailBudgetFiles.length > 0">
+            <h3 class="section-title">预算佐证材料（{{ detailBudgetFiles.length }} 份）</h3>
+            <ul class="file-list">
+              <li v-for="file in detailBudgetFiles" :key="file.id" class="file-row">
+                <span class="file-dot" :style="{ backgroundColor: FILE_CATEGORY_COLORS[file.category] }" />
+                <span class="file-name" :title="file.fileName">{{ file.fileName }}</span>
+                <span class="file-size">{{ formatFileSize(file.size) }}</span>
+                <el-button link type="primary" @click="openBudgetPreview(file)">预览</el-button>
+                <el-button link type="primary" @click="downloadBudgetFile(file)">下载</el-button>
+              </li>
+            </ul>
+          </template>
 
           <template v-if="history.length > 0">
             <h3 class="section-title">历史填报 / 审核记录</h3>
@@ -959,6 +1027,11 @@ useAutoRefresh(
                 <span class="field-hint">≤ 本级认定值 {{ initialReviewValue?.percent === null || initialReviewValue?.percent === undefined ? '—' : formatPercent(initialReviewValue.percent) }}</span>
               </el-form-item>
             </template>
+
+            <el-form-item v-if="detail.expenseAmount != null" label="认定支出（万元）">
+              <el-input-number v-model="reviewForm.approvedExpenseAmount" :min="0" :precision="2" controls-position="right" />
+              <span class="field-hint">≤ 本级认定上限 {{ expenseCap == null ? '—' : formatMoney(expenseCap) }}</span>
+            </el-form-item>
 
             <el-form-item v-if="reduction !== null" label=" ">
               <span class="reduction-hint">核减 {{ reduction }}，请填写审核意见说明原因</span>
@@ -1022,6 +1095,8 @@ useAutoRefresh(
       </el-card>
     </div>
     </section>
+
+    <FilePreviewDrawer v-model="budgetPreviewVisible" :file="budgetPreviewFile" />
 
     <ReviewHistoryDialog v-model="historyVisible" />
 

@@ -11,7 +11,7 @@ import type { Role } from '@/types/enums'
 
 describe('用户创建角色矩阵', () => {
   it.each<[Role[], Role[]]>([
-    [['ADMIN'], ['ADMIN', 'LEADER', 'SCHOOL_OWNER', 'UNIT_OWNER']],
+    [['ADMIN'], ['ADMIN', 'LEADER', 'SCHOOL_OWNER', 'UNIT_OWNER', 'STAFF']],
     [['LEADER'], ['LEADER', 'SCHOOL_OWNER', 'UNIT_OWNER']],
     [['SCHOOL_OWNER'], ['SCHOOL_OWNER', 'UNIT_OWNER']],
     [['UNIT_OWNER'], ['UNIT_OWNER', 'STAFF']],
@@ -20,7 +20,8 @@ describe('用户创建角色矩阵', () => {
     expect(creatableRoles(creatorRoles)).toEqual(expected)
   })
 
-  it('多角色按矩阵取并集，干事仍只能由学院负责人创建', () => {
+  it('多角色按矩阵取并集，管理员与学院负责人均可创建干事', () => {
+    expect(creatableRoles(['ADMIN'])).toContain('STAFF')
     expect(creatableRoles(['LEADER', 'UNIT_OWNER'])).toEqual([
       'LEADER',
       'SCHOOL_OWNER',
@@ -30,15 +31,17 @@ describe('用户创建角色矩阵', () => {
     expect(creatableRoles(['LEADER', 'STAFF'])).not.toContain('STAFF')
   })
 
-  it('新选择干事时移除其他角色，改选其他角色时移除干事', () => {
+  it('管理角色保持多选，新选择干事时移除其他角色，改选其他角色时移除干事', () => {
+    expect(normalizeCreationRoles(['LEADER', 'SCHOOL_OWNER'], [])).toEqual(['LEADER', 'SCHOOL_OWNER'])
     expect(normalizeCreationRoles(['UNIT_OWNER', 'STAFF'], ['UNIT_OWNER'])).toEqual(['STAFF'])
     expect(normalizeCreationRoles(['STAFF', 'UNIT_OWNER'], ['STAFF'])).toEqual(['UNIT_OWNER'])
   })
 })
 
 describe('创建用户的单元约束', () => {
-  it('干事单元留空，由服务端继承创建人的全部单元', () => {
+  it('干事单元留空，由服务端继承归属负责人的全部单元', () => {
     expect(creationUnitIds(['UNIT_OWNER'], ['STAFF'], ['other'], ['101', '102'])).toEqual([])
+    expect(creationUnitIds(['ADMIN'], ['STAFF'], ['other'], [])).toEqual([])
   })
 
   it('学院负责人创建学院负责人时仅保留本人单元', () => {

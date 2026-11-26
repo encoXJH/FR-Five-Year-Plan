@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { deleteUser, getRolePermissions, updateRolePermissions } from '../system'
+import {
+  deleteManagedUser,
+  deleteUser,
+  getRolePermissions,
+  setManagedUserRoles,
+  updateRolePermissions,
+} from '../system'
 import { http } from '@/utils/request'
-import type { RoleItem, RolePermissionResponse } from '@/types/system'
+import type { RoleItem, RolePermissionResponse, SetUserRolesRequest } from '@/types/system'
 
 vi.mock('@/utils/request', () => ({
   http: { get: vi.fn(), put: vi.fn(), delete: vi.fn() },
@@ -72,6 +78,25 @@ describe('角色权限 API 契约', () => {
 
     await deleteUser('1', { version: 2, reason: '误建账号' })
     expect(deleteMock).toHaveBeenCalledWith('/users/1', {
+      data: { version: 2, reason: '误建账号' },
+    })
+  })
+
+  it('学院自管角色互转使用专用路径并提交单角色、原因和版本', async () => {
+    putMock.mockResolvedValue({ user: { id: '1' } })
+    const request: SetUserRolesRequest = { roles: ['STAFF'], reason: '调整为干事', version: 2 }
+
+    await setManagedUserRoles('1', request)
+
+    expect(putMock).toHaveBeenCalledWith('/users/staff/1/roles', request)
+  })
+
+  it('学院自管删除使用专用路径并保留版本和原因', async () => {
+    deleteMock.mockResolvedValue(undefined)
+
+    await deleteManagedUser('1', { version: 2, reason: '误建账号' })
+
+    expect(deleteMock).toHaveBeenCalledWith('/users/staff/1', {
       data: { version: 2, reason: '误建账号' },
     })
   })

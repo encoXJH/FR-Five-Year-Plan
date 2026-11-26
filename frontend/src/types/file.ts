@@ -15,6 +15,16 @@ export interface FileInfo {
   uploadedBy: UserRef | null
 }
 
+/** 文件摘要 FileView（随填报详情 / 预算支出明细返回，不含上传信息） */
+export interface FileView {
+  id: string
+  fileName: string
+  size: number
+  ext: string | null
+  category: FileCategory
+  mimeType: string | null
+}
+
 /** GET /files/{fileId}/preview 返回（API 8.6，url 为 10 分钟有效的签名地址） */
 export interface PreviewInfo {
   previewType: PreviewType

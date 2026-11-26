@@ -18,7 +18,7 @@ import { useUserStore } from '@/stores/user'
 import { newIdempotencyKey } from '@/utils/idempotency'
 import { getCurrentPlan } from '@/utils/currentPlan'
 import { ApiError } from '@/utils/request'
-import { formatDateTime } from '@/utils/format'
+import { formatDateTime, formatMoney } from '@/utils/format'
 import { enumOptions } from '@/utils/enumLabels'
 import { canReviewSubmission, initialReviewValue } from '@/utils/review'
 import type { ReviewNodeTarget } from '@/utils/review'
@@ -31,7 +31,7 @@ import {
 } from '@/utils/submission'
 import type { PageResult } from '@/types/api'
 import type { ReviewNode, StatCaliber } from '@/types/enums'
-import type { MetricValue, PendingReviewItem, SubmissionDetail, SubmissionListItem } from '@/types/submission'
+import type { MetricValue, PendingReviewItem, ReviewRequest, SubmissionDetail, SubmissionListItem } from '@/types/submission'
 import type { PlanCard } from '@/types/plan'
 
 const route = useRoute()
@@ -260,6 +260,7 @@ function openItem(item: PendingReviewItem): void {
 
 // 审核表单
 const reviewValue = ref<MetricValue>({})
+const reviewExpense = ref('')
 const comment = ref('')
 const reviewReason = ref('')
 const approving = ref(false)
@@ -267,6 +268,14 @@ const rejecting = ref(false)
 
 function initReviewForm(data: SubmissionDetail): void {
   reviewValue.value = initialReviewValue(data)
+  if (data.expenseAmount != null) {
+    const base = data.currentReviewNode === 'LEADER_REVIEW' && data.approvedExpenseAmount != null
+      ? data.approvedExpenseAmount
+      : data.expenseAmount
+    reviewExpense.value = String(base)
+  } else {
+    reviewExpense.value = ''
+  }
   comment.value = ''
   reviewReason.value = ''
 }
@@ -281,6 +290,25 @@ const reduction = computed(() =>
   detail.value ? approvedReduction(caliber.value, reviewBaseline.value, approvedValue.value) : null,
 )
 
+const hasExpense = computed(() => detail.value?.expenseAmount != null)
+const expenseCap = computed<number | null>(() => {
+  const item = detail.value
+  if (!item || item.expenseAmount == null) return null
+  return item.currentReviewNode === 'LEADER_REVIEW' && item.approvedExpenseAmount != null
+    ? item.approvedExpenseAmount
+    : item.expenseAmount
+})
+const expenseReduction = computed<number | null>(() => {
+  const cap = expenseCap.value
+  const raw = reviewExpense.value.trim()
+  if (cap == null || raw === '' || !/^\d+(\.\d{1,2})?$/.test(raw)) return null
+  const diff = Math.round((cap - Number(raw)) * 100) / 100
+  return diff > 0 ? diff : null
+})
+const budgetAttachmentFiles = computed(() =>
+  (detail.value?.budgetFiles ?? []).map((file) => ({ ...file, transcodeStatus: null })),
+)
+
 function validateApproved(): string[] {
   const errors: string[] = []
   if (!detail.value) return errors
@@ -288,8 +316,16 @@ function validateApproved(): string[] {
     && !isApprovedValueValid(caliber.value, reviewBaseline.value, approvedValue.value)) {
     errors.push('认定值不能大于本级认定值（60005）')
   }
-  if (reduction.value !== null && !comment.value.trim()) {
-    errors.push('核减认定值时必须填写审核意见')
+  if (hasExpense.value) {
+    const raw = reviewExpense.value.trim()
+    if (raw === '' || !/^\d+(\.\d{1,2})?$/.test(raw)) {
+      errors.push('认定支出须为不小于 0 的数字，最多两位小数')
+    } else if (expenseCap.value != null && Number(raw) > expenseCap.value) {
+      errors.push('认定支出不能大于本级认定支出（60005）')
+    }
+  }
+  if ((reduction.value !== null || expenseReduction.value !== null) && !comment.value.trim()) {
+    errors.push('核减认定值或认定支出时必须填写审核意见')
   }
   return errors
 }
@@ -308,11 +344,12 @@ async function handleApprove(): Promise<void> {
   }
   const isUnitReview = target.currentReviewNode === 'UNIT_REVIEW'
   const reductionText = reduction.value !== null ? `，本级认定值核减 ${reduction.value}` : ''
+  const expenseReductionText = expenseReduction.value !== null ? `，认定支出核减 ${expenseReduction.value} 万` : ''
   try {
     const { showConfirmDialog } = await import('vant')
     await showConfirmDialog({
       title: isUnitReview ? '通过院审' : '通过校审',
-      message: `确认通过「${target.task?.code ?? ''}」的填报${reductionText}？${isUnitReview ? '院审通过后转校级负责人终审，暂不认定完成值。' : '终审通过后计入完成值。'}`,
+      message: `确认通过「${target.task?.code ?? ''}」的填报${reductionText}${expenseReductionText}？${isUnitReview ? '院审通过后转校级负责人终审，暂不认定完成值。' : '终审通过后计入完成值。'}`,
       confirmButtonText: '确认通过',
     })
   } catch {
@@ -320,7 +357,7 @@ async function handleApprove(): Promise<void> {
   }
   approving.value = true
   try {
-    const body = caliber.value === 'BOOLEAN'
+    const body: ReviewRequest = caliber.value === 'BOOLEAN'
       ? {
           result: 'APPROVED' as const,
           comment: comment.value || undefined,
@@ -334,6 +371,7 @@ async function handleApprove(): Promise<void> {
           version: target.version,
           reason: reviewReason.value || undefined,
         }
+    if (hasExpense.value) body.approvedExpenseAmount = Number(reviewExpense.value.trim())
     await reviewSubmission(target.id, body, newIdempotencyKey())
     showToast(isUnitReview
       ? '院审已通过，待校级负责人审核'
@@ -619,6 +657,8 @@ const planSwitcherPlans = computed(() => plans.value)
               <div class="small muted">{{ detail.unit?.name ?? '—' }} · {{ detail.year }} 年</div>
               <div class="kv-list review-kv">
                 <div class="kv"><span class="kv__label">填报值</span><span class="kv__value">{{ valueText }}</span></div>
+                <div v-if="detail.expenseAmount != null" class="kv"><span class="kv__label">本次支出</span><span class="kv__value">{{ formatMoney(detail.expenseAmount) }} 万</span></div>
+                <div v-if="detail.approvedExpenseAmount != null" class="kv"><span class="kv__label">认定支出</span><span class="kv__value">{{ formatMoney(detail.approvedExpenseAmount) }} 万</span></div>
                 <div class="kv"><span class="kv__label">提交时间</span><span class="kv__value">{{ formatDateTime(detail.submittedAt ?? detail.createdAt) }}</span></div>
                 <div v-if="detail.sourceNote" class="kv"><span class="kv__label">来源说明</span><span class="kv__value">{{ detail.sourceNote }}</span></div>
                 <div v-if="remarkParts.completionDate" class="kv"><span class="kv__label">完成日期</span><span class="kv__value">{{ remarkParts.completionDate }}</span></div>
@@ -629,6 +669,11 @@ const planSwitcherPlans = computed(() => plans.value)
             <div class="card card--tight">
               <div class="section-title">佐证材料（{{ detailFiles.length }} 份）</div>
               <AttachmentList :files="detailFiles" empty-text="本次提交未上传材料" />
+            </div>
+
+            <div v-if="budgetAttachmentFiles.length > 0" class="card card--tight">
+              <div class="section-title">预算佐证（{{ budgetAttachmentFiles.length }} 份）</div>
+              <AttachmentList :files="budgetAttachmentFiles" empty-text="无预算佐证" />
             </div>
 
             <div v-if="detail.reviews.length > 0" class="card card--tight">
@@ -646,8 +691,16 @@ const planSwitcherPlans = computed(() => plans.value)
                 </template>
                 <p v-else class="small muted">是否型只做通过 / 驳回，认定值与填报值一致。</p>
 
+                <template v-if="hasExpense">
+                  <p class="small muted">可核减认定支出，不能大于本级认定支出 {{ formatMoney(expenseCap) }} 万（60005）。</p>
+                  <div class="field">
+                    <label>认定支出（万元）</label>
+                    <van-field v-model="reviewExpense" type="number" inputmode="decimal" />
+                  </div>
+                </template>
+
                 <div class="field">
-                  <label>审核意见{{ reduction !== null ? '（核减必填）' : '' }}</label>
+                  <label>审核意见{{ reduction !== null || expenseReduction !== null ? '（核减必填）' : '' }}</label>
                   <van-field v-model="comment" type="textarea" rows="2" maxlength="500" show-word-limit placeholder="驳回或核减时必须填写意见" />
                 </div>
                 <div v-if="isDelegateReview" class="field">
@@ -655,6 +708,7 @@ const planSwitcherPlans = computed(() => plans.value)
                   <van-field v-model="reviewReason" type="textarea" rows="2" maxlength="500" show-word-limit placeholder="管理员代审原因（选填，写入审计日志）" />
                 </div>
                 <p v-if="reduction !== null" class="small text-warning">本级核减量：{{ reduction }}</p>
+                <p v-if="expenseReduction !== null" class="small text-warning">认定支出核减量：{{ expenseReduction }} 万</p>
               </template>
               <p v-else class="small text-warning guard-text">{{ reviewGuardMessage(detail) }}</p>
             </div>
@@ -669,6 +723,9 @@ const planSwitcherPlans = computed(() => plans.value)
                     <StatusTag kind="SubmissionStatus" :value="item.status" :review-node="item.currentReviewNode" />
                   </div>
                   <div class="small">{{ formatMetricValue(item.value, caliber) }}</div>
+                  <div v-if="item.expenseAmount != null" class="small muted">
+                    本次支出 {{ formatMoney(item.expenseAmount) }} 万<template v-if="item.approvedExpenseAmount != null"> · 认定 {{ formatMoney(item.approvedExpenseAmount) }} 万</template>
+                  </div>
                 </div>
               </div>
             </div>

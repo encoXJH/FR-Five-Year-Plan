@@ -6,6 +6,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { MoreFilled, Plus } from '@element-plus/icons-vue'
 import ReasonDialog from '@/components/ReasonDialog.vue'
 import StatusTag from '@/components/StatusTag.vue'
+import TrainingStaffDialog from '@/views/training/components/TrainingStaffDialog.vue'
 import { activatePlan, archivePlan, createPlan, deletePlan, listPlans, savePlanAsTemplate } from '@/api/plan'
 import { listTemplates } from '@/api/template'
 import { exportTrainingSheet, listTrainingSheets } from '@/api/training'
@@ -28,6 +29,7 @@ import type { TodoItem } from '@/types/todo'
 import type { NotificationItem } from '@/types/notification'
 import {
   canArchivePlanCard,
+  canAssignTrainingPlanStaff,
   canDeletePlanCard,
   canExportTrainingPlan,
   trainingPlanExportFilename,
@@ -86,6 +88,38 @@ async function goPlan(plan: PlanCard): Promise<void> {
 }
 
 const exportingTraining = reactive<Record<string, boolean>>({})
+const openingTrainingStaff = reactive<Record<string, boolean>>({})
+const trainingStaffDialogVisible = ref(false)
+const trainingStaffSheetId = ref<string | null>(null)
+const trainingStaffPlanName = ref('')
+
+async function openTrainingStaff(plan: PlanCard): Promise<void> {
+  const canAssign = canAssignTrainingPlanStaff(
+    plan.planType,
+    plan.status,
+    userStore.roles.includes('ADMIN'),
+  )
+  if (!canAssign || openingTrainingStaff[plan.id]) return
+  openingTrainingStaff[plan.id] = true
+  try {
+    const sheets = await listTrainingSheets(plan.id)
+    if (sheets.length === 0) {
+      ElMessage.info('该计划尚未初始化培训采集表')
+      return
+    }
+    trainingStaffSheetId.value = sheets[0].id
+    trainingStaffPlanName.value = plan.name
+    trainingStaffDialogVisible.value = true
+  } catch {
+    // 拦截器已提示
+  } finally {
+    openingTrainingStaff[plan.id] = false
+  }
+}
+
+async function handleTrainingStaffSaved(): Promise<void> {
+  await Promise.all([loadPlans(), userStore.fetchMe().catch(() => undefined)])
+}
 
 async function handleTrainingExport(plan: PlanCard): Promise<void> {
   if (exportingTraining[plan.id]) return
@@ -260,6 +294,7 @@ async function submitDelete(reason: string): Promise<void> {
 
 function handleCardCommand(plan: PlanCard, command: string): void {
   if (command === 'enter') goPlan(plan)
+  else if (command === 'training-staff') void openTrainingStaff(plan)
   else if (command === 'training-export') void handleTrainingExport(plan)
   else if (command === 'activate') void handleActivate(plan)
   else if (command === 'current') setAsCurrent(plan)
@@ -474,6 +509,13 @@ useAutoRefresh(() => Promise.all([loadPlans(true), loadTodos(), loadNotification
               <el-dropdown-menu>
                 <el-dropdown-item command="enter">进入</el-dropdown-item>
                 <el-dropdown-item
+                  v-if="canAssignTrainingPlanStaff(plan.planType, plan.status, userStore.roles.includes('ADMIN'))"
+                  command="training-staff"
+                  :disabled="openingTrainingStaff[plan.id]"
+                >
+                  干事分配
+                </el-dropdown-item>
+                <el-dropdown-item
                   v-if="canExportTrainingPlan(plan.planType, userStore.can)"
                   command="training-export"
                   :disabled="exportingTraining[plan.id]"
@@ -671,6 +713,13 @@ useAutoRefresh(() => Promise.all([loadPlans(true), loadTodos(), loadNotification
       </el-button>
     </template>
   </el-dialog>
+
+  <TrainingStaffDialog
+    v-model="trainingStaffDialogVisible"
+    :sheet-id="trainingStaffSheetId"
+    :plan-name="trainingStaffPlanName"
+    @saved="handleTrainingStaffSaved"
+  />
 
   <ReasonDialog
     v-model="archiveDialogVisible"

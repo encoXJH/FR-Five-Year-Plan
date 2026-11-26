@@ -2,11 +2,31 @@ import { createSSRApp, defineComponent, h } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import { describe, expect, it, vi } from 'vitest'
 import TrainingProjectEditor from './TrainingProjectEditor.vue'
-import type { TrainingField, TrainingFieldType } from '@/types/training'
+import type { TrainingField, TrainingFieldType, TrainingProjectInput } from '@/types/training'
+import type { FileInfo } from '@/types/file'
 
 vi.mock('element-plus', () => ({
   ElMessage: { warning: vi.fn() },
 }))
+
+vi.mock('@/views/submission/components/MaterialUploader.vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  return {
+    default: defineComponent({
+      props: ['modelValue', 'initialFiles', 'disabled', 'bizType'],
+      setup(props) {
+        const files = props.initialFiles as FileInfo[]
+        return () => h('div', {
+          class: 'material-uploader-stub',
+          'data-biz-type': props.bizType,
+          'data-file-ids': (props.modelValue as string[]).join(','),
+          'data-initial-files': files.map((file) => file.id).join(','),
+          'data-disabled': String(props.disabled),
+        })
+      },
+    }),
+  }
+})
 
 const elementTags = [
   'el-drawer',
@@ -53,16 +73,21 @@ const fields: TrainingField[] = groupDefinitions.flatMap((group) =>
   }),
 )
 
-function renderEditor(readonly = false): Promise<string> {
+function renderEditor(
+  readonly = false,
+  projectOverrides: Partial<TrainingProjectInput> = {},
+): Promise<string> {
+  const project: TrainingProjectInput = {
+    id: 'project-1',
+    rowNo: 1,
+    data: { c10: 1.25, c11: 2.75, c18: 2, c19: 3, c33: 4, c45: 5 },
+    ...projectOverrides,
+  }
   const app = createSSRApp(TrainingProjectEditor, {
     modelValue: true,
     fields,
     readonly,
-    project: {
-      id: 'project-1',
-      rowNo: 1,
-      data: { c10: 1.25, c11: 2.75, c18: 2, c19: 3, c33: 4, c45: 5 },
-    },
+    project,
   })
   for (const tag of elementTags) {
     app.component(tag, defineComponent({
@@ -93,6 +118,23 @@ describe('TrainingProjectEditor schema 渲染', () => {
     expect(html).toContain('model-value="5 人"')
     expect(html).toContain('model-value="4 人"')
     expect((html.match(/readonly/g) ?? []).length).toBeGreaterThanOrEqual(4)
+    expect(html).toContain('项目附件')
+    expect(html).toContain('项目附件随“保存草稿”生效')
+    expect(html).toContain('data-biz-type="TRAINING_ATTACHMENT"')
+    expect(html).toContain('上传附件')
+  })
+
+  it('每次打开按当前 fileIds 初始化附件，新增空 id 项目也可携带临时附件', async () => {
+    const html = await renderEditor(false, {
+      id: null,
+      fileIds: ['file-2', 'temp-file'],
+      files: [{ id: 'file-1' } as FileInfo, { id: 'file-2' } as FileInfo],
+    })
+
+    expect(html).toContain('data-file-ids="file-2,temp-file"')
+    expect(html).toContain('data-initial-files="file-2"')
+    expect(html).not.toContain('data-initial-files="file-1')
+    expect(html).toContain('data-disabled="false"')
   })
 
   it('待审或已通过项目显示只读说明，不显示草稿提示', async () => {
@@ -100,5 +142,8 @@ describe('TrainingProjectEditor schema 渲染', () => {
 
     expect(html).toContain('该项目正在审核或已审核通过，内容只读')
     expect(html).not.toContain('草稿允许暂缺必填项')
+    expect(html).toContain('项目附件仅支持预览和下载')
+    expect(html).toContain('data-disabled="true"')
+    expect(html).not.toContain('上传附件')
   })
 })

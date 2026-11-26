@@ -7,11 +7,11 @@ import UserPanel from '@/views/system/components/UserPanel.vue'
     <div class="page-header">
       <div>
         <h1 class="page-title">用户管理</h1>
-        <p class="page-subtitle">查询全校人员及其所属学院、角色和账号状态，人员信息只读。</p>
+        <p class="page-subtitle">查询全校人员，本学院任意负责人归属的干事及本人创建的学院项目负责人可编辑、删除及转换角色。</p>
       </div>
     </div>
     <el-card shadow="never">
-      <UserPanel readonly unit-owner-directory />
+      <UserPanel unit-owner-directory />
     </el-card>
   </div>
 </template>

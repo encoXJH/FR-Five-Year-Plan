@@ -14,7 +14,7 @@ import { listMilestones } from '@/api/milestone'
 import { getPlanGantt } from '@/api/gantt'
 import { listDirections } from '@/api/direction'
 import { useUserStore } from '@/stores/user'
-import { formatPercent, formatDateTime } from '@/utils/format'
+import { formatPercent, formatDateTime, formatMoney } from '@/utils/format'
 import {
   completionPercent,
   formatActualValue,
@@ -258,6 +258,7 @@ watch(indicatorId, () => {
             <div class="kv"><span class="kv__label">汇总方式</span><span class="kv__value">{{ indicator.rollupMode === 'MANUAL' ? '手工认定' : '自动汇总' }}</span></div>
             <div class="kv"><span class="kv__label">达成方向</span><span class="kv__value">{{ indicator.targetDirection === 'LOWER_BETTER' ? '越小越好' : '越大越好' }}</span></div>
             <div class="kv"><span class="kv__label">最少材料数</span><span class="kv__value">{{ indicator.minFileCount ?? '—' }}</span></div>
+            <div v-if="indicator.level === 'A'" class="kv"><span class="kv__label">指标预算</span><span class="kv__value">{{ indicator.totalBudget == null ? '未设置' : `${formatMoney(indicator.totalBudget)} 万 · 已花 ${formatMoney(indicator.spentBudget ?? 0)} 万` }}</span></div>
             <div class="kv"><span class="kv__label">更新于</span><span class="kv__value">{{ formatDateTime(indicator.updatedAt) }}</span></div>
           </div>
           <div v-if="indicator.description" class="block-text">

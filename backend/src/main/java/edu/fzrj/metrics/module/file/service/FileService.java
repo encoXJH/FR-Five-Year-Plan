@@ -24,6 +24,7 @@ import edu.fzrj.metrics.module.submission.service.SubmissionService;
 import edu.fzrj.metrics.module.system.entity.SysUser;
 import edu.fzrj.metrics.module.task.entity.Task;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
+import edu.fzrj.metrics.module.training.service.TrainingAccessService;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.service.UserUnitService;
 import edu.fzrj.metrics.security.SecurityUtils;
@@ -60,7 +61,7 @@ public class FileService {
 
     private static final Set<String> BIZ_TYPES = Set.of(
             "SUBMISSION_ATTACHMENT", "ADJUSTMENT_ATTACHMENT", "MILESTONE_ATTACHMENT",
-            "INDICATOR_ATTACHMENT", "IMPORT_FILE");
+            "INDICATOR_ATTACHMENT", "IMPORT_FILE", "TRAINING_ATTACHMENT", "BUDGET_ATTACHMENT");
     private static final int PART_SIZE = 5 * 1024 * 1024;
 
     private final FileInfoMapper fileInfoMapper;
@@ -77,6 +78,7 @@ public class FileService {
     private final TaskMapper taskMapper;
     private final ObjectProvider<DirectStorageService> directStorageProvider;
     private final UserUnitService userUnitService;
+    private final TrainingAccessService trainingAccessService;
 
     @Value("${app.file.storage-type:LOCAL}")
     private String storageType;
@@ -88,7 +90,7 @@ public class FileService {
                        AdjustmentService adjustmentService, MilestoneService milestoneService,
                        IndicatorMapper indicatorMapper, TaskMapper taskMapper,
                        ObjectProvider<DirectStorageService> directStorageProvider,
-                       UserUnitService userUnitService) {
+                       UserUnitService userUnitService, TrainingAccessService trainingAccessService) {
         this.fileInfoMapper = fileInfoMapper;
         this.sessionMapper = sessionMapper;
         this.sysUserMapper = sysUserMapper;
@@ -103,6 +105,7 @@ public class FileService {
         this.taskMapper = taskMapper;
         this.directStorageProvider = directStorageProvider;
         this.userUnitService = userUnitService;
+        this.trainingAccessService = trainingAccessService;
     }
 
     // ---------------- 直接上传 ----------------
@@ -408,7 +411,7 @@ public class FileService {
 
     private void requireRefAccess(FileRef ref, FileInfo fileInfo) {
         switch (ref.getBizType()) {
-            case "SUBMISSION" -> {
+            case "SUBMISSION", "SUBMISSION_BUDGET" -> {
                 Submission submission = submissionService.requireSubmission(ref.getBizId());
                 submissionService.requireAccess(submission);
             }
@@ -417,6 +420,8 @@ public class FileService {
             case "MILESTONE" -> milestoneService.requireAccess(
                     milestoneService.requireMilestone(ref.getBizId()));
             case "INDICATOR" -> requireIndicatorMaterialAccess(ref.getBizId(), fileInfo);
+            case "TRAINING_PROJECT" -> trainingAccessService.requireProjectReadAccess(
+                    ref.getBizId(), SecurityUtils.getLoginUser());
             default -> throw new BizException(ErrorCode.DATA_SCOPE_DENIED);
         }
     }

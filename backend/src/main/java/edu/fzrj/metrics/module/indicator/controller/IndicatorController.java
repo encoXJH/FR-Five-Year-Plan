@@ -33,13 +33,16 @@ public class IndicatorController {
     private final IndicatorService indicatorService;
     private final DecompositionService decompositionService;
     private final edu.fzrj.metrics.module.indicator.service.ManualValueService manualValueService;
+    private final edu.fzrj.metrics.module.indicator.service.IndicatorBudgetService indicatorBudgetService;
 
     public IndicatorController(IndicatorService indicatorService,
                                DecompositionService decompositionService,
-                               edu.fzrj.metrics.module.indicator.service.ManualValueService manualValueService) {
+                               edu.fzrj.metrics.module.indicator.service.ManualValueService manualValueService,
+                               edu.fzrj.metrics.module.indicator.service.IndicatorBudgetService indicatorBudgetService) {
         this.indicatorService = indicatorService;
         this.decompositionService = decompositionService;
         this.manualValueService = manualValueService;
+        this.indicatorBudgetService = indicatorBudgetService;
     }
 
     @Operation(summary = "指标列表（不分页）；view=tree 返回 A → A+ 树",
@@ -122,6 +125,28 @@ public class IndicatorController {
     public IndicatorDtos.Detail putYearTargets(@PathVariable Long indicatorId,
                                                @Valid @RequestBody IndicatorDtos.YearTargetsPutRequest request) {
         return indicatorService.putYearTargets(indicatorId, request);
+    }
+
+    @Operation(summary = "维护指标总预算（万元；null 清除）",
+            description = "权限：indicator:budget；ADMIN / LEADER 全校，SCHOOL_OWNER 限本人负责的 A；"
+                    + "仅 A 级；不受下发保护限制；带 version（冲突 10005）与 Idempotency-Key；reason 必填；"
+                    + "新预算低于已认定支出时 10001")
+    @PutMapping("/api/v1/indicators/{indicatorId}/budget")
+    @PreAuthorize("hasAuthority('indicator:budget')")
+    @Idempotent
+    @AuditLog(action = "UPDATE", resourceType = "indicator", resourceId = "#indicatorId", reason = "#request.reason",
+            before = "detail(#indicatorId)", after = "#result")
+    public IndicatorDtos.Detail putBudget(@PathVariable Long indicatorId,
+                                          @Valid @RequestBody IndicatorDtos.BudgetPutRequest request) {
+        return indicatorBudgetService.putBudget(indicatorId, request);
+    }
+
+    @Operation(summary = "指标预算概览与支出明细（分页）",
+            description = "已花预算仅统计校审通过的认定支出；明细按当前用户可见任务过滤，支持 year 筛选")
+    @GetMapping("/api/v1/indicators/{indicatorId}/budget")
+    public IndicatorDtos.BudgetView budget(@PathVariable Long indicatorId,
+                                           IndicatorDtos.BudgetQuery query) {
+        return indicatorBudgetService.view(indicatorId, query);
     }
 
     @Operation(summary = "MANUAL 汇总 A 指标的人工认定（PRD 4.5：建设方向负责人手工认定完成值）",

@@ -36,10 +36,14 @@ import edu.fzrj.metrics.module.task.mapper.TaskYearMapper;
 import edu.fzrj.metrics.module.task.service.TaskYearActivationService;
 import edu.fzrj.metrics.module.training.entity.TrainingProject;
 import edu.fzrj.metrics.module.training.entity.TrainingSheet;
+import edu.fzrj.metrics.module.training.entity.TrainingSheetStaff;
 import edu.fzrj.metrics.module.training.mapper.TrainingProjectMapper;
 import edu.fzrj.metrics.module.training.mapper.TrainingSheetMapper;
+import edu.fzrj.metrics.module.training.mapper.TrainingSheetStaffMapper;
+import edu.fzrj.metrics.module.training.service.TrainingAttachmentService;
 import edu.fzrj.metrics.security.LoginUser;
 import edu.fzrj.metrics.security.SecurityUtils;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -77,6 +81,8 @@ public class PlanService {
     private final PlanReadScopeService planReadScopeService;
     private final TrainingSheetMapper trainingSheetMapper;
     private final TrainingProjectMapper trainingProjectMapper;
+    private final TrainingSheetStaffMapper trainingSheetStaffMapper;
+    private final TrainingAttachmentService trainingAttachmentService;
 
     public PlanService(PlanMapper planMapper, PlanYearMapper planYearMapper, TemplateMapper templateMapper,
                        DirectionMapper directionMapper, IndicatorMapper indicatorMapper,
@@ -85,7 +91,9 @@ public class PlanService {
                        TaskMapper taskMapper, TaskYearMapper taskYearMapper,
                        TaskYearActivationService taskYearActivationService,
                        ObjectMapper objectMapper, PlanReadScopeService planReadScopeService,
-                       TrainingSheetMapper trainingSheetMapper, TrainingProjectMapper trainingProjectMapper) {
+                       TrainingSheetMapper trainingSheetMapper, TrainingProjectMapper trainingProjectMapper,
+                       TrainingSheetStaffMapper trainingSheetStaffMapper,
+                       @Lazy TrainingAttachmentService trainingAttachmentService) {
         this.planMapper = planMapper;
         this.planYearMapper = planYearMapper;
         this.templateMapper = templateMapper;
@@ -103,6 +111,8 @@ public class PlanService {
         this.planReadScopeService = planReadScopeService;
         this.trainingSheetMapper = trainingSheetMapper;
         this.trainingProjectMapper = trainingProjectMapper;
+        this.trainingSheetStaffMapper = trainingSheetStaffMapper;
+        this.trainingAttachmentService = trainingAttachmentService;
     }
 
     // ---------------- 查询 ----------------
@@ -454,6 +464,11 @@ public class PlanService {
                         .orderByAsc(TrainingProject::getId)
                         .last("FOR UPDATE"));
             }
+            if (!sheetIds.isEmpty()) {
+                trainingSheetStaffMapper.delete(new LambdaQueryWrapper<TrainingSheetStaff>()
+                        .in(TrainingSheetStaff::getSheetId, sheetIds));
+            }
+            trainingAttachmentService.removeAll(projects.stream().map(TrainingProject::getId).toList());
         }
         plan.setDeleted(planId);
         plan.setUpdatedBy(userId);

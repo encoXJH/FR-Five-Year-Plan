@@ -91,6 +91,7 @@ export type AchieveStatus =
 
 export type FileBizType =
   | 'SUBMISSION_ATTACHMENT'
+  | 'BUDGET_ATTACHMENT'
   | 'ADJUSTMENT_ATTACHMENT'
   | 'MILESTONE_ATTACHMENT'
   | 'INDICATOR_ATTACHMENT'

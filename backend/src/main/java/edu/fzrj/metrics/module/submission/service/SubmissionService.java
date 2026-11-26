@@ -72,6 +72,7 @@ public class SubmissionService {
             "DRAFT", "PENDING_REVIEW", "APPROVED", "REJECTED", "WITHDRAWN");
     private static final Set<String> EDITABLE_STATUSES = Set.of("DRAFT", "REJECTED", "WITHDRAWN");
     private static final String FILE_BIZ_TYPE = "SUBMISSION";
+    private static final String BUDGET_FILE_BIZ_TYPE = "SUBMISSION_BUDGET";
 
     private final SubmissionMapper submissionMapper;
     private final SubmissionHistoryMapper historyMapper;
@@ -198,13 +199,15 @@ public class SubmissionService {
         submission.setStatus("DRAFT");
         submission.setSubmitterRole(resolveSubmitterRole(loginUser));
         submission.setCurrentReviewNode(null);
+        submission.setExpenseAmount(validateExpense(request.getExpenseAmount()));
         submission.setRevisionNo(0);
         submission.setIsProxy(proxy);
         submission.setProxyReason(proxy ? proxyReason : null);
         submission.setCreatedBy(userId);
         submission.setUpdatedBy(userId);
         submissionMapper.insert(submission);
-        bindFiles(submission.getId(), request.getFileIds());
+        bindFiles(submission.getId(), request.getFileIds(), FILE_BIZ_TYPE);
+        bindFiles(submission.getId(), request.getBudgetFileIds(), BUDGET_FILE_BIZ_TYPE);
         return detail(submission.getId());
     }
 
@@ -237,7 +240,16 @@ public class SubmissionService {
         }
         if (patch.has("fileIds")) {
             List<Long> fileIds = patch.isNull("fileIds") ? List.of() : parseFileIds(patch.raw("fileIds"));
-            replaceFiles(submissionId, fileIds);
+            replaceFiles(submissionId, fileIds, FILE_BIZ_TYPE);
+        }
+        if (patch.has("expenseAmount")) {
+            submission.setExpenseAmount(patch.isNull("expenseAmount") ? null
+                    : validateExpense(patch.decimal("expenseAmount")));
+        }
+        if (patch.has("budgetFileIds")) {
+            List<Long> budgetFileIds = patch.isNull("budgetFileIds") ? List.of()
+                    : parseFileIds(patch.raw("budgetFileIds"));
+            replaceFiles(submissionId, budgetFileIds, BUDGET_FILE_BIZ_TYPE);
         }
         submission.setUpdatedBy(SecurityUtils.getUserId());
         if (submissionMapper.updateById(submission) == 0) {
@@ -256,10 +268,11 @@ public class SubmissionService {
         if (!"DRAFT".equals(submission.getStatus())) {
             throw new BizException(ErrorCode.SUBMISSION_STATUS_INVALID, "只有草稿可以删除");
         }
-        List<Long> fileIds = fileIdsOf(submissionId);
+        List<Long> fileIds = new ArrayList<>(fileIdsOf(submissionId, FILE_BIZ_TYPE));
+        fileIds.addAll(fileIdsOf(submissionId, BUDGET_FILE_BIZ_TYPE));
         fileRefMapper.delete(new LambdaQueryWrapper<FileRef>()
-                .eq(FileRef::getBizType, FILE_BIZ_TYPE)
-                .eq(FileRef::getBizId, submissionId));
+                .eq(FileRef::getBizId, submissionId)
+                .in(FileRef::getBizType, FILE_BIZ_TYPE, BUDGET_FILE_BIZ_TYPE));
         fileIds.forEach(this::unbindIfOrphan);
         submissionMapper.update(null, new LambdaUpdateWrapper<Submission>()
                 .eq(Submission::getId, submissionId)
@@ -287,12 +300,18 @@ public class SubmissionService {
         String caliber = submission.getStatCaliber();
         SubmissionDtos.MetricValue value = valueViewOf(submission);
         requireCaliberValue(caliber, value);
-        List<Long> fileIds = fileIdsOf(submissionId);
+        List<Long> fileIds = fileIdsOf(submissionId, FILE_BIZ_TYPE);
         String attachmentError = SubmissionValueRules.attachmentError(
                 caliber, indicator.getMinFileCount(), fileIds.size(), submission.getSourceNote());
         if (attachmentError != null) {
             throw new BizException(ErrorCode.ATTACHMENT_REQUIRED, attachmentError);
         }
+        List<Long> budgetFileIds = fileIdsOf(submissionId, BUDGET_FILE_BIZ_TYPE);
+        if (submission.getExpenseAmount() != null && submission.getExpenseAmount().signum() > 0
+                && budgetFileIds.isEmpty()) {
+            throw new BizException(ErrorCode.ATTACHMENT_REQUIRED, "支出金额大于 0 时必须上传预算佐证材料");
+        }
+        checkBudgetLimit(task, submission.getIndicatorId(), submission.getExpenseAmount());
         TaskYear taskYear = requireTaskYearForUpdate(submission.getTaskId(), submission.getYear());
         requireYearNotAchieved(taskYear);
         if ("ADJUSTING".equals(taskYear.getYearStatus())) {
@@ -321,6 +340,8 @@ public class SubmissionService {
         history.setRevisionNo(submission.getRevisionNo());
         history.setValueJson(writeJson(value));
         history.setFileIdsJson(writeJson(fileIds));
+        history.setExpenseAmount(submission.getExpenseAmount());
+        history.setBudgetFileIdsJson(writeJson(budgetFileIds));
         history.setSubmittedAt(now);
         history.setSubmittedBy(userId);
         historyMapper.insert(history);
@@ -381,6 +402,7 @@ public class SubmissionService {
         submission.setApprovedDenominator(null);
         submission.setApprovedPercent(null);
         submission.setApprovedAchieved(null);
+        submission.setApprovedExpenseAmount(null);
         submission.setReviewedAt(null);
         submission.setReviewerId(null);
     }
@@ -450,6 +472,44 @@ public class SubmissionService {
         }
     }
 
+    /** 支出金额校验：非负、最多两位小数（万元） */
+    private BigDecimal validateExpense(BigDecimal expense) {
+        if (expense == null) {
+            return null;
+        }
+        if (expense.signum() < 0 || expense.scale() > 2) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "支出金额必须为非负数且最多两位小数（万元）");
+        }
+        return expense;
+    }
+
+    /** 超支校验：已设预算时，累计已认定支出 + 本次支出不得超过总预算（60008）；未设预算不限制 */
+    public void checkBudgetLimit(Task task, Long indicatorId, BigDecimal expense) {
+        if (expense == null || expense.signum() <= 0) {
+            return;
+        }
+        Indicator topA = resolveTopIndicator(task, indicatorId);
+        if (topA == null || topA.getTotalBudget() == null) {
+            return;
+        }
+        BigDecimal spent = indicatorService.spentOfIndicator(topA);
+        if (spent.add(expense).compareTo(topA.getTotalBudget()) > 0) {
+            throw new BizException(ErrorCode.BUDGET_EXCEEDED,
+                    "本次支出后累计支出将超过指标总预算 "
+                            + topA.getTotalBudget().stripTrailingZeros().toPlainString() + " 万元");
+        }
+    }
+
+    private Indicator resolveTopIndicator(Task task, Long indicatorId) {
+        Long topId = task.getTopIndicatorId();
+        if (topId == null) {
+            Indicator indicator = indicatorService.requireIndicator(indicatorId);
+            topId = indicator.getParentId() != null ? indicator.getParentId() : indicator.getId();
+        }
+        List<Indicator> found = indicatorService.findByIds(List.of(topId));
+        return found.isEmpty() ? null : found.get(0);
+    }
+
     private void requireCaliberValue(String caliber, SubmissionDtos.MetricValue value) {
         String error = SubmissionValueRules.caliberError(caliber, value.getAmount(), value.getTotal(),
                 value.getNumerator(), value.getDenominator(), value.getPercent(), value.getAchieved());
@@ -493,14 +553,18 @@ public class SubmissionService {
     // ---------------- 文件 ----------------
 
     void bindFiles(Long submissionId, List<Long> fileIds) {
+        bindFiles(submissionId, fileIds, FILE_BIZ_TYPE);
+    }
+
+    void bindFiles(Long submissionId, List<Long> fileIds, String bizType) {
         if (fileIds == null || fileIds.isEmpty()) {
             return;
         }
         int sort = 0;
         for (Long fileId : new LinkedHashSet<>(fileIds)) {
-            FileInfo fileInfo = fileService.requireBindable(fileId, FILE_BIZ_TYPE, submissionId);
+            FileInfo fileInfo = fileService.requireBindable(fileId, bizType, submissionId);
             FileRef ref = new FileRef();
-            ref.setBizType(FILE_BIZ_TYPE);
+            ref.setBizType(bizType);
             ref.setBizId(submissionId);
             ref.setFileId(fileId);
             ref.setSort(sort++);
@@ -514,23 +578,23 @@ public class SubmissionService {
         }
     }
 
-    private void replaceFiles(Long submissionId, List<Long> fileIds) {
+    private void replaceFiles(Long submissionId, List<Long> fileIds, String bizType) {
         List<Long> keep = fileIds == null ? List.of() : List.copyOf(new LinkedHashSet<>(fileIds));
         List<FileRef> existing = fileRefMapper.selectList(new LambdaQueryWrapper<FileRef>()
-                .eq(FileRef::getBizType, FILE_BIZ_TYPE)
+                .eq(FileRef::getBizType, bizType)
                 .eq(FileRef::getBizId, submissionId));
         List<Long> existingIds = existing.stream().map(FileRef::getFileId).toList();
         List<Long> removed = existingIds.stream().filter(id -> !keep.contains(id)).toList();
         if (!removed.isEmpty()) {
             fileRefMapper.delete(new LambdaQueryWrapper<FileRef>()
-                    .eq(FileRef::getBizType, FILE_BIZ_TYPE)
+                    .eq(FileRef::getBizType, bizType)
                     .eq(FileRef::getBizId, submissionId)
                     .in(FileRef::getFileId, removed));
             removed.forEach(this::unbindIfOrphan);
         }
         List<Long> added = keep.stream().filter(id -> !existingIds.contains(id)).toList();
         if (!added.isEmpty()) {
-            bindFiles(submissionId, added);
+            bindFiles(submissionId, added, bizType);
         }
     }
 
@@ -548,8 +612,12 @@ public class SubmissionService {
     }
 
     public List<Long> fileIdsOf(Long submissionId) {
+        return fileIdsOf(submissionId, FILE_BIZ_TYPE);
+    }
+
+    public List<Long> fileIdsOf(Long submissionId, String bizType) {
         return fileRefMapper.selectList(new LambdaQueryWrapper<FileRef>()
-                        .eq(FileRef::getBizType, FILE_BIZ_TYPE)
+                        .eq(FileRef::getBizType, bizType)
                         .eq(FileRef::getBizId, submissionId)
                         .orderByAsc(FileRef::getSort))
                 .stream().map(FileRef::getFileId).toList();
@@ -577,7 +645,8 @@ public class SubmissionService {
                 taskRef(refs.tasks().get(s.getTaskId())),
                 indicatorRef(refs.indicators().get(s.getIndicatorId())),
                 unitRef(refs.units().get(s.getUnitId())),
-                s.getYear(), s.getStatCaliber(), valueViewOf(s), s.getStatus(),
+                s.getYear(), s.getStatCaliber(), valueViewOf(s),
+                s.getExpenseAmount(), s.getApprovedExpenseAmount(), s.getStatus(),
                 s.getSubmitterRole(), s.getCurrentReviewNode(), s.getRevisionNo(),
                 s.getSubmittedAt(), userRefResolver.refOf(s.getSubmittedBy(), refs.users()),
                 s.getReviewedAt(), userRefResolver.refOf(s.getReviewerId(), refs.users()),
@@ -603,10 +672,22 @@ public class SubmissionService {
                 .orderByDesc(Review::getCreatedAt));
         Map<Long, SysUser> reviewUsers = userRefResolver.mapOf(
                 reviews.stream().map(Review::getReviewerId).toList());
+        List<FileRef> budgetRefs = fileRefMapper.selectList(new LambdaQueryWrapper<FileRef>()
+                .eq(FileRef::getBizType, BUDGET_FILE_BIZ_TYPE)
+                .eq(FileRef::getBizId, s.getId())
+                .orderByAsc(FileRef::getSort));
+        List<SubmissionDtos.FileView> budgetFiles = budgetRefs.isEmpty() ? List.of()
+                : fileInfoMapper.selectList(new LambdaQueryWrapper<FileInfo>()
+                                .in(FileInfo::getId, budgetRefs.stream().map(FileRef::getFileId).toList())
+                                .eq(FileInfo::getDeleted, 0L))
+                        .stream().map(f -> new SubmissionDtos.FileView(f.getId(), f.getFileName(),
+                                f.getSize(), f.getExt(), f.getCategory(), f.getMimeType()))
+                        .toList();
         List<SubmissionDtos.ReviewView> reviewViews = reviews.stream()
                 .map(r -> new SubmissionDtos.ReviewView(r.getId(), r.getRevisionNo(), r.getReviewNode(),
                         userRefResolver.refOf(r.getReviewerId(), reviewUsers),
                         r.getResult(), r.getComment(), readValue(r.getApprovedValueJson()),
+                        r.getExpenseAmount(), r.getApprovedExpenseAmount(),
                         r.getIsProxy(), r.getCreatedAt()))
                 .toList();
         List<SubmissionHistory> histories = historyMapper.selectList(new LambdaQueryWrapper<SubmissionHistory>()
@@ -616,7 +697,8 @@ public class SubmissionService {
                 histories.stream().map(SubmissionHistory::getSubmittedBy).toList());
         List<SubmissionDtos.HistoryView> historyViews = histories.stream()
                 .map(h -> new SubmissionDtos.HistoryView(h.getRevisionNo(), readValue(h.getValueJson()),
-                        readLongList(h.getFileIdsJson()), h.getSubmittedAt(),
+                        readLongList(h.getFileIdsJson()), h.getExpenseAmount(),
+                        readLongList(h.getBudgetFileIdsJson()), h.getSubmittedAt(),
                         userRefResolver.refOf(h.getSubmittedBy(), historyUsers)))
                 .toList();
         return new SubmissionDtos.Detail(s.getId(), s.getPlanId(),
@@ -624,9 +706,10 @@ public class SubmissionService {
                 indicatorRef(refs.indicators().get(s.getIndicatorId())),
                 unitRef(refs.units().get(s.getUnitId())),
                 s.getYear(), s.getStatCaliber(), valueViewOf(s), approvedValueViewOf(s),
+                s.getExpenseAmount(), s.getApprovedExpenseAmount(),
                 s.getRemark(), s.getSourceNote(), s.getStatus(),
                 s.getSubmitterRole(), s.getCurrentReviewNode(), s.getRevisionNo(), s.getIsProxy(),
-                files, reviewViews, historyViews,
+                files, budgetFiles, reviewViews, historyViews,
                 s.getSubmittedAt(), userRefResolver.refOf(s.getSubmittedBy(), refs.users()),
                 s.getReviewedAt(), userRefResolver.refOf(s.getReviewerId(), refs.users()),
                 s.getVersion(), s.getCreatedAt(), s.getUpdatedAt());

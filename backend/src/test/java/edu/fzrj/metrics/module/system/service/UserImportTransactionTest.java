@@ -20,8 +20,10 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -79,11 +81,38 @@ class UserImportTransactionTest {
         assertNotNull(previewStore.get(importId));
     }
 
+    @Test
+    void 管理员干事批次绕过预览后仍在确认时阻断() {
+        SysUserMapper sysUserMapper = mock(SysUserMapper.class);
+        OrgUnitMapper orgUnitMapper = mock(OrgUnitMapper.class);
+        UserAdminService userAdminService = mock(UserAdminService.class);
+        UserImportPreviewStore previewStore = new UserImportPreviewStore();
+        UserImportService service = new UserImportService(
+                sysUserMapper, orgUnitMapper, userAdminService, previewStore);
+        String importId = previewStore.save(99L, List.of(draft("staff401", "STAFF")), false);
+        security = Mockito.mockStatic(SecurityUtils.class);
+        security.when(SecurityUtils::getUserId).thenReturn(99L);
+        security.when(SecurityUtils::getLoginUser).thenReturn(new LoginUser(
+                99L, "creator", "创建人", null, List.of("ADMIN"), List.of()));
+
+        BizException error = assertThrows(BizException.class,
+                () -> service.confirm(importId, "password"));
+
+        assertEquals(10001, error.getErrorCode().getCode());
+        assertTrue(error.getMessage().contains("批量导入不支持 STAFF"));
+        verify(userAdminService, never()).create(any());
+        assertNotNull(previewStore.get(importId));
+    }
+
     private static SystemDtos.UserImportDraftRow draft(String username) {
+        return draft(username, "LEADER");
+    }
+
+    private static SystemDtos.UserImportDraftRow draft(String username, String role) {
         SystemDtos.UserImportDraftRow row = new SystemDtos.UserImportDraftRow();
         row.setName(username);
         row.setUsername(username);
-        row.setRoles(List.of("LEADER"));
+        row.setRoles(List.of(role));
         row.setUnitIds(List.of());
         return row;
     }

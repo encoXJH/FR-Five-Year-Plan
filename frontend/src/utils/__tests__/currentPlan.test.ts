@@ -79,5 +79,6 @@ describe('currentPlan 上下文', () => {
     localStorage.setItem('metrics:current-plan', JSON.stringify({ id: '2', name: '历史培训缓存' }))
 
     expect(getCurrentPlan()).toBeNull()
+    expect(localStorage.getItem('metrics:current-plan')).toBeNull()
   })
 })

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { CircleCheck, CircleClose } from '@element-plus/icons-vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { formatDateTime } from '@/utils/format'
+import { formatDateTime, formatMoney } from '@/utils/format'
 import { formatMetricValue } from '@/utils/submission'
 import type { StatCaliber } from '@/types/enums'
 import type { SubmissionListItem } from '@/types/submission'
@@ -58,6 +58,10 @@ function timelineIcon(status: string) {
         {{ item.status === 'APPROVED' ? '认定' : '院审暂存认定' }}
         {{ formatMetricValue(item.approvedValue, caliber, unitLabel) }}
       </div>
+      <div v-if="item.expenseAmount != null || item.approvedExpenseAmount != null" class="sub-line">
+        <template v-if="item.expenseAmount != null">支出 {{ formatMoney(item.expenseAmount) }} 万</template>
+        <template v-if="item.approvedExpenseAmount != null">{{ item.expenseAmount != null ? ' / ' : '' }}认定支出 {{ formatMoney(item.approvedExpenseAmount) }} 万</template>
+      </div>
       <div v-for="review in item.reviews ?? []" :key="review.id" class="review-comment">
         <StatusTag v-if="review.reviewNode" kind="ReviewNode" :value="review.reviewNode" />
         <span class="reviewer">{{ review.reviewer?.name ?? '审核人' }}</span>
@@ -68,6 +72,10 @@ function timelineIcon(status: string) {
         <el-tag v-if="review.isProxy" type="warning" effect="plain" size="small">代</el-tag>
         <span v-if="review.approvedValue" class="approved-value">
           认定 {{ formatMetricValue(review.approvedValue, caliber, unitLabel) }}
+        </span>
+        <span v-if="review.expenseAmount != null || review.approvedExpenseAmount != null" class="approved-value">
+          <template v-if="review.expenseAmount != null">支出 {{ formatMoney(review.expenseAmount) }} 万</template>
+          <template v-if="review.approvedExpenseAmount != null">{{ review.expenseAmount != null ? ' / ' : '' }}认定支出 {{ formatMoney(review.approvedExpenseAmount) }} 万</template>
         </span>
         <span v-if="review.comment" class="comment">“{{ review.comment }}”</span>
       </div>

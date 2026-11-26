@@ -26,6 +26,7 @@ import edu.fzrj.metrics.module.submission.service.SubmissionService;
 import edu.fzrj.metrics.module.system.mapper.SysUserMapper;
 import edu.fzrj.metrics.module.system.service.UserUnitService;
 import edu.fzrj.metrics.module.task.mapper.TaskMapper;
+import edu.fzrj.metrics.module.training.service.TrainingAccessService;
 import edu.fzrj.metrics.security.LoginUser;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
@@ -100,6 +101,8 @@ class FileServiceTest {
     private TaskMapper taskMapper;
     @Mock
     private UserUnitService userUnitService;
+    @Mock
+    private TrainingAccessService trainingAccessService;
 
     @InjectMocks
     private FileService fileService;
@@ -270,6 +273,40 @@ class FileServiceTest {
     }
 
     @Test
+    void 培训项目附件复用培训实时读取范围() {
+        FileInfo file = file("BOUND", 88L);
+        when(fileInfoMapper.selectOne(any())).thenReturn(file);
+        when(fileRefMapper.selectList(any())).thenReturn(List.of(ref("TRAINING_PROJECT", 70L)));
+
+        assertSame(file, fileService.requireReadable(1L));
+
+        verify(trainingAccessService).requireProjectReadAccess(any(), any());
+    }
+
+    @Test
+    void 移除培训分配后文件读取立即返回20005() {
+        FileInfo file = file("BOUND", 88L);
+        when(fileInfoMapper.selectOne(any())).thenReturn(file);
+        when(fileRefMapper.selectList(any())).thenReturn(List.of(ref("TRAINING_PROJECT", 70L)));
+        doThrow(new BizException(ErrorCode.DATA_SCOPE_DENIED))
+                .when(trainingAccessService).requireProjectReadAccess(any(), any());
+
+        BizException error = assertThrows(BizException.class, () -> fileService.requireReadable(1L));
+
+        assertEquals(20005, error.getErrorCode().getCode());
+    }
+
+    @Test
+    void 培训项目绑定仍拒绝他人临时文件() {
+        when(fileInfoMapper.selectOne(any())).thenReturn(file("TEMP", 88L));
+
+        BizException error = assertThrows(BizException.class,
+                () -> fileService.requireBindable(1L, "TRAINING_PROJECT", 70L));
+
+        assertEquals(20005, error.getErrorCode().getCode());
+    }
+
+    @Test
     void 已绑定文件没有业务关联时拒绝读取() {
         when(fileInfoMapper.selectOne(any())).thenReturn(file("BOUND", 88L));
         when(fileRefMapper.selectList(any())).thenReturn(List.of());
@@ -348,6 +385,19 @@ class FileServiceTest {
         assertEquals(content.length, response.getSize());
         assertEquals("valid.pdf", response.getFileName());
         verify(fileInfoMapper).insert(any(FileInfo.class));
+    }
+
+    @Test
+    void 上传用途接受培训项目附件() {
+        MultipartInitRequest request = multipartRequest();
+        request.setBizType("TRAINING_ATTACHMENT");
+        when(fileInfoMapper.selectList(any())).thenReturn(List.of());
+
+        fileService.initMultipart(request);
+
+        ArgumentCaptor<FileUploadSession> session = ArgumentCaptor.forClass(FileUploadSession.class);
+        verify(sessionMapper).insert(session.capture());
+        assertEquals("TRAINING_ATTACHMENT", session.getValue().getBizType());
     }
 
     @Test

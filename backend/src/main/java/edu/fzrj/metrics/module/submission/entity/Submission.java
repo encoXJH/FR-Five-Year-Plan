@@ -69,6 +69,9 @@ public class Submission {
     /** 填报值：BOOLEAN 是否完成 */
     private Boolean achieved;
 
+    /** 本次填报支出金额（万元） */
+    private BigDecimal expenseAmount;
+
     /** 认定值：审核认定的增量（核减后） */
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal approvedAmount;
@@ -92,6 +95,10 @@ public class Submission {
     /** 认定值：审核认定的是否完成 */
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Boolean approvedAchieved;
+
+    /** 认定支出金额（万元，核减后） */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal approvedExpenseAmount;
 
     /** 完成情况说明 */
     private String remark;

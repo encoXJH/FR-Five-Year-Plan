@@ -199,5 +199,6 @@ export function toTrainingProjectInputs(projects: TrainingProjectInput[]): Train
     ...(project.id ? { id: project.id } : {}),
     rowNo: index + 1,
     data: calculateTrainingValues(project.data),
+    fileIds: [...(project.fileIds ?? project.files?.map((file) => file.id) ?? [])],
   }))
 }

@@ -69,11 +69,16 @@ const submitTargetLabel = computed(() => userStore.roles.includes('STAFF')
   : '校级负责人审核')
 
 function normalizedProjects(source: TrainingProjectInput[]): TrainingProjectInput[] {
-  return source.map((project, index) => ({
-    ...project,
-    rowNo: index + 1,
-    data: calculateTrainingValues(project.data),
-  }))
+  return source.map((project, index) => {
+    const fileIds = [...(project.fileIds ?? project.files?.map((file) => file.id) ?? [])]
+    return {
+      ...project,
+      rowNo: index + 1,
+      data: calculateTrainingValues(project.data),
+      fileIds,
+      files: (project.files ?? []).filter((file) => fileIds.includes(file.id)),
+    }
+  })
 }
 
 function applyDetail(value: TrainingSheetDetail): void {
@@ -154,8 +159,11 @@ function openCreate(): void {
   editorIndex.value = -1
   editorIsNew.value = true
   editorProject.value = {
+    id: null,
     rowNo: projects.value.length + 1,
     data: emptyTrainingProjectData(),
+    fileIds: [],
+    files: [],
     status: 'DRAFT',
     revisionNo: 0,
     canEdit: true,
@@ -172,6 +180,8 @@ function openProject(index: number): void {
   editorProject.value = {
     ...project,
     data: { ...project.data },
+    fileIds: [...(project.fileIds ?? [])],
+    files: [...(project.files ?? [])],
   }
   editorVisible.value = true
 }
